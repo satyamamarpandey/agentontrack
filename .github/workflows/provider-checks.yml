@@ -45,3 +45,66 @@ jobs:
           name: provider-${{ matrix.which }}
           path: runtime-results/
           retention-days: 30
+
+  local-models:
+    # Bounded: small real models on a CPU-only runner, each server with its own time limit. Results are kept even if one runs out of time.
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      GGUF: https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsc -b packages/cli
+      - run: npm install -g opencode-ai
+      - name: Ollama
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          sudo systemctl set-property ollama MemoryMax=6G || true
+          sleep 3
+          ollama pull qwen2.5:1.5b
+          printf 'FROM qwen2.5:1.5b\nPARAMETER num_ctx 16384\n' > /tmp/Modelfile
+          ollama create aot:latest -f /tmp/Modelfile
+          node benchmarks/live/local-model-checks.mjs ollama http://127.0.0.1:11434/v1 aot:latest
+          sudo systemctl stop ollama
+      - name: llama.cpp
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          mkdir -p /tmp/llama && cd /tmp/llama
+          curl -fsSL -o m.gguf "$GGUF"
+          URL=$(gh api repos/ggml-org/llama.cpp/releases/latest --jq '.assets[]|select(.name|test("ubuntu-x64.*\\.(zip|tar.gz)$"))|select(.name|test("vulkan|cuda|sycl")|not)|.browser_download_url' | head -1)
+          curl -fsSL -o l.bin "$URL"
+          (unzip -qo l.bin || tar -xzf l.bin)
+          S=$(find . -name llama-server -type f | head -1); chmod +x "$S"
+          (LD_LIBRARY_PATH=$(dirname "$S") nohup "$S" -m m.gguf --port 8181 --jinja -c 16384 > /tmp/llama.log 2>&1 &)
+          sleep 15
+          cd "$GITHUB_WORKSPACE"
+          node benchmarks/live/local-model-checks.mjs llamacpp http://127.0.0.1:8181/v1 m.gguf
+          pkill llama-server || true
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: LM Studio
+        continue-on-error: true
+        timeout-minutes: 12
+        run: |
+          curl -fsSL https://lmstudio.ai/install.sh | bash
+          export PATH="$HOME/.lmstudio/bin:$PATH"
+          lms daemon up || true
+          lms get "$GGUF" --yes
+          lms load qwen2.5-1.5b-instruct --context-length 16384 --identifier aot --yes || lms ls
+          lms server start --port 1234
+          node benchmarks/live/local-model-checks.mjs lmstudio http://127.0.0.1:1234/v1 aot
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: local-models
+          path: runtime-results/
+          retention-days: 30

@@ -28,7 +28,8 @@ const hostRun = (cmd, args, { timeout = 150_000, cwd, env = {}, shell = false } 
   let stdout = ''; let stderr = '';
   c.stdout.setEncoding('utf8').on('data', (d) => { stdout += d; });
   c.stderr.setEncoding('utf8').on('data', (d) => { stderr += d; });
-  const t = setTimeout(() => c.kill(), timeout);
+  // A child can hold the pipes open after the host is killed, so a timeout finishes this run regardless.
+  const t = setTimeout(() => { c.kill('SIGKILL'); setTimeout(() => ok({ status: null, stdout, stderr: `${stderr}\n[timed out]` }), 2000); }, timeout);
   c.on('error', (e) => { clearTimeout(t); ok({ status: null, stdout, stderr: `${stderr}${e.message}` }); });
   c.on('close', (status) => { clearTimeout(t); ok({ status, stdout, stderr }); });
 });

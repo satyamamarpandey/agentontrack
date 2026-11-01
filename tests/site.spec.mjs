@@ -47,6 +47,13 @@ test('sends nothing to any third party, and sets no cookies', async ({ page, con
   expect(await context.cookies()).toEqual([]);
 });
 
+test('the github.io address reaches the site', async ({ page }) => {
+  test.skip(!process.env.SITE_URL, 'Only meaningful against the live site.');
+  const r = await page.goto('https://satyamamarpandey.github.io/agentontrack/');
+  expect(r.status()).toBe(200);
+  await expect(page.getByRole('heading', { level: 1 })).toContainText('right task');
+});
+
 test('makes no unsupported claims', async ({ page }) => {
   let text = '';
   for (const p of PAGES) { await page.goto(`${BASE}/${p}${p ? '/' : ''}`); text += ` ${await page.locator('body').textContent()}`; }

@@ -1,0 +1,29 @@
+{
+  "which": "hermes",
+  "model": "aot-agent:latest",
+  "ranAt": "2026-11-01T18:21:01.437Z",
+  "runner": "Linux",
+  "version": "Hermes Agent v0.22.5 (2026.9.24) · stable · local bf0203a794a0\nInstall directory: /home/runner/.hermes/hermes-agent\nInstall method: git\nPython: 3.14.9\nOpenAI SDK: 2.24.0\nUp to date",
+  "results": [
+    {
+      "name": "Hermes installed",
+      "outcome": "PASS",
+      "detail": "Hermes Agent v0.22.5 (2026.9.24) · stable · local bf0203a794a0\nInstall directory: /home/runner/.hermes/hermes-agent\nInstall method: git\nPython: 3.14.9\nOpenAI SDK: 2.24.0\nUp to date"
+    },
+    {
+      "name": "Hermes hook config written to the disposable runner",
+      "outcome": "PASS",
+      "detail": "fail_closed: true on pre_tool_call"
+    },
+    {
+      "name": "Hook fired from a real Hermes process",
+      "outcome": "NOT OBSERVED",
+      "detail": "exit null, 464s. Tail: Query: Call the tool named terminal, with the argument command set to: git push \norigin main\n"
+    },
+    {
+      "name": "Real Hermes tool call reached the gate",
+      "outcome": "NOT OBSERVED",
+      "detail": "[]"
+    }
+  ]
+}

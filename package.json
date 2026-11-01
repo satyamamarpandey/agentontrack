@@ -1,1 +1,28 @@
-{ "name": "agentontrack-website", "private": true, "type": "module", "scripts": { "test": "playwright test" }, "devDependencies": { "@playwright/test": "1.64.1" } }
+{
+  "name": "agentontrack-monorepo",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@12.10.1",
+  "scripts": {
+    "build": "tsc -b packages/cli && pnpm --dir apps/dashboard build",
+    "test": "vitest run",
+    "build:pages": "node scripts/build-pages.mjs",
+    "lint": "oxlint --deny-warnings --ignore-path .gitignore --ignore-pattern benchmarks/v2/run.mjs --ignore-pattern benchmarks/v3/run.mjs --ignore-pattern site-repo packages apps e2e benchmarks scripts",
+    "typecheck": "tsc -b packages/cli"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
+    "@lydell/node-pty": "1.2.0-beta.18",
+    "@modelcontextprotocol/client": "2.4.0",
+    "@playwright/test": "1.64.1",
+    "@types/node": "^24.19.2",
+    "esbuild": "^0.28.2",
+    "oxlint": "^1.90.0",
+    "playwright": "1.64.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

@@ -1,0 +1,202 @@
+{
+  "ranAt": "2026-11-01T04:06:41.337Z",
+  "env": "win32 10.0.26200, AMD Ryzen 5 220 w/ Radeon 740M, 16 GB RAM, Node v24.20.0. Times in ms unless noted. One machine, antivirus not excluded.",
+  "budgets": {
+    "readToolP95Ms": 250,
+    "shellHookP95Ms2000Files": 400
+  },
+  "rows": [
+    {
+      "name": "Bare node startup (floor for any hook)",
+      "n": 30,
+      "p50": 49.2,
+      "p95": 54.9,
+      "p99": 56.1
+    },
+    {
+      "name": "Event append, small: 50 files, 100 events",
+      "n": 100,
+      "p50": 0.21,
+      "p95": null,
+      "p99": null
+    },
+    {
+      "name": "First scan (cold), small: 50 files, 100 events",
+      "n": 1,
+      "p50": 211,
+      "p95": null,
+      "p99": null
+    },
+    {
+      "name": "Read tool, no scan, small: 50 files, 100 events",
+      "n": 60,
+      "p50": 178.8,
+      "p95": 203.5,
+      "p99": 207.8
+    },
+    {
+      "name": "Bash pre-action, cached scan, small: 50 files, 100 events",
+      "n": 60,
+      "p50": 193.3,
+      "p95": 215.6,
+      "p99": 359.5
+    },
+    {
+      "name": "Post-action diff, small: 50 files, 100 events",
+      "n": 60,
+      "p50": 190.1,
+      "p95": 209.4,
+      "p99": 218.2
+    },
+    {
+      "name": "Open and load state, with projection, small: 50 files, 100 events",
+      "n": 1,
+      "p50": 2.4,
+      "p95": null,
+      "p99": null
+    },
+    {
+      "name": "Full integrity check, small: 50 files, 100 events (ok=true)",
+      "n": 1,
+      "p50": 19,
+      "p95": null,
+      "p99": null
+    },
+    {
+      "name": "Database size in MB, small: 50 files, 100 events",
+      "n": 1,
+      "p50": 0.2,
+      "p95": null,
+      "p99": null,
+      "unit": "MB"
+    },
+    {
+      "name": "Event append, medium: 2,000 files, 5,000 events",
+      "n": 5000,
+      "p50": 0.4,
+      "p95": null,
+      "p99": null
+    },
+    {
+      "name": "First scan (cold), medium: 2,000 files, 5,000 events",
+      "n": 1,
+      "p50": 369,
+      "p95": null,
+      "p99": null
+    },
+    {
+      "name": "Read tool, no scan, medium: 2,000 files, 5,000 events",
+      "n": 40,
+      "p50": 180.5,
+      "p95": 200.3,
+      "p99": 205.4
+    },
+    {
+      "name": "Bash pre-action, cached scan, medium: 2,000 files, 5,000 events",
+      "n": 40,
+      "p50": 261.4,
+      "p95": 293.3,
+      "p99": 296.6
+    },
+    {
+      "name": "Post-action diff, medium: 2,000 files, 5,000 events",
+      "n": 40,
+      "p50": 251.1,
+      "p95": 277,
+      "p99": 277.1
+    },
+    {
+      "name": "Open and load state, with projection, medium: 2,000 files, 5,000 events",
+      "n": 1,
+      "p50": 2.2,
+      "p95": null,
+      "p99": null
+    },
+    {
+      "name": "Full integrity check, medium: 2,000 files, 5,000 events (ok=true)",
+      "n": 1,
+      "p50": 268,
+      "p95": null,
+      "p99": null
+    },
+    {
+      "name": "Database size in MB, medium: 2,000 files, 5,000 events",
+      "n": 1,
+      "p50": 2.5,
+      "p95": null,
+      "p99": null,
+      "unit": "MB"
+    },
+    {
+      "name": "Event append, large: 10,000 files, 50,000 events",
+      "n": 50000,
+      "p50": 0.39,
+      "p95": null,
+      "p99": null
+    },
+    {
+      "name": "First scan (cold), large: 10,000 files, 50,000 events",
+      "n": 1,
+      "p50": 1093,
+      "p95": null,
+      "p99": null
+    },
+    {
+      "name": "Read tool, no scan, large: 10,000 files, 50,000 events",
+      "n": 25,
+      "p50": 198.6,
+      "p95": 231.3,
+      "p99": 234.9
+    },
+    {
+      "name": "Bash pre-action, cached scan, large: 10,000 files, 50,000 events",
+      "n": 25,
+      "p50": 493.4,
+      "p95": 541.5,
+      "p99": 571.2
+    },
+    {
+      "name": "Post-action diff, large: 10,000 files, 50,000 events",
+      "n": 25,
+      "p50": 482.6,
+      "p95": 530.3,
+      "p99": 535.7
+    },
+    {
+      "name": "Open and load state, with projection, large: 10,000 files, 50,000 events",
+      "n": 1,
+      "p50": 4.3,
+      "p95": null,
+      "p99": null
+    },
+    {
+      "name": "Full integrity check, large: 10,000 files, 50,000 events (ok=true)",
+      "n": 1,
+      "p50": 2468,
+      "p95": null,
+      "p99": null
+    },
+    {
+      "name": "Database size in MB, large: 10,000 files, 50,000 events",
+      "n": 1,
+      "p50": 23.9,
+      "p95": null,
+      "p99": null,
+      "unit": "MB"
+    },
+    {
+      "name": "16 parallel hook processes",
+      "n": 16,
+      "p50": 687.3,
+      "p95": 911.3,
+      "p99": 911.3
+    },
+    {
+      "name": "Parallel run: nonzero exits 0, chain ok true",
+      "n": 16,
+      "p50": null,
+      "p95": null,
+      "p99": null
+    }
+  ]
+}

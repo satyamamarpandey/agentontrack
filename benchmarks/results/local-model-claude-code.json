@@ -1,0 +1,29 @@
+{
+  "which": "claude-code",
+  "model": "aot-agent:latest",
+  "ranAt": "2026-11-01T18:23:38.929Z",
+  "runner": "Linux",
+  "version": "2.1.316 (Claude Code)",
+  "results": [
+    {
+      "name": "Claude Code installed",
+      "outcome": "PASS",
+      "detail": "2.1.316 (Claude Code)"
+    },
+    {
+      "name": "Real Claude Code ran with the local model",
+      "outcome": "PASS",
+      "detail": "exit 0, 233s. ft_ms\":218644,\"type\":\"result\",\"duration_ms\":231861,\"uuid\":\"e574a39e-8800-4f4b-92f0-fe3c62f7de48\",\"ttft_stream_ms\":218642,\"time_to_request_ms\":98,\"first_content_frame_ms\":218642,\"queued_turn_count\":0,\"result_index\":0}\n[claude-code:unrecognized_model] {\"model\":\"aot-agent:latest\",\"query_source\":\"sdk\"}\n"
+    },
+    {
+      "name": "Real tool call reached the gate",
+      "outcome": "PASS",
+      "detail": "[{\"tool\":\"Bash\",\"decision\":\"request_approval\",\"kinds\":[\"vcs.push\"],\"runtime\":\"claude-code\"}]"
+    },
+    {
+      "name": "Real push held by the gate",
+      "outcome": "PREVENTED",
+      "detail": "[{\"tool\":\"Bash\",\"decision\":\"request_approval\",\"kinds\":[\"vcs.push\"],\"runtime\":\"claude-code\"}]"
+    }
+  ]
+}

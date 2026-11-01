@@ -1,0 +1,115 @@
+name: live-runtimes
+# Real Claude Code, Codex, Hermes and Ollama in disposable runners. No credentials of any kind.
+# hosts: real programs with a scripted model, so every path runs. models: the same programs with a real local model.
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: Ollama model
+        default: qwen2.5:3b
+      only:
+        description: hosts, models or both
+        default: both
+      hosts:
+        description: JSON list of which and os, so a repair reruns only what it affects
+        default: '[{"which":"claude-code","os":"ubuntu-latest"},{"which":"claude-code","os":"macos-latest"},{"which":"codex","os":"ubuntu-latest"},{"which":"hermes","os":"ubuntu-latest"},{"which":"handoff","os":"ubuntu-latest"}]'
+permissions:
+  contents: read
+jobs:
+  hosts:
+    if: ${{ inputs.only != 'models' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.hosts) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsc -b packages/cli
+      - name: Install the real hosts
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap socat ripgrep
+            # Ubuntu restricts the user namespaces that OS sandboxes need. This runner is disposable.
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_unconfined=0 || true
+          fi
+          if [ "${{ matrix.which }}" = claude-code ]; then npm install -g @anthropic-ai/claude-code@latest; fi
+          if [ "${{ matrix.which }}" = codex ] || [ "${{ matrix.which }}" = handoff ]; then npm install -g @openai/codex@latest; fi
+          if [ "${{ matrix.which }}" = hermes ] || [ "${{ matrix.which }}" = handoff ]; then
+            curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash -s -- --skip-setup || true
+            echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          fi
+      - run: node benchmarks/live/host-checks.mjs ${{ matrix.which }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: host-${{ matrix.which }}-${{ matrix.os }}
+          path: runtime-results/
+          retention-days: 30
+
+  models:
+    if: ${{ inputs.only != 'hosts' }}
+    runs-on: ubuntu-latest
+    # Bounded: one small model, capped memory, a step limit on each host, and results kept even if a host runs out of time.
+    timeout-minutes: 40
+    env:
+      MODEL: ${{ inputs.model || 'qwen2.5:3b' }}
+      OLLAMA_NUM_PARALLEL: 1
+      OLLAMA_MAX_LOADED_MODELS: 1
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsc -b packages/cli
+      - name: Install Ollama and a small model
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          sudo systemctl set-property ollama MemoryMax=5500M || true
+          sudo systemctl restart ollama || (ollama serve > /tmp/ollama.log 2>&1 &)
+          sleep 5
+          ollama pull "$MODEL"
+          ollama --version
+          # Agents need far more context than Ollama's default, or their system prompt is cut off.
+          printf 'FROM %s\nPARAMETER num_ctx 65536\n' "$MODEL" > /tmp/Modelfile
+          ollama create aot-agent -f /tmp/Modelfile
+          # Load it now, so the first agent's time limit is not spent loading the model.
+          ollama run aot-agent:latest 'Say ok' > /dev/null
+      - name: Real local model probe
+        run: node benchmarks/live/runtime-checks.mjs ollama "$MODEL"
+      - name: Real Codex with the local model
+        continue-on-error: true
+        timeout-minutes: 12
+        run: |
+          npm install -g @openai/codex@latest
+          node benchmarks/live/runtime-checks.mjs codex aot-agent:latest
+      - name: Real Hermes with the local model
+        continue-on-error: true
+        timeout-minutes: 8
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash -s -- --skip-setup || true
+          export PATH="$HOME/.local/bin:$PATH"
+          node benchmarks/live/runtime-checks.mjs hermes aot-agent:latest
+      - name: Real Claude Code with the local model
+        continue-on-error: true
+        timeout-minutes: 8
+        run: |
+          npm install -g @anthropic-ai/claude-code@latest
+          node benchmarks/live/runtime-checks.mjs claude-code aot-agent:latest
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: runtime-results
+          path: runtime-results/
+          retention-days: 30

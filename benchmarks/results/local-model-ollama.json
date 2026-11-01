@@ -1,0 +1,29 @@
+{
+  "which": "ollama",
+  "model": "qwen2.5:3b",
+  "ranAt": "2026-11-01T18:06:54.931Z",
+  "runner": "Linux",
+  "version": null,
+  "results": [
+    {
+      "name": "Ollama reachable",
+      "outcome": "PASS",
+      "detail": "[\"aot-agent:latest\",\"qwen2.5:3b\"]"
+    },
+    {
+      "name": "Chat completions",
+      "outcome": "PASS",
+      "detail": "A raw model endpoint has no tools, approvals or session state of its own. AgentOnTrack enforcement needs an agent harness in front of it."
+    },
+    {
+      "name": "Tool call observed from qwen2.5:3b, one trial",
+      "outcome": "PASS",
+      "detail": "verified"
+    },
+    {
+      "name": "Usage reported",
+      "outcome": "PASS",
+      "detail": ""
+    }
+  ]
+}

@@ -1,0 +1,93 @@
+{
+  "which": "claude-code",
+  "label": "real host, scripted model",
+  "ranAt": "2026-11-01T18:05:15.615Z",
+  "runner": "macOS",
+  "version": "2.1.316 (Claude Code)",
+  "results": [
+    {
+      "name": "Claude Code present",
+      "outcome": "PASS",
+      "label": "real host, scripted model",
+      "detail": "2.1.316 (Claude Code)"
+    },
+    {
+      "name": "Read tool started no hook (lower overhead)",
+      "outcome": "PASS",
+      "label": "real host, scripted model",
+      "detail": "[{\"tool\":\"Bash\",\"decision\":\"request_approval\",\"kinds\":[\"vcs.push\"],\"runtime\":\"claude-code\"}]"
+    },
+    {
+      "name": "Push held by the gate",
+      "outcome": "PREVENTED",
+      "label": "real host, scripted model",
+      "detail": "[{\"tool\":\"Bash\",\"decision\":\"request_approval\",\"kinds\":[\"vcs.push\"],\"runtime\":\"claude-code\"}]"
+    },
+    {
+      "name": "Still held after a denial",
+      "outcome": "PREVENTED",
+      "label": "real host, scripted model",
+      "detail": ""
+    },
+    {
+      "name": "Allowed once after approval",
+      "outcome": "PASS",
+      "label": "real host, scripted model",
+      "detail": ""
+    },
+    {
+      "name": "A goal change ended the old approval",
+      "outcome": "PASS",
+      "label": "real host, scripted model",
+      "detail": "{\"tool\":\"Bash\",\"decision\":\"request_approval\",\"kinds\":[\"vcs.push\"],\"runtime\":\"claude-code\"}"
+    },
+    {
+      "name": "MCP tool called through the real host",
+      "outcome": "PASS",
+      "label": "real host, scripted model",
+      "detail": "{\n  \"goal\": {\n    \"statement\": \"Edit files in src only\",\n    \"scope\": {\n      \"include\": [\n        \"src/**\"\n      ],\n      \"exclude\": []\n    },\n    \"prohibit\": [],\n    \"successCriteria\": [],\n    \"version\": 1,\n    \"status\": \"active\"\n  },\n  \"task\": {\n    \"id\": \"t\",\n    \"title\": \"host check\",\n    \"status\": \"IN_PROGRESS\",\n    \"reasons\": [\n      \"Criterion c: missing\"\n    ],\n    \"criteria\": [\n      {\n        \"id\": \"c\",\n        \"state\": \"missing\"\n      }\n    ],\n    \"progress\": {\n      \"passed\": 0,\n      \"total\": 1\n    }\n  },\n  \"pendingApprovals\": [],\n  \"openMismatches\": []\n}"
+    },
+    {
+      "name": "Compaction seen by the hooks",
+      "outcome": "PASS",
+      "label": "real host, scripted model",
+      "detail": "context.reset events: 1; exit 0"
+    },
+    {
+      "name": "Gate still holds after resume",
+      "outcome": "PREVENTED",
+      "label": "real host, scripted model",
+      "detail": "{\"tool\":\"Bash\",\"decision\":\"request_approval\",\"kinds\":[\"vcs.push\"],\"runtime\":\"claude-code\"}"
+    },
+    {
+      "name": "Control, no sandbox: a script reaches the network and writes outside the project",
+      "outcome": "CONFIRMED NOT PREVENTED",
+      "label": "real host, scripted model",
+      "detail": "network true, outside write true"
+    },
+    {
+      "name": "With --sandbox: an ordinary command still runs",
+      "outcome": "PASS",
+      "label": "real host, scripted model",
+      "detail": ""
+    },
+    {
+      "name": "With --sandbox: a script reaching a local port",
+      "outcome": "PREVENTED",
+      "label": "real host, scripted model",
+      "detail": "SANDBOX-RUNS | SANDBOX-RUNS | NET-BLOCKED EPERM | SANDBOX-RUNS | NET-BLOCKED EPERM | Exit code 1\nnode:fs:2482\n    return binding.writeFileUtf8(\n                   ^\n\nError: EPERM: operation not permitted, open '/Users/runner/aot-out-mdMtKF/w-true.txt'\n    at Object.writeFileSync (node:fs:2482:20)\n    at [eval]:1:15\n    at runScriptInThisContext (node:internal/vm:219:10)\n    at node:internal/process/execution:451:12\n    at [eval]-wrapper:6:24\n    at runScriptInContext (node:internal/process/execution:449:60)\n    at evalFunction (node:internal/process/execution:283:30)\n    at evalTypeScript (node:internal/process/execution:295:3)\n    at node:internal/main/eval_string:71:3 {\n  errno: -1,\n  code: 'EPERM',\n  syscall: 'open',\n  path: '/Users/runner/aot-out-mdMtKF/w-true.txt'\n}\n\nNode.js v24.22.1"
+    },
+    {
+      "name": "With --sandbox: a script writing to the home folder",
+      "outcome": "PREVENTED",
+      "label": "real host, scripted model",
+      "detail": ""
+    },
+    {
+      "name": "Missing hook program, onFailure block",
+      "outcome": "FAIL-CLOSED",
+      "label": "real host, scripted model",
+      "detail": ""
+    }
+  ]
+}

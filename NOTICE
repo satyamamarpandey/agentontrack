@@ -1,0 +1,9 @@
+AgentOnTrack
+Copyright 2026 Satyam Adharchandra Pandey
+
+Licensed under the Apache License, Version 2.0. See LICENSE.
+
+Much of this software was written by an AI coding agent directed by the author.
+
+Release archives bundle third-party software, including the Node.js runtime.
+Their notices are in THIRD_PARTY_NOTICES.txt and node/LICENSE in each archive.

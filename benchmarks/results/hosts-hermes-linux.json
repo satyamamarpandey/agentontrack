@@ -1,0 +1,51 @@
+{
+  "which": "hermes",
+  "label": "real host, scripted model",
+  "ranAt": "2026-11-01T20:36:04.368Z",
+  "runner": "Linux",
+  "version": "Hermes Agent v0.22.5 (2026.9.24) · stable · local bf0203a794a0\nInstall directory: /home/runner/.hermes/hermes-agent\nInstall method: git\nPython: 3.14.9\nOpenAI SDK: 2.24.0\nUp to date",
+  "results": [
+    {
+      "name": "Hermes present",
+      "outcome": "PASS",
+      "label": "real host, scripted model",
+      "detail": "Hermes Agent v0.22.5 (2026.9.24) · stable · local bf0203a794a0\nInstall directory: /home/runner/.hermes/hermes-agent\nInstall method: git\nPython: 3.14.9\nOpenAI SDK: 2.24.0\nUp to date"
+    },
+    {
+      "name": "Real terminal call reached the gate",
+      "outcome": "PASS",
+      "label": "real host, scripted model",
+      "detail": "[{\"tool\":\"terminal\",\"decision\":\"request_approval\",\"kinds\":[\"vcs.push\"],\"runtime\":\"hermes\"}]"
+    },
+    {
+      "name": "Push held by the gate",
+      "outcome": "PREVENTED",
+      "label": "real host, scripted model",
+      "detail": ""
+    },
+    {
+      "name": "Still held after a denial",
+      "outcome": "PREVENTED",
+      "label": "real host, scripted model",
+      "detail": ""
+    },
+    {
+      "name": "Allowed once after approval",
+      "outcome": "PASS",
+      "label": "real host, scripted model",
+      "detail": ""
+    },
+    {
+      "name": "Missing hook program with fail_closed: true",
+      "outcome": "FAIL-CLOSED",
+      "label": "real host, scripted model",
+      "detail": "{\"error\": \"hook \\\"/opt/hostedtoolcache/node/24.22.1/x64/bin/node\\\" \\\"/tmp/aot-host-rUeyau/gone.js\\\" hook hermes failed closed: hook exited 1 with no directive\"}"
+    },
+    {
+      "name": "MCP tool called through the real host",
+      "outcome": "NOT OBSERVED",
+      "label": "real host, scripted model",
+      "detail": " {\"queries\": [\"agentontrack project status\"], \"total_available\": 6, \"results\": [{\"query\": \"agentontrack project status\", \"matches\": [], \"available_sources\": [{\"name\": \"browser\", \"tool_count\": 1}, {\"name\": \"computer_use\", \"tool_count\": 1}, {\"name\": \"cronjob\", \"tool_count\": 1}, {\"name\": \"session_search\", \"tool_count\": 1}, {\"name\": \"terminal\", \"tool_count\": 1}, {\"name\": \"todo\", \"tool_count\": 1}], \"hint\": \"This query returned no lexical matches, but the sources above are connected and their tools remain available. Retry tool_search with the service name plus a concrete action or object before concluding the capability is unavailable.\"}], \"tools\": {}, \"connectors\": {\"status\": \"not_set_up\", \"hint\": \"Hosted connectors are not set up for this user yet. Call manage_connections to connect the app first; that sets them up. Hosted apps (Gmail, Calendar, Notion and more) are then searchable. If the r"
+    }
+  ]
+}

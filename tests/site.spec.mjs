@@ -56,7 +56,7 @@ test('the github.io address reaches the site', async ({ page }) => {
 
 test('makes no unsupported claims', async ({ page }) => {
   let text = '';
-  for (const p of PAGES) { await page.goto(`${BASE}/${p}${p ? '/' : ''}`); text += ` ${await page.locator('body').textContent()}`; }
+  for (const p of PAGES) { await page.goto(`${BASE}/${p}${p ? '/' : ''}`); text += ` ${await page.locator('body').innerText()}`; }
   const t = text.toLowerCase();
   for (const banned of ['testimonial', 'trusted by', 'zero hallucination', 'tamper-proof', 'guaranteed savings', 'saves tokens', 'open source under', 'bindline', 'independently validated']) expect(t, banned).not.toContain(banned);
   expect(t).toContain('free');

@@ -1,7 +1,7 @@
 {
   "which": "handoff",
   "label": "real host, scripted model",
-  "ranAt": "2026-11-01T20:35:52.848Z",
+  "ranAt": "2026-11-01T21:11:26.791Z",
   "runner": "Linux",
   "version": "codex-cli 0.166.0 + Hermes Agent v0.22.5 (2026.9.24) · stable · local bf0203a794a0\nInstall directory: /home/runner/.hermes/hermes-agent\nInstall method: git\nPython: 3.14.9\nOpenAI SDK: 2.24.0\nUp to date",
   "results": [
@@ -15,7 +15,7 @@
       "name": "Handoff: approval re-evaluated for the receiver, not copied",
       "outcome": "PASS",
       "label": "real host, scripted model",
-      "detail": "[{\"id\":\"apr_4c1b5e575591\",\"valid\":false,\"reason\":\"bound to runtime codex\"}]"
+      "detail": "[{\"id\":\"apr_b90d4ac7ea5a\",\"valid\":false,\"reason\":\"bound to runtime codex\"}]"
     },
     {
       "name": "Hermes cannot use the approval Codex was given",

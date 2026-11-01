@@ -1,7 +1,7 @@
 {
   "which": "codex",
   "model": "aot-agent:latest",
-  "ranAt": "2026-11-01T18:11:26.677Z",
+  "ranAt": "2026-11-01T21:12:58.802Z",
   "runner": "Linux",
   "version": "codex-cli 0.166.0",
   "results": [
@@ -18,7 +18,7 @@
     {
       "name": "Hook fired from a real Codex process",
       "outcome": "PASS",
-      "detail": "exit 0, 198s. Events: project.attached, goal.approved, task.created, task.activated, session.bound, workspace.drift, action.requested, approval.requested. Tail: router: error=Command blocked by PreToolUse hook: AgentOnTrack needs human approval: vcs.push requires human approval. Do not retry or work around this. Tell the user to run agentontrack approve apr_bd17f30386b1 in their own terminal, then carry on with anything else.. Command: git push origin main\n"
+      "detail": "exit 0, 60s. Events: project.attached, goal.approved, task.created, task.activated, session.bound, workspace.drift, action.requested, approval.requested. Tail: router: error=Command blocked by PreToolUse hook: AgentOnTrack needs human approval: vcs.push requires human approval. Do not retry or work around this. Tell the user to run agentontrack approve apr_cb33aed17ad2 in their own terminal, then carry on with anything else.. Command: git push origin main\n"
     },
     {
       "name": "Real Codex tool call reached the gate",
@@ -33,17 +33,17 @@
     {
       "name": "Token usage reported by real Codex",
       "outcome": "PASS",
-      "detail": "input 7701, output 125"
+      "detail": "input 7723, output 131"
     },
     {
       "name": "Real Codex push allowed after a human approval",
-      "outcome": "PASS",
-      "detail": "[{\"tool\":\"Bash\",\"decision\":\"request_approval\",\"kinds\":[\"vcs.push\"],\"runtime\":\"codex\"},{\"tool\":\"Bash\",\"decision\":\"allow\",\"kinds\":[\"vcs.push\"],\"runtime\":\"codex\"}]; reached remote: true; exit 0"
+      "outcome": "NOT OBSERVED",
+      "detail": "[{\"tool\":\"Bash\",\"decision\":\"allow\",\"kinds\":[\"vcs.push\"],\"runtime\":\"codex\"},{\"tool\":\"Bash\",\"decision\":\"request_approval\",\"kinds\":[\"vcs.push\"],\"runtime\":\"codex\"}]; reached remote: false; exit 0"
     },
     {
       "name": "Real Codex with a missing hook program",
-      "outcome": "FAIL-OPEN",
-      "detail": "push reached remote: true; exit 0. Tail: }\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":7717,\"cached_input_tokens\":7482,\"cache_write_input_tokens\":0,\"output_tokens\":95,\"reasoning_output_tokens\":0}}\nReading additional input from stdin...\n"
+      "outcome": "NO PUSH",
+      "detail": "push reached remote: false; exit 0. Tail: Z ERROR codex_core::tools::router: error=`justification` requires an explicit `sandbox_permissions`; use `sandbox_permissions: \"require_escalated\"` for unsandboxed execution, or omit `justification`.\n"
     }
   ]
 }

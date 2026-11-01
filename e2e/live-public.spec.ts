@@ -52,14 +52,15 @@ test('deployed site: pair, connect, goal, denied and approved actions, evidence,
     c = await startCompanion({ root, port: PORT, allowedOrigins: [new URL(SITE).origin], onTerminalChallenge: (code) => { terminalCodes.push(code); } });
   }
   const pushed = () => spawnSync('git', ['--git-dir', bare, 'rev-parse', '--verify', '-q', 'main']).status === 0;
+  // The list can take seconds to load, so the test keeps its own count.
+  let started = 0;
   const run = async (prompt: string) => {
     await go(page, 'Agents');
-    const before = await page.getByTestId('run').count();
     await page.getByLabel('Prompt').fill(prompt);
     await page.getByLabel('Model').fill('haiku');
     await page.getByLabel(/Budget cap/).fill('0.25');
     await page.getByRole('button', { name: 'Start run' }).click();
-    await expect(page.getByTestId('run')).toHaveCount(before + 1, { timeout: 15_000 });
+    await expect(page.getByTestId('run')).toHaveCount(++started, { timeout: 30_000 });
     await expect(page.getByTestId('run').first()).not.toHaveAttribute('data-status', 'running', { timeout: 180_000 });
   };
   try {

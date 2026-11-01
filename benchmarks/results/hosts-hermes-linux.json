@@ -1,7 +1,7 @@
 {
   "which": "hermes",
   "label": "real host, scripted model",
-  "ranAt": "2026-11-01T20:36:04.368Z",
+  "ranAt": "2026-11-01T21:11:22.884Z",
   "runner": "Linux",
   "version": "Hermes Agent v0.22.5 (2026.9.24) · stable · local bf0203a794a0\nInstall directory: /home/runner/.hermes/hermes-agent\nInstall method: git\nPython: 3.14.9\nOpenAI SDK: 2.24.0\nUp to date",
   "results": [
@@ -39,7 +39,7 @@
       "name": "Missing hook program with fail_closed: true",
       "outcome": "FAIL-CLOSED",
       "label": "real host, scripted model",
-      "detail": "{\"error\": \"hook \\\"/opt/hostedtoolcache/node/24.22.1/x64/bin/node\\\" \\\"/tmp/aot-host-rUeyau/gone.js\\\" hook hermes failed closed: hook exited 1 with no directive\"}"
+      "detail": "{\"error\": \"hook \\\"/opt/hostedtoolcache/node/24.22.1/x64/bin/node\\\" \\\"/tmp/aot-host-t6nrAk/gone.js\\\" hook hermes failed closed: hook exited 1 with no directive\"}"
     },
     {
       "name": "MCP tool called through the real host",

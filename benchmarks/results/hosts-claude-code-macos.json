@@ -1,7 +1,7 @@
 {
   "which": "claude-code",
   "label": "real host, scripted model",
-  "ranAt": "2026-11-01T18:05:15.615Z",
+  "ranAt": "2026-11-01T21:10:08.073Z",
   "runner": "macOS",
   "version": "2.1.316 (Claude Code)",
   "results": [
@@ -75,7 +75,7 @@
       "name": "With --sandbox: a script reaching a local port",
       "outcome": "PREVENTED",
       "label": "real host, scripted model",
-      "detail": "SANDBOX-RUNS | SANDBOX-RUNS | NET-BLOCKED EPERM | SANDBOX-RUNS | NET-BLOCKED EPERM | Exit code 1\nnode:fs:2482\n    return binding.writeFileUtf8(\n                   ^\n\nError: EPERM: operation not permitted, open '/Users/runner/aot-out-mdMtKF/w-true.txt'\n    at Object.writeFileSync (node:fs:2482:20)\n    at [eval]:1:15\n    at runScriptInThisContext (node:internal/vm:219:10)\n    at node:internal/process/execution:451:12\n    at [eval]-wrapper:6:24\n    at runScriptInContext (node:internal/process/execution:449:60)\n    at evalFunction (node:internal/process/execution:283:30)\n    at evalTypeScript (node:internal/process/execution:295:3)\n    at node:internal/main/eval_string:71:3 {\n  errno: -1,\n  code: 'EPERM',\n  syscall: 'open',\n  path: '/Users/runner/aot-out-mdMtKF/w-true.txt'\n}\n\nNode.js v24.22.1"
+      "detail": "SANDBOX-RUNS | SANDBOX-RUNS | NET-BLOCKED EPERM | SANDBOX-RUNS | NET-BLOCKED EPERM | Exit code 1\nnode:fs:2482\n    return binding.writeFileUtf8(\n                   ^\n\nError: EPERM: operation not permitted, open '/Users/runner/aot-out-Da8HI6/w-true.txt'\n    at Object.writeFileSync (node:fs:2482:20)\n    at [eval]:1:15\n    at runScriptInThisContext (node:internal/vm:219:10)\n    at node:internal/process/execution:451:12\n    at [eval]-wrapper:6:24\n    at runScriptInContext (node:internal/process/execution:449:60)\n    at evalFunction (node:internal/process/execution:283:30)\n    at evalTypeScript (node:internal/process/execution:295:3)\n    at node:internal/main/eval_string:71:3 {\n  errno: -1,\n  code: 'EPERM',\n  syscall: 'open',\n  path: '/Users/runner/aot-out-Da8HI6/w-true.txt'\n}\n\nNode.js v24.22.1"
     },
     {
       "name": "With --sandbox: a script writing to the home folder",

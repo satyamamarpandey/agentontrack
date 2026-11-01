@@ -1,7 +1,7 @@
 {
   "which": "claude-code",
   "label": "real host, scripted model",
-  "ranAt": "2026-11-01T20:34:07.909Z",
+  "ranAt": "2026-11-01T21:10:20.121Z",
   "runner": "Linux",
   "version": "2.1.316 (Claude Code)",
   "results": [

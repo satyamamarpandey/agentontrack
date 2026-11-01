@@ -118,6 +118,12 @@ describe('host specifics', () => {
     expect(a.allow().stdout).toBeUndefined();
   });
 
+  it('a hook installed for a pre-action event refuses a payload it cannot read, rather than allowing it', () => {
+    const out = handleProviderHook(p, PROVIDERS.cline!, JSON.stringify({ somethingNew: true }), { event: 'PreToolUse' });
+    expect(JSON.parse(out.stdout!).cancel).toBe(true);
+    expect(out.stderr).toMatch(/could not/);
+  });
+
   it('Gemini keeps other settings and hooks, in milliseconds', () => {
     mkdirSync(join(root, '.gemini'));
     writeFileSync(join(root, '.gemini/settings.json'), JSON.stringify({ theme: 'x' }));

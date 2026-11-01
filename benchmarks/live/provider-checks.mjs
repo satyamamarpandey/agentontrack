@@ -98,6 +98,16 @@ if (HOSTS[which]) {
   record('Real program present', version(h) ? 'PASS' : 'FAIL', version(h));
   await h.setup();
 
+  // Records what the real host sends, since docs and hosts can differ.
+  if (which === 'cline') {
+    const k = fresh();
+    const cap = join(k.dir, 'capture.sh');
+    writeFileSync(cap, `#!/bin/sh\ncat >> "${resolve(OUT)}/cline-payload.jsonl"\necho >> "${resolve(OUT)}/cline-payload.jsonl"\necho '{"cancel":false}'\n`);
+    chmodSync(cap, 0o755);
+    a.install(k.root, `"${cap}"`);
+    model.setPlan([sh('echo hi')]);
+    log('capture', await h.run(k.root));
+  }
   const s = fresh();
   a.install(s.root, SELF(s.root));
   record('Installed', providerInstalled(a, s.root) ? 'PASS' : 'FAIL', a.hookFiles.filter((f) => existsSync(join(s.root, f))).join(', '));

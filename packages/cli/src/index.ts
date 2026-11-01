@@ -122,7 +122,7 @@ async function main(): Promise<void> {
   switch (cmd) {
     case 'hook': {
       if (isProvider(sub)) {
-        const out = handleProviderHookSafely(() => new Project(root), PROVIDERS[sub!]!, await readStdin());
+        const out = handleProviderHookSafely(() => new Project(root), PROVIDERS[sub!]!, await readStdin(), opt('event') ? { event: opt('event')! } : {});
         if (out.stdout) process.stdout.write(out.stdout);
         if (out.stderr) process.stderr.write(out.stderr);
         process.exitCode = out.exitCode;

@@ -84,8 +84,12 @@ export function effectsFor(a: ProviderAdapter, tool: string, input: Record<strin
 
 const SELF_TEST = 'agentontrack-selftest';
 
-export function handleProviderHook(project: Project, a: ProviderAdapter, raw: string): ProviderOutput {
-  const ev = a.normalize(JSON.parse(raw));
+export function handleProviderHook(project: Project, a: ProviderAdapter, raw: string, opts: { event?: string } = {}): ProviderOutput {
+  const payload = JSON.parse(raw);
+  const ev = a.normalize(opts.event ? { hook_event_name: opts.event, hookName: opts.event, ...payload } : payload);
+  // The hook was installed for a pre-action event, and the payload did not read as one: the host's format has changed, so refuse.
+  if (opts.event && /pre/i.test(opts.event) && ev.phase !== 'pre') return a.deny(`AgentOnTrack could not read this request from ${a.name}, so it was refused. Its hook format may have changed.`);
+  if (opts.event && /pre/i.test(opts.event) && !ev.tool) return a.deny(`AgentOnTrack could not tell which tool ${a.name} is calling, so it was refused.`);
   if (ev.sessionId === SELF_TEST && ev.phase === 'pre') return a.deny('AgentOnTrack self-test');
   const base = { runtime: a.id, ...(ev.sessionId ? { sessionId: ev.sessionId } : {}), ...(ev.cwd ? { cwd: ev.cwd } : {}) };
   switch (ev.phase) {
@@ -113,14 +117,14 @@ export function handleProviderHook(project: Project, a: ProviderAdapter, raw: st
 }
 
 /** Any failure of ours on a pre-action event refuses the action, in the form that host honours. */
-export function handleProviderHookSafely(open: () => Project, a: ProviderAdapter, raw: string): ProviderOutput {
+export function handleProviderHookSafely(open: () => Project, a: ProviderAdapter, raw: string, opts: { event?: string } = {}): ProviderOutput {
   let project: Project | undefined;
   try {
     project = open();
-    return handleProviderHook(project, a, raw);
+    return handleProviderHook(project, a, raw, opts);
   } catch (err) {
     const message = `AgentOnTrack hook error, blocking as a precaution: ${(err as Error).message}`;
-    return a.isPreRaw(raw) || !raw.trim() ? a.deny(message) : { exitCode: 0, stderr: message };
+    return a.isPreRaw(raw) || !raw.trim() || (opts.event && /pre/i.test(opts.event)) ? a.deny(message) : { exitCode: 0, stderr: message };
   } finally {
     project?.close();
   }
@@ -359,7 +363,7 @@ const cline: ProviderAdapter = {
     for (const d of CLINE_DIRS) for (const e of CLINE_EVENTS) {
       const path = join(root, d, e);
       mkdirSync(dirname(path), { recursive: true });
-      writeFileSync(path, `#!/bin/sh\n# Written by agentontrack install cline\n${command} hook cline\n`);
+      writeFileSync(path, `#!/bin/sh\n# Written by agentontrack install cline\n${command} hook cline --event ${e}\n`);
       chmodSync(path, 0o755);
       out.push(path);
     }

@@ -1,11 +1,12 @@
 // Contract tests from each vendor's documented payloads. These check our translation, and say nothing about whether a real host
 // behaves as documented: that is what benchmarks/live/provider-checks.mjs and the certification file are for.
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Project } from '@agentontrack/core';
-import { effectsFor, handleProviderHook, handleProviderHookSafely, installMcpClient, isProvider, MCP_CLIENTS, PROVIDERS, providerInstalled } from '../src/providers.js';
+import { effectsFor, handleProviderHook, handleProviderHookSafely, installMcpClient, isProvider, MCP_CLIENTS, PROVIDERS, providerInstalled, providerSelfTest } from '../src/providers.js';
 
 let dir: string; let root: string; let p: Project;
 beforeEach(() => {
@@ -69,6 +70,25 @@ describe.each(Object.keys(PROVIDERS))('%s contract', (id) => {
     expect(providerInstalled(a, root)).toBe(true);
     expect(a.uninstall(root)).toBe(true);
     expect(providerInstalled(a, root)).toBe(false);
+  });
+
+  it('the real program, called as installed with --root first, refuses a push; and the self-test passes, then fails if the program goes', () => {
+    if (id === 'cline' && process.platform === 'win32') return;
+    p.close();
+    const cli = resolve('packages/cli/dist/index.js').replace(/\\/g, '/');
+    const cmd = `"${process.execPath.replace(/\\/g, '/')}" "${cli}" --root "${root.replace(/\\/g, '/')}"`;
+    a.install(root, cmd);
+    const r = spawnSync(`${cmd} hook ${id}`, { shell: true, input: JSON.stringify(PUSH[id]), encoding: 'utf8', env: process.env });
+    p = new Project(root);
+    expect(blocked(id, { exitCode: r.status ?? -1, stdout: r.stdout }), r.stderr).toBe(true);
+    expect(p.store.byType(['action.requested']).at(-1)?.payload.effects[0].kind).toBe('vcs.push');
+    const before = p.store.byType(['action.requested']).length;
+    expect(providerSelfTest(a, root)).toMatchObject({ ok: true });
+    expect(p.store.byType(['action.requested']).length, 'self-test leaves no trace in analytics').toBe(before);
+    a.uninstall(root);
+    expect(providerSelfTest(a, root).ok).toBe(false);
+    a.install(root, `"${process.execPath.replace(/\\/g, '/')}" "${join(dir, 'gone.js').replace(/\\/g, '/')}"`);
+    expect(providerSelfTest(a, root).ok).toBe(false);
   });
 
   it('declares failure behaviour and limitations, so nothing reads as fully supported by default', () => {

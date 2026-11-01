@@ -70,7 +70,7 @@ export async function startScriptedModel() {
     const id = `resp_${seen.requests}`;
     const item = call ? { type: 'function_call', id: `fc_${call.id}`, call_id: call.id, ...(spaces.get(call.name) ?? { name: call.name }), arguments: JSON.stringify(call.args), status: 'completed' } : { type: 'message', id: `m_${seen.requests}`, role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'Finished.', annotations: [] }] };
     sse(res, [
-      ['response.created', { type: 'response.created', response: { id, status: 'in_progress', output: [] } }],
+      ['response.created', { type: 'response.created', response: { id, status: 'in_progress', output: [], created_at: 1, model: b.model } }],
       ['response.output_item.added', { type: 'response.output_item.added', output_index: 0, item }],
       ['response.output_item.done', { type: 'response.output_item.done', output_index: 0, item }],
       ['response.completed', { type: 'response.completed', response: { id, status: 'completed', output: [item], usage: { input_tokens: 10, input_tokens_details: { cached_tokens: 0 }, output_tokens: 5, output_tokens_details: { reasoning_tokens: 0 }, total_tokens: 15 } } }],

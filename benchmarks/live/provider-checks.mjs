@@ -79,7 +79,7 @@ const HOSTS = {
   },
   cline: {
     bin: 'cline', version: ['--version'],
-    setup: async () => { const r = await hostRun('cline', ['auth', '--provider', 'openai-native', '--apikey', 'scripted', '--modelid', 'scripted', '--baseurl', `${model.url}/v1`]); writeFileSync(join(OUT, 'cline-auth.log'), `${r.stdout}\n---\n${r.stderr}`); },
+    setup: async () => { const r = await hostRun('cline', ['auth', '--provider', 'openai', '--apikey', 'scripted', '--modelid', 'scripted', '--baseurl', `${model.url}/v1`]); writeFileSync(join(OUT, 'cline-auth.log'), `${r.stdout}\n---\n${r.stderr}`); },
     run: (root) => hostRun('cline', ['--yolo', '--json', 'please do the work'], { cwd: root }),
   },
 };
@@ -121,7 +121,7 @@ if (HOSTS[which]) {
   }
 
   // What the real host does when the gate itself misbehaves. A push reaching the remote means it failed open.
-  const scripts = { crash: '#!/bin/sh\ncat >/dev/null\nexit 1\n', malformed: '#!/bin/sh\ncat >/dev/null\necho not-json\nexit 0\n', exit3: '#!/bin/sh\ncat >/dev/null\nexit 3\n', timeout: '#!/bin/sh\nsleep 30\n' };
+  const scripts = { crash: '#!/bin/sh\ncat >/dev/null\nexit 1\n', malformed: '#!/bin/sh\ncat >/dev/null\necho not-json\nexit 0\n', exit3: '#!/bin/sh\ncat >/dev/null\nexit 3\n', timeout: '#!/bin/sh\nsleep 30\necho not-reached\n' };
   for (const [kind, body] of [...Object.entries(scripts), ['missing', null]]) {
     const f = fresh();
     const path = join(f.dir, `gate-${kind}.sh`);

@@ -6,7 +6,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { approvalView, checkAnchor, isPendingLive, Project, pushAnchor, registerProject, routeIntent, type ProjectState } from '@agentontrack/core';
-import { coverageFor, handleHookSafely, handleProviderHookSafely, installMcpClient, isProvider, MCP_CLIENTS, perplexityMcpConfig, PROVIDERS, providerInstalled, hermesHookConfig, hookSelfTest, hooksInstalled, installHooks, probeLocalModel, uninstallHooks, type RuntimeId } from '@agentontrack/adapters';
+import { coverageFor, handleHookSafely, handleProviderHookSafely, installMcpClient, isProvider, MCP_CLIENTS, perplexityMcpConfig, PROVIDERS, providerInstalled, providerSelfTest, hermesHookConfig, hookSelfTest, hooksInstalled, installHooks, probeLocalModel, uninstallHooks, type RuntimeId } from '@agentontrack/adapters';
 import { runSelf, stableCommand, VERSION } from './self.js';
 import { planProjectFiles, applyProjectFiles } from './init.js';
 
@@ -14,7 +14,10 @@ import { planProjectFiles, applyProjectFiles } from './init.js';
 const PUBLIC_SITE_ORIGINS = ['https://pandeysatyam.com'];
 const argv = process.argv.slice(2);
 const opt = (name: string) => { const i = argv.indexOf(`--${name}`); return i >= 0 ? argv[i + 1] : undefined; };
-const root = opt('root') ?? process.env.AGENTONTRACK_ROOT ?? process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
+const rootFlag = opt('root');
+// A hook command names its project first, so this comes out before the command is read.
+if (rootFlag) argv.splice(argv.indexOf('--root'), 2);
+const root = rootFlag ?? process.env.AGENTONTRACK_ROOT ?? process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
 const has = (name: string) => argv.includes(`--${name}`);
 const print = (v: unknown) => console.log(typeof v === 'string' ? v : JSON.stringify(v, null, 2));
 
@@ -216,7 +219,17 @@ async function main(): Promise<void> {
     }
     case 'run': {
       // Everything after the runtime goes to the agent unchanged, after the checks a fail-open host cannot do for itself.
-      if (sub !== 'codex' && sub !== 'claude-code') throw new Error('Usage: agentontrack run codex|claude-code [agent arguments]');
+      if (isProvider(sub)) {
+        const a = PROVIDERS[sub!]!;
+        const test = providerSelfTest(a, root);
+        if (!test.ok) { console.error(`Refusing to start ${a.name}: ${test.detail}`); process.exit(78); }
+        const quoted = [...(a.runArgs ?? []), ...argv.slice(2)].map((x) => (process.platform === 'win32' ? `"${x.replace(/%/g, '%%').replace(/"/g, '\\"')}"` : x));
+        const r = spawnSync(a.bin, quoted, { stdio: 'inherit', shell: process.platform === 'win32', cwd: root, env: { ...process.env, AGENTONTRACK_ROOT: root, PWD: root } });
+        if (r.error) throw new Error(`Could not start ${a.name}: ${r.error.message}`);
+        process.exitCode = r.status ?? 1;
+        return;
+      }
+      if (sub !== 'codex' && sub !== 'claude-code') throw new Error(`Usage: agentontrack run codex|claude-code|${Object.keys(PROVIDERS).join('|')} [agent arguments]`);
       const check = hookSelfTest(sub, root);
       if (!check.ok) { console.error(`Refusing to start ${sub}: ${check.detail}. ${check.fix ?? ''}`); process.exit(78); }
       const passthrough = argv.slice(2).filter((a) => a !== '--allow-network');
@@ -240,7 +253,7 @@ async function main(): Promise<void> {
       print(VERSION);
       return;
     case 'providers': {
-      print(Object.values(PROVIDERS).map((a) => { const v = toolVersion(`${a.bin} ${a.versionArgs.join(' ')}`); return { id: a.id, name: a.name, kind: a.kind, version: v ?? 'NOT FOUND', hooksInstalled: providerInstalled(a, root), surfaces: a.surfaces, ifTheHookFails: a.failure, limitations: a.limitations }; }));
+      print(Object.values(PROVIDERS).map((a) => { const v = toolVersion(`${a.bin} ${a.versionArgs.join(' ')}`); return { id: a.id, name: a.name, kind: a.kind, version: v ?? 'NOT FOUND', hooksInstalled: providerInstalled(a, root), ...(providerInstalled(a, root) ? { hookSelfTest: providerSelfTest(a, root) } : {}), surfaces: a.surfaces, ifTheHookFails: a.failure, limitations: a.limitations }; }));
       return;
     }
     case 'mcp-config': {

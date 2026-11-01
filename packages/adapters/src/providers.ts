@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { classifyCommand, type Effect, type Project } from '@agentontrack/core';
@@ -42,6 +43,10 @@ export interface ProviderAdapter {
   capabilities: ProviderCapabilities;
   failure: FailureBehaviour;
   limitations: string[];
+  /** A pre-action request that must be refused, used by the self-test. */
+  probe: (command: string) => Record<string, unknown>;
+  /** Added by agentontrack run, where the host would otherwise skip the gate. */
+  runArgs?: string[];
   /** Files this adapter writes, for install, uninstall and status. */
   hookFiles: string[];
   isPreRaw(raw: string): boolean;
@@ -64,7 +69,7 @@ const writeJson = (path: string, value: unknown) => { mkdirSync(dirname(path), {
 /** Turns a canonical tool call into effects. Unknown tools stay opaque, never harmless. */
 export function effectsFor(a: ProviderAdapter, tool: string, input: Record<string, unknown>): { effects: Effect[]; opaque: boolean; readOnly: boolean } {
   switch (a.kindOf(tool)) {
-    case 'shell': { const c = classifyCommand(String(input.command ?? input.cmd ?? '')); return { effects: c.effects, opaque: c.opaque, readOnly: false }; }
+    case 'shell': { const c = classifyCommand(Array.isArray(input.commands) ? input.commands.join('\n') : String(input.command ?? input.cmd ?? '')); return { effects: c.effects, opaque: c.opaque, readOnly: false }; }
     case 'write': {
       const p = pathOf(input);
       return p ? { effects: [{ kind: 'fs.write', target: p }], opaque: false, readOnly: false } : { effects: [{ kind: 'exec.opaque', target: tool }], opaque: true, readOnly: false };
@@ -77,8 +82,11 @@ export function effectsFor(a: ProviderAdapter, tool: string, input: Record<strin
   }
 }
 
+const SELF_TEST = 'agentontrack-selftest';
+
 export function handleProviderHook(project: Project, a: ProviderAdapter, raw: string): ProviderOutput {
   const ev = a.normalize(JSON.parse(raw));
+  if (ev.sessionId === SELF_TEST && ev.phase === 'pre') return a.deny('AgentOnTrack self-test');
   const base = { runtime: a.id, ...(ev.sessionId ? { sessionId: ev.sessionId } : {}), ...(ev.cwd ? { cwd: ev.cwd } : {}) };
   switch (ev.phase) {
     case 'session':
@@ -132,6 +140,7 @@ const cursor: ProviderAdapter = {
   capabilities: caps({ preActionMcp: 'yes', compaction: 'partial' }),
   failure: { crash: 'Blocks with failClosed, which this install sets', timeout: 'Blocks with failClosed', malformed: 'Blocks', missing: 'Not documented', source: 'documented' },
   limitations: ['Project hooks load only in a trusted workspace.', 'Team dashboard hooks cannot be made fail-closed.', 'A user report says Linux CLI hooks can fail silently, and that preToolUse may not fire on the CLI.'],
+  probe: (command) => ({ hook_event_name: 'preToolUse', tool_name: 'Shell', tool_input: { command }, conversation_id: SELF_TEST }),
   hookFiles: [cursorFile],
   isPreRaw: preRe('"hook_event_name"\\s*:\\s*"preToolUse"'),
   normalize: (p) => {
@@ -162,6 +171,8 @@ const copilot: ProviderAdapter = {
   capabilities: caps({ compaction: 'partial' }),
   failure: { crash: 'Denies', timeout: 'ALLOWS, by design: Copilot has no fail-closed setting for this', malformed: 'No decision, so its own default applies', missing: 'Not documented', source: 'documented' },
   limitations: ['A hook that times out lets the action run.', 'disableAllHooks in repo settings skips the gate, so that file is a protected path here.', 'After 8 consecutive blocks the CLI ends the turn.'],
+  probe: (command) => ({ toolName: 'bash', toolArgs: JSON.stringify({ command }), sessionId: SELF_TEST }),
+  runArgs: ['--trust-folder'],
   hookFiles: [copilotFile],
   isPreRaw: preRe('"(hook_event_name"\\s*:\\s*"PreToolUse|toolName"|tool_name")'),
   normalize: (p) => {
@@ -189,6 +200,7 @@ const devin: ProviderAdapter = {
   capabilities: caps({ preActionMcp: 'yes', compaction: 'yes' }),
   failure: { crash: 'Blocks only if fail_closed works: its guide says hooks fail open, and fail_closed appears only in a changelog', timeout: 'Same', malformed: 'Same', missing: 'Not documented', source: 'documented' },
   limitations: ['Its own guide says not to rely on hooks for crucial guardrails yet.', 'In Restricted Mode hooks neither load nor run.'],
+  probe: (command) => ({ hook_event_name: 'PreToolUse', tool_name: 'exec', tool_input: { command }, session_id: SELF_TEST }),
   hookFiles: [devinFile],
   isPreRaw: preRe('"hook_event_name"\\s*:\\s*"PreToolUse"'),
   normalize: (p) => {
@@ -215,6 +227,7 @@ const gemini: ProviderAdapter = {
   capabilities: caps({ preActionMcp: 'yes', compaction: 'partial' }),
   failure: { crash: 'Docs: proceeds. Source: exit codes other than 0 and 1 block. Every internal error here exits 2', timeout: 'Not documented', malformed: 'Allows, per docs', missing: 'Docs and source disagree', source: 'documented' },
   limitations: ['No fail-closed setting.', 'hooksConfig.enabled false disables the gate, so the settings file is a protected path here.', 'Project hooks are untrusted by default.'],
+  probe: (command) => ({ hook_event_name: 'BeforeTool', tool_name: 'run_shell_command', tool_input: { command }, session_id: SELF_TEST }),
   hookFiles: [geminiFile],
   isPreRaw: preRe('"hook_event_name"\\s*:\\s*"BeforeTool"'),
   normalize: (p) => {
@@ -250,9 +263,9 @@ const gemini: ProviderAdapter = {
   },
 };
 
-const opencodeV1 = (command: string) => `// Written by agentontrack install opencode. Any failure refuses the action, so a broken gate cannot pass as an allow.
+const opencodeV1 = (command: string, ms: number) => `// Written by agentontrack install opencode. Any failure refuses the action, so a broken gate cannot pass as an allow.
 import { spawnSync } from 'node:child_process';
-const run = (payload) => spawnSync(${JSON.stringify(`${command} hook opencode`)}, { shell: true, input: JSON.stringify(payload), encoding: 'utf8', timeout: 60000 });
+const run = (payload) => spawnSync(${JSON.stringify(`${command} hook opencode`)}, { shell: true, input: JSON.stringify(payload), encoding: 'utf8', timeout: ${ms} });
 export const AgentOnTrack = async ({ directory }) => ({
   'tool.execute.before': async (input, output) => {
     const r = run({ hook_event_name: 'tool.execute.before', tool: input.tool, sessionID: input.sessionID, args: output.args, cwd: directory });
@@ -262,10 +275,10 @@ export const AgentOnTrack = async ({ directory }) => ({
   event: async ({ event }) => { if (event.type === 'session.compacted') run({ hook_event_name: 'session.compacted', cwd: directory }); },
 });
 `;
-const opencodeV2 = (command: string) => `// Written by agentontrack install opencode --v2. Any failure refuses the action, so a broken gate cannot pass as an allow.
+const opencodeV2 = (command: string, ms: number) => `// Written by agentontrack install opencode --v2. Any failure refuses the action, so a broken gate cannot pass as an allow.
 import { spawnSync } from 'node:child_process';
 import { Plugin } from '@opencode/plugin';
-const run = (payload) => spawnSync(${JSON.stringify(`${command} hook opencode`)}, { shell: true, input: JSON.stringify(payload), encoding: 'utf8', timeout: 60000 });
+const run = (payload) => spawnSync(${JSON.stringify(`${command} hook opencode`)}, { shell: true, input: JSON.stringify(payload), encoding: 'utf8', timeout: ${ms} });
 export default Plugin.define({ id: 'agentontrack', async setup(ctx) {
   await ctx.tool.hook('execute.before', (event) => {
     const r = run({ hook_event_name: 'tool.execute.before', tool: event.tool, args: event.input });
@@ -279,6 +292,7 @@ const opencode: ProviderAdapter = {
   capabilities: caps({ compaction: 'partial' }),
   failure: { crash: 'Refused: the plugin throws on any failure of the hook', timeout: 'Refused after 60 s, by the plugin', malformed: 'Not applicable: exit status decides', missing: 'Refused if the program is gone. If the plugin itself fails to load, the gate is off', source: 'mixed' },
   limitations: ['opencode --pure, or OPENCODE_PURE, disables external plugins and so the gate.', 'A report says tools run through its batch tool skip plugin hooks.', 'A V1 plugin does not run on V2.'],
+  probe: (command) => ({ hook_event_name: 'tool.execute.before', tool: 'bash', sessionID: SELF_TEST, args: { command } }),
   hookFiles: ['.opencode/plugins/agentontrack.js', '.opencode/plugins/agentontrack/index.js'],
   isPreRaw: preRe('"hook_event_name"\\s*:\\s*"tool\\.execute\\.before"'),
   normalize: (p) => {
@@ -291,7 +305,7 @@ const opencode: ProviderAdapter = {
   install: (root, command, o = {}) => {
     const path = join(root, o.v2 ? '.opencode/plugins/agentontrack/index.js' : '.opencode/plugins/agentontrack.js');
     mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, (o.v2 ? opencodeV2 : opencodeV1)(command));
+    writeFileSync(path, (o.v2 ? opencodeV2 : opencodeV1)(command, (o.timeoutSec ?? 60) * 1000));
     return [path];
   },
   uninstall: (root) => { const a = removeFile(join(root, '.opencode/plugins/agentontrack.js')); const b = removeFile(join(root, '.opencode/plugins/agentontrack/index.js')); return a || b; },
@@ -303,6 +317,7 @@ const kiro: ProviderAdapter = {
   capabilities: caps({ compaction: 'no', preActionMcp: 'yes' }),
   failure: { crash: 'CLI docs: warns and continues. IDE docs: blocks. These conflict', timeout: 'Not documented', malformed: 'Not documented', missing: 'Not documented', source: 'documented' },
   limitations: ['No fail-closed setting.', 'A report says custom-agent hooks fire on the orchestrator only, not subagents.'],
+  probe: (command) => ({ hook_event_name: 'PreToolUse', tool_name: 'execute_bash', tool_input: { command }, session_id: SELF_TEST }),
   hookFiles: [kiroFile],
   isPreRaw: preRe('"hook_event_name"\\s*:\\s*"(PreToolUse|preToolUse)"'),
   normalize: (p) => {
@@ -328,6 +343,7 @@ const cline: ProviderAdapter = {
   capabilities: caps({ compaction: 'no' }),
   failure: { crash: 'Not documented', timeout: 'Not documented', malformed: 'Not documented', missing: 'Not documented', source: 'documented' },
   limitations: ['Script hooks do not run on Windows.', 'The extension may need hooks enabled in settings.', 'SDK plugin hooks ignore errors by default; this adapter uses script hooks.'],
+  probe: (command) => ({ hookName: 'PreToolUse', taskId: SELF_TEST, preToolUse: { toolName: 'execute_command', parameters: { command } } }),
   hookFiles: CLINE_DIRS.flatMap((d) => CLINE_EVENTS.map((e) => `${d}/${e}`)),
   isPreRaw: preRe('"(hookName"\\s*:\\s*"PreToolUse|preToolUse")'),
   normalize: (p) => {
@@ -335,7 +351,7 @@ const cline: ProviderAdapter = {
     const body = p.preToolUse ?? p.postToolUse ?? {};
     return { phase: e === 'PreToolUse' ? 'pre' : e === 'PostToolUse' ? 'post' : /^Task(Start|Resume)$/.test(e) ? 'session' : 'other', tool: String(body.toolName ?? ''), input: parseMaybe(body.parameters), sessionId: p.taskId, cwd: p.workspaceRoots?.[0] };
   },
-  kindOf: table({ execute_command: 'shell', run_commands: 'shell', bash: 'shell', write_to_file: 'write', replace_in_file: 'write', editor: 'write', read_file: 'read', read_files: 'read', search_files: 'read', search_codebase: 'read', list_files: 'read', list_code_definition_names: 'read', web_fetch: 'web', fetch_web_content: 'web', use_mcp_tool: 'mcp', access_mcp_resource: 'mcp', attempt_completion: 'read', ask_followup_question: 'read' }, () => false),
+  kindOf: table({ execute_command: 'shell', run_commands: 'shell', bash: 'shell', write_to_file: 'write', replace_in_file: 'write', editor: 'write', submit_and_exit: 'read', read_file: 'read', read_files: 'read', search_files: 'read', search_codebase: 'read', list_files: 'read', list_code_definition_names: 'read', web_fetch: 'web', fetch_web_content: 'web', use_mcp_tool: 'mcp', access_mcp_resource: 'mcp', attempt_completion: 'read', ask_followup_question: 'read' }, () => false),
   allow: () => ({ exitCode: 0, stdout: JSON.stringify({ cancel: false }) }),
   deny: (reason) => ({ exitCode: 0, stdout: JSON.stringify({ cancel: true, errorMessage: reason }), stderr: reason }),
   install: (root, command) => {
@@ -394,3 +410,36 @@ export function installMcpClient(id: string, command: string[], root: string): s
 
 /** Research only: optional, on the user's own key, and billed by Perplexity. It enforces nothing, and an answer is never evidence of completion. */
 export const perplexityMcpConfig = () => ({ mcpServers: { perplexity: { command: 'npx', args: ['-y', '@perplexity-ai/mcp-server'], env: { PERPLEXITY_API_KEY: '<your key, from your own Perplexity account>' } } } });
+
+/** The hook command as written for this host. Reading it back tests what the host will really run. */
+export function providerHookCommand(a: ProviderAdapter, root: string): string | null {
+  const ends = new RegExp(`hook ${a.id}$`);
+  for (const f of a.hookFiles) {
+    const path = join(root, f);
+    if (!existsSync(path)) continue;
+    const text = readFileSync(path, 'utf8');
+    if (f.endsWith('.json')) {
+      const stack: unknown[] = [JSON.parse(text)];
+      while (stack.length) {
+        const v = stack.pop();
+        if (typeof v === 'string' && ends.test(v) && !v.startsWith('& ')) return v;
+        if (v && typeof v === 'object') stack.push(...Object.values(v));
+      }
+    } else {
+      const js = new RegExp(`spawnSync\\(("(?:[^"\\\\]|\\\\.)*hook ${a.id}")`).exec(text);
+      if (js) return JSON.parse(js[1]!);
+      const line = text.split('\n').find((l) => ends.test(l.trim()));
+      if (line) return line.trim();
+    }
+  }
+  return null;
+}
+
+/** Runs the installed hook on a request it must refuse. A host that fails open cannot do this check for itself. */
+export function providerSelfTest(a: ProviderAdapter, root: string): { ok: boolean; detail: string } {
+  const command = providerHookCommand(a, root);
+  if (!command) return { ok: false, detail: `no hook is installed. Run: agentontrack install ${a.id}` };
+  const r = spawnSync(command, { shell: true, input: JSON.stringify(a.probe('agentontrack approve selftest')), encoding: 'utf8', timeout: 30_000, cwd: root });
+  const refused = a.id === 'cline' ? /"cancel":true/.test(r.stdout ?? '') : r.status === 2;
+  return refused ? { ok: true, detail: 'The hook program ran and refused a test request' } : { ok: false, detail: `the hook program did not refuse a test request (exit ${r.status ?? 'none'}). Run: agentontrack install ${a.id}` };
+}

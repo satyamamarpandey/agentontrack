@@ -173,8 +173,8 @@ const copilotFile = '.github/hooks/agentontrack.json';
 const copilot: ProviderAdapter = {
   id: 'copilot', name: 'GitHub Copilot', kind: 'native-hooks', bin: 'copilot', versionArgs: ['version'], surfaces: 'CLI and VS Code (Preview) read the same file. The cloud agent needs a paid plan and a hosted sandbox',
   capabilities: caps({ compaction: 'partial' }),
-  failure: { crash: 'Denies', timeout: 'ALLOWS, by design: Copilot has no fail-closed setting for this', malformed: 'No decision, so its own default applies', missing: 'Not documented', source: 'documented' },
-  limitations: ['A hook that times out lets the action run.', 'disableAllHooks in repo settings skips the gate, so that file is a protected path here.', 'After 8 consecutive blocks the CLI ends the turn.'],
+  failure: { crash: 'Blocks (observed)', timeout: 'RUNS THE ACTION (observed). No fail-closed setting exists', malformed: 'RUNS THE ACTION (observed)', missing: 'Blocks (observed)', source: 'observed' },
+  limitations: ['In copilot -p, repo hooks load only in a trusted folder, or the gate is silently off (observed). agentontrack run copilot adds --trust-folder.', 'A hook that times out lets the action run.', 'disableAllHooks in repo settings skips the gate, so that file is a protected path here.', 'After 8 consecutive blocks the CLI ends the turn.'],
   probe: (command) => ({ toolName: 'bash', toolArgs: JSON.stringify({ command }), sessionId: SELF_TEST }),
   runArgs: ['--trust-folder'],
   hookFiles: [copilotFile],
@@ -229,7 +229,7 @@ const GEMINI_EVENTS = ['BeforeTool', 'AfterTool', 'SessionStart', 'AfterAgent', 
 const gemini: ProviderAdapter = {
   id: 'gemini', name: 'Gemini CLI', kind: 'native-hooks', bin: 'gemini', versionArgs: ['--version'], surfaces: 'CLI. Replaced by Antigravity CLI for unpaid and Google One users, which has a different hook contract and is not covered',
   capabilities: caps({ preActionMcp: 'yes', compaction: 'partial' }),
-  failure: { crash: 'Docs: proceeds. Source: exit codes other than 0 and 1 block. Every internal error here exits 2', timeout: 'Not documented', malformed: 'Allows, per docs', missing: 'Docs and source disagree', source: 'documented' },
+  failure: { crash: 'RUNS THE ACTION on exit 1 or 3 (observed). Errors inside AgentOnTrack exit 2, which blocks', timeout: 'RUNS THE ACTION (observed)', malformed: 'RUNS THE ACTION (observed)', missing: 'Blocks (observed)', source: 'observed' },
   limitations: ['No fail-closed setting.', 'hooksConfig.enabled false disables the gate, so the settings file is a protected path here.', 'Project hooks are untrusted by default.'],
   probe: (command) => ({ hook_event_name: 'BeforeTool', tool_name: 'run_shell_command', tool_input: { command }, session_id: SELF_TEST }),
   hookFiles: [geminiFile],
@@ -294,7 +294,7 @@ export default Plugin.define({ id: 'agentontrack', async setup(ctx) {
 const opencode: ProviderAdapter = {
   id: 'opencode', name: 'OpenCode', kind: 'plugin', bin: 'opencode', versionArgs: ['--version'], surfaces: 'CLI and TUI. V1 and V2 have incompatible plugin APIs and are installed separately',
   capabilities: caps({ compaction: 'partial' }),
-  failure: { crash: 'Refused: the plugin throws on any failure of the hook', timeout: 'Refused after 60 s, by the plugin', malformed: 'Not applicable: exit status decides', missing: 'Refused if the program is gone. If the plugin itself fails to load, the gate is off', source: 'mixed' },
+  failure: { crash: 'Blocks (observed): the plugin throws on any failure', timeout: 'Blocks (observed)', malformed: 'Not applicable: exit status decides', missing: 'Blocks if the program is gone (observed). A plugin that fails to load is not tested, and would leave the gate off', source: 'observed' },
   limitations: ['opencode --pure, or OPENCODE_PURE, disables external plugins and so the gate.', 'A report says tools run through its batch tool skip plugin hooks.', 'A V1 plugin does not run on V2.'],
   probe: (command) => ({ hook_event_name: 'tool.execute.before', tool: 'bash', sessionID: SELF_TEST, args: { command } }),
   hookFiles: ['.opencode/plugins/agentontrack.js', '.opencode/plugins/agentontrack/index.js'],
@@ -345,15 +345,18 @@ const CLINE_EVENTS = ['PreToolUse', 'PostToolUse', 'TaskStart', 'TaskResume'];
 const cline: ProviderAdapter = {
   id: 'cline', name: 'Cline', kind: 'native-hooks', bin: 'cline', versionArgs: ['--version'], surfaces: 'CLI and VS Code extension script hooks. Linux and macOS only: Windows script hooks are not supported',
   capabilities: caps({ compaction: 'no' }),
-  failure: { crash: 'Not documented', timeout: 'Not documented', malformed: 'Not documented', missing: 'Not documented', source: 'documented' },
-  limitations: ['Script hooks do not run on Windows.', 'The extension may need hooks enabled in settings.', 'SDK plugin hooks ignore errors by default; this adapter uses script hooks.'],
+  failure: { crash: 'RUNS THE ACTION (observed)', timeout: 'Waits, and a long hang can stall the run (observed)', malformed: 'RUNS THE ACTION (observed)', missing: 'RUNS THE ACTION (observed)', source: 'observed' },
+  limitations: ['A refusal ends the whole run, not just that action (observed).', 'Real payloads differ from its README, so this was built from a real capture and may shift between versions.', 'Script hooks do not run on Windows.', 'The extension may need hooks enabled in settings.', 'SDK plugin hooks ignore errors by default; this adapter uses script hooks.'],
   probe: (command) => ({ hookName: 'PreToolUse', taskId: SELF_TEST, preToolUse: { toolName: 'execute_command', parameters: { command } } }),
   hookFiles: CLINE_DIRS.flatMap((d) => CLINE_EVENTS.map((e) => `${d}/${e}`)),
-  isPreRaw: preRe('"(hookName"\\s*:\\s*"PreToolUse|preToolUse")'),
+  isPreRaw: preRe('"(hookName"\\s*:\\s*"(PreToolUse|tool_call)|preToolUse")'),
   normalize: (p) => {
+    // Real Cline CLI 3.0.74 sends hookName tool_call and tool_result, with the true input under tool_call. Its README names PreToolUse and stringifies parameters.
     const e = String(p.hookName ?? '');
+    const call = p.tool_call ?? p.tool_result;
     const body = p.preToolUse ?? p.postToolUse ?? {};
-    return { phase: e === 'PreToolUse' ? 'pre' : e === 'PostToolUse' ? 'post' : /^Task(Start|Resume)$/.test(e) ? 'session' : 'other', tool: String(body.toolName ?? ''), input: parseMaybe(body.parameters), sessionId: p.taskId, cwd: p.workspaceRoots?.[0] };
+    const phase = e === 'tool_call' || e === 'PreToolUse' ? 'pre' : e === 'tool_result' || e === 'PostToolUse' ? 'post' : /^(agent_start|Task(Start|Resume))$/.test(e) ? 'session' : 'other';
+    return { phase, tool: String(call?.name ?? body.toolName ?? ''), input: parseMaybe(call?.input ?? body.parameters), sessionId: p.taskId, cwd: p.workspaceRoots?.[0] };
   },
   kindOf: table({ execute_command: 'shell', run_commands: 'shell', bash: 'shell', write_to_file: 'write', replace_in_file: 'write', editor: 'write', submit_and_exit: 'read', read_file: 'read', read_files: 'read', search_files: 'read', search_codebase: 'read', list_files: 'read', list_code_definition_names: 'read', web_fetch: 'web', fetch_web_content: 'web', use_mcp_tool: 'mcp', access_mcp_resource: 'mcp', attempt_completion: 'read', ask_followup_question: 'read' }, () => false),
   allow: () => ({ exitCode: 0, stdout: JSON.stringify({ cancel: false }) }),

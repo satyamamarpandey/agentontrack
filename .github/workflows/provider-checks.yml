@@ -49,9 +49,9 @@ jobs:
   local-models:
     # Bounded: small real models on a CPU-only runner, each server with its own time limit. Results are kept even if one runs out of time.
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 50
     env:
-      GGUF: https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf
+      GGUF: https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
@@ -76,15 +76,14 @@ jobs:
           sudo systemctl stop ollama
       - name: llama.cpp
         continue-on-error: true
-        timeout-minutes: 10
+        timeout-minutes: 16
         run: |
           mkdir -p /tmp/llama && cd /tmp/llama
           curl -fsSL -o m.gguf "$GGUF"
-          URL=$(gh api repos/ggml-org/llama.cpp/releases/latest --jq '.assets[].browser_download_url' | grep -E 'bin-ubuntu-x64' | grep -vE 'vulkan|cuda|sycl' | head -1)
-          echo "asset: $URL"
-          curl -fsSL -o l.bin "$URL"
-          case "$URL" in *.zip) unzip -qo l.bin ;; *) tar -xzf l.bin ;; esac
-          S=$(find . -name llama-server -type f | head -1); chmod +x "$S"
+          git clone -q --depth 1 https://github.com/ggml-org/llama.cpp src
+          cmake -S src -B build -DCMAKE_BUILD_TYPE=Release -DLLAMA_BUILD_TESTS=OFF > /dev/null
+          cmake --build build -j4 --target llama-server > /dev/null
+          S=build/bin/llama-server
           (LD_LIBRARY_PATH=$(dirname "$S") nohup "$S" -m m.gguf --port 8181 --jinja -c 16384 > /tmp/llama.log 2>&1 &)
           sleep 15
           cd "$GITHUB_WORKSPACE"
@@ -100,7 +99,7 @@ jobs:
           export PATH="$HOME/.lmstudio/bin:$PATH"
           lms daemon up || true
           lms get "$GGUF" --yes
-          lms load qwen2.5-1.5b-instruct --context-length 16384 --identifier aot --yes || lms ls
+          lms load qwen2.5-3b-instruct --context-length 16384 --identifier aot --yes || lms ls
           lms server start --port 1234
           node benchmarks/live/local-model-checks.mjs lmstudio http://127.0.0.1:1234/v1 aot
       - uses: actions/upload-artifact@v4

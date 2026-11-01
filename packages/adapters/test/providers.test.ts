@@ -118,6 +118,13 @@ describe('host specifics', () => {
     expect(a.allow().stdout).toBeUndefined();
   });
 
+  it('Cline: reads the payload the real CLI sends, as captured from 3.0.74', () => {
+    const real = { hookName: 'tool_call', taskId: 'conv_1', workspaceRoots: ['.'], tool_call: { id: 'x', name: 'run_commands', input: { commands: ['git push origin main'] } }, preToolUse: { toolName: 'run_commands', parameters: { commands: '["git push origin main"]' } } };
+    const out = handleProviderHook(p, PROVIDERS.cline!, JSON.stringify(real), { event: 'PreToolUse' });
+    expect(JSON.parse(out.stdout!).cancel).toBe(true);
+    expect([...p.state().approvals.values()].at(-1)!.effect.kind).toBe('vcs.push');
+  });
+
   it('a hook installed for a pre-action event refuses a payload it cannot read, rather than allowing it', () => {
     const out = handleProviderHook(p, PROVIDERS.cline!, JSON.stringify({ somethingNew: true }), { event: 'PreToolUse' });
     expect(JSON.parse(out.stdout!).cancel).toBe(true);

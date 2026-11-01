@@ -1,0 +1,26 @@
+{
+  "which": "continue",
+  "label": "real host, scripted model",
+  "ranAt": "2026-11-01T23:21:53.733Z",
+  "runner": "Linux",
+  "results": [
+    {
+      "name": "Real program present",
+      "outcome": "PASS",
+      "label": "real host, scripted model",
+      "detail": "1.5.47"
+    },
+    {
+      "name": "MCP tool answered through the real host",
+      "outcome": "PASS",
+      "label": "real host, scripted model",
+      "detail": "exit 0; requests 2; tools Read,Write,List,Bash,Fetch,Checklist,CheckBackgroundJob,AskQuestion,Edit,Exit,Skills,project.status; Finished.\n"
+    },
+    {
+      "name": "Continue hook fired",
+      "outcome": "NOT OBSERVED",
+      "label": "real host, scripted model",
+      "detail": "pushed true"
+    }
+  ]
+}

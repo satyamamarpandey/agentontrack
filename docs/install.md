@@ -32,6 +32,19 @@ agentontrack doctor     # says what is and is not enforced here
 
 Then use your agent as usual. On Codex, start it with `agentontrack run codex`. When an action is held: `agentontrack approvals`, then `approve <id>` or `deny <id>`. Afterwards: `agentontrack verify`. To see it all: `agentontrack dashboard`.
 
+## Other platforms
+
+```sh
+agentontrack providers                 # what is found here, and how each behaves if its hook fails
+agentontrack install copilot           # or gemini, opencode, cline, cursor, devin, kiro
+agentontrack run copilot               # checks the hook first, and adds what the host needs to load it
+agentontrack uninstall copilot
+agentontrack mcp-config continue       # state only, with no enforcement. Also: cline, roo
+agentontrack research                  # optional Perplexity config, on your own key
+```
+
+See [compatibility](compatibility.md). Do not assume an adapter works until its status says so.
+
 ## Upgrade, roll back, remove
 
 ```sh
@@ -58,4 +71,8 @@ Uninstall removes hooks only from projects it knows about, and leaves files such
 | Task stays `IMPLEMENTED_UNVERIFIED` with `Weak check` | Your check can pass without the work being done. Strengthen it, or run `agentontrack task accept-weak <id>` |
 | `changed with no gate firing` | Files changed while no hook ran. Run `agentontrack doctor`, then review them and run `agentontrack ack <seq>` |
 | Public site says it cannot reach the companion | Run `agentontrack dashboard --allow-public-site`, and allow local network access if the browser asks. Safari blocks this: use the local address the command prints |
+| `Refusing to start <agent>` | Its hook did not refuse a test request. Run `agentontrack install <id>` |
+| Copilot `-p` ignores the gate | Repo hooks load only in a trusted folder. Use `agentontrack run copilot`, or add `--trust-folder` |
+| Gemini hook not running | Project hooks are untrusted by default. Trust the folder, and check `hooksConfig` |
+| Cline ends the run on a held action | That is how Cline handles a refusal |
 | `Approvals are suspended` | The log failed its integrity check. Run `agentontrack audit`, then `audit --recover` |

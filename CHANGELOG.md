@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased: platform integrations, tested separately from 1.0.0-rc.1
+
+- One provider layer over the same engine: Copilot CLI, Gemini CLI, OpenCode and Cline verified on the real programs with a scripted model; Cursor, Devin and Kiro written from docs and never run on the real programs.
+- `agentontrack providers`, `mcp-config`, `research`, and `run` and `install` for each platform.
+- A pre-action hook that cannot read a request now refuses it.
+- Host config folders are protected paths, so an agent cannot edit its own hooks.
+
 ## 1.0.0-rc.1, not yet published
 
 First installable version.

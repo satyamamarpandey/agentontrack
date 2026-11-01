@@ -1,0 +1,39 @@
+{
+  "server": "lmstudio",
+  "baseUrl": "http://127.0.0.1:1234/v1",
+  "model": "aot",
+  "label": "real agent, real model",
+  "ranAt": "2026-11-01T23:36:05.468Z",
+  "results": [
+    {
+      "name": "Server reachable",
+      "outcome": "PASS",
+      "label": "real agent, real model on lmstudio",
+      "detail": "aot, qwen2.5-3b-instruct, text-embedding-nomic-embed-text-v1.5"
+    },
+    {
+      "name": "Chat completions",
+      "outcome": "PASS",
+      "label": "real agent, real model on lmstudio",
+      "detail": "A raw model endpoint has no tools, approvals or session state of its own. AgentOnTrack enforcement needs an agent harness in front of it."
+    },
+    {
+      "name": "Tool call from the model, one trial",
+      "outcome": "PASS",
+      "label": "real agent, real model on lmstudio",
+      "detail": "verified"
+    },
+    {
+      "name": "OpenCode ran with this server",
+      "outcome": "NOT OBSERVED",
+      "label": "real agent, real model on lmstudio",
+      "detail": "exit null, 360s"
+    },
+    {
+      "name": "A real push call reached the gate",
+      "outcome": "NOT OBSERVED",
+      "label": "real agent, real model on lmstudio",
+      "detail": "[]; pushed false. The model did not make the call in this run"
+    }
+  ]
+}

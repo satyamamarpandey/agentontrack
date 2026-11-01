@@ -28,6 +28,13 @@ Run `agentontrack doctor` to see this for your own machine and project.
 | Claude Code | Blocks the action (`onFailure: block`, observed) |
 | Codex | **Runs the action anyway (observed).** The gate is not a hard boundary on Codex. `agentontrack run codex` refuses to start unless the hook answers |
 | Hermes | Blocks the action with `fail_closed: true`, which `agentontrack install hermes` prints (observed). Its default fails open |
+| Copilot CLI | Blocks on a crash or missing program. **Runs the action on a timeout or malformed output (observed).** Plain `copilot -p` in an untrusted folder skips the hook entirely |
+| Gemini CLI | Blocks on a missing program. **Runs the action on a crash, timeout or malformed output (observed)** |
+| OpenCode | Blocks on a crash, timeout or missing program (observed). A plugin that fails to load is not tested |
+| Cline CLI | **Runs the action on a crash, malformed output or missing program (observed)** |
+| Cursor, Devin, Kiro | Not observed. These adapters have never run on the real programs |
+
+An adapter on a host that fails open is a gate only while the hook runs. Start such hosts with `agentontrack run <id>`.
 
 ## The public website
 

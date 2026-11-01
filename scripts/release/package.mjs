@@ -70,7 +70,7 @@ for (const t of targets) {
   cpSync(lib, join(root, 'lib'), { recursive: true });
   cpSync('packages/companion/ui', join(root, 'ui'), { recursive: true });
   mkdirSync(join(root, 'benchmarks'));
-  for (const f of ['matched-v3.json', 'security-campaign.json', 'performance.json', 'matched-v4.json']) if (existsSync(`benchmarks/results/${f}`)) cpSync(`benchmarks/results/${f}`, join(root, 'benchmarks', f));
+  for (const f of ['matched-v3.json', 'security-campaign.json', 'performance.json', 'matched-v4.json', 'provider-certification.json']) if (existsSync(`benchmarks/results/${f}`)) cpSync(`benchmarks/results/${f}`, join(root, 'benchmarks', f));
   cpSync('LICENSE', join(root, 'LICENSE'));
   cpSync('NOTICE', join(root, 'NOTICE'));
   writeFileSync(join(root, 'THIRD_PARTY_NOTICES.txt'), thirdParty);

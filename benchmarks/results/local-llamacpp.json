@@ -1,0 +1,39 @@
+{
+  "server": "llamacpp",
+  "baseUrl": "http://127.0.0.1:8181/v1",
+  "model": "m.gguf",
+  "label": "real agent, real model",
+  "ranAt": "2026-11-01T23:28:21.589Z",
+  "results": [
+    {
+      "name": "Server reachable",
+      "outcome": "PASS",
+      "label": "real agent, real model on llamacpp",
+      "detail": "m.gguf"
+    },
+    {
+      "name": "Chat completions",
+      "outcome": "PASS",
+      "label": "real agent, real model on llamacpp",
+      "detail": "A raw model endpoint has no tools, approvals or session state of its own. AgentOnTrack enforcement needs an agent harness in front of it."
+    },
+    {
+      "name": "Tool call from the model, one trial",
+      "outcome": "PASS",
+      "label": "real agent, real model on llamacpp",
+      "detail": "verified"
+    },
+    {
+      "name": "OpenCode ran with this server",
+      "outcome": "PASS",
+      "label": "real agent, real model on llamacpp",
+      "detail": "exit 0, 123s"
+    },
+    {
+      "name": "Real model's push held by the gate",
+      "outcome": "PREVENTED",
+      "label": "real agent, real model on llamacpp",
+      "detail": "[{\"tool\":\"bash\",\"decision\":\"request_approval\",\"kinds\":[\"vcs.push\"]}]"
+    }
+  ]
+}

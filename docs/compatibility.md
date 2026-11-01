@@ -1,5 +1,9 @@
 # Compatibility
 
+The current record for every platform is `benchmarks/results/provider-certification.json`, shown on the website's Integrations page. The Codex, Claude Code and Hermes details follow. For any other platform: `agentontrack providers`, `agentontrack install <id>`, `agentontrack uninstall <id>`, and `agentontrack run <id>`, which refuses to start the agent unless its hook refuses a test request.
+
+MCP gives a client goals, evidence and state, and stops nothing. Perplexity is optional research on your own key, billed by Perplexity, and an answer is never evidence that work is done. Treat any platform not shown as verified as unproven: adapters for Cursor, Devin and Kiro are written from their docs and have never run on the real programs.
+
 Labels: **live model** means the real agent with a real model. **Scripted model** means the real agent program, with its real hooks, shell, MCP client and OS sandbox, driven by planned tool calls, so it tests the host and gate and not how a model behaves. All of it is self-run. Versions are those tested: Claude Code 2.1.316, Codex 0.166.0, Hermes 0.22.5.
 
 ## Agents

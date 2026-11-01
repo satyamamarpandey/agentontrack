@@ -1,0 +1,20 @@
+{
+  "which": "perplexity",
+  "label": "real host, scripted model",
+  "ranAt": "2026-11-01T23:21:53.093Z",
+  "runner": "Linux",
+  "results": [
+    {
+      "name": "Official MCP server lists its tools",
+      "outcome": "PASS",
+      "label": "real host, scripted model",
+      "detail": "perplexity_ask, perplexity_research, perplexity_reason, perplexity_search"
+    },
+    {
+      "name": "A real Perplexity answer",
+      "outcome": "BLOCKED",
+      "label": "real host, scripted model",
+      "detail": "Needs a paid key from the owner. No paid call was made."
+    }
+  ]
+}

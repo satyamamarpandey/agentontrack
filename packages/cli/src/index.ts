@@ -170,7 +170,7 @@ async function main(): Promise<void> {
       if (isProvider(sub)) {
         const a = PROVIDERS[sub!]!;
         const stable = `${selfCommand()} --root "${root.replace(/\\/g, '/')}"`;
-        const files = a.install(root, stable, { v2: has('v2') });
+        const files = a.install(root, stable, { v2: has('v2'), extension: has('extension') });
         registerProject(root);
         print(`Wrote ${files.join(', ')}`);
         print({ provider: a.id, kind: a.kind, surfaces: a.surfaces, ifTheHookFails: a.failure, limitations: a.limitations });

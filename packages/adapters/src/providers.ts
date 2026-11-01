@@ -30,7 +30,7 @@ export interface ProviderCapabilities {
 
 export interface FailureBehaviour { crash: string; timeout: string; malformed: string; missing: string; source: 'documented' | 'observed' | 'mixed' }
 
-export interface InstallOptions { timeoutSec?: number; v2?: boolean }
+export interface InstallOptions { timeoutSec?: number; v2?: boolean; extension?: boolean }
 
 export interface ProviderAdapter {
   id: string;
@@ -361,9 +361,10 @@ const cline: ProviderAdapter = {
   kindOf: table({ execute_command: 'shell', run_commands: 'shell', bash: 'shell', write_to_file: 'write', replace_in_file: 'write', editor: 'write', submit_and_exit: 'read', read_file: 'read', read_files: 'read', search_files: 'read', search_codebase: 'read', list_files: 'read', list_code_definition_names: 'read', web_fetch: 'web', fetch_web_content: 'web', use_mcp_tool: 'mcp', access_mcp_resource: 'mcp', attempt_completion: 'read', ask_followup_question: 'read' }, () => false),
   allow: () => ({ exitCode: 0, stdout: JSON.stringify({ cancel: false }) }),
   deny: (reason) => ({ exitCode: 0, stdout: JSON.stringify({ cancel: true, errorMessage: reason }), stderr: reason }),
-  install: (root, command) => {
+  install: (root, command, o = {}) => {
     const out: string[] = [];
-    for (const d of CLINE_DIRS) for (const e of CLINE_EVENTS) {
+    // One folder only: the CLI runs both, and a second call would find a single-use approval already spent.
+    for (const d of [o.extension ? '.clinerules/hooks' : '.cline/hooks']) for (const e of CLINE_EVENTS) {
       const path = join(root, d, e);
       mkdirSync(dirname(path), { recursive: true });
       writeFileSync(path, `#!/bin/sh\n# Written by agentontrack install cline\n${command} hook cline --event ${e}\n`);

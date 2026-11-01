@@ -22,7 +22,7 @@ const sh = (c) => ({ tool: SHELL, args: (name) => (name === 'run_commands' ? { c
 const PUSH = 'git push origin main';
 
 const hostRun = (cmd, args, { timeout = 150_000, cwd, env = {}, shell = false } = {}) => new Promise((ok) => {
-  const c = spawn(cmd, args, { cwd, shell, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const c = spawn(cmd, args, { cwd, shell, env: { ...process.env, ...(cwd ? { PWD: cwd } : {}), ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = ''; let stderr = '';
   c.stdout.setEncoding('utf8').on('data', (d) => { stdout += d; });
   c.stderr.setEncoding('utf8').on('data', (d) => { stderr += d; });
@@ -62,11 +62,14 @@ const HOSTS = {
       mkdirSync(d, { recursive: true });
       writeFileSync(join(d, 'providers.json'), JSON.stringify({ providers: [{ name: 'scripted', type: 'openai', baseUrl: `${model.url}/v1` }], models: [{ id: 'scripted', provider: 'scripted' }] }));
     },
-    run: (root) => hostRun('copilot', ['-p', 'go', '--model', 'scripted/scripted', '--allow-all-tools', '--no-ask-user', '--output-format=json'], { cwd: root, env: { COPILOT_OFFLINE: 'true' } }),
+    run: (root, extra = ['--trust-folder']) => hostRun('copilot', ['-p', 'go', '--model', 'scripted/scripted', '--allow-all-tools', '--no-ask-user', '--output-format=json', ...extra], { cwd: root, env: { COPILOT_OFFLINE: 'true' } }),
   },
   gemini: {
     bin: 'gemini', version: ['--version'],
-    setup() {},
+    setup() {
+      mkdirSync(join(homedir(), '.gemini'), { recursive: true });
+      writeFileSync(join(homedir(), '.gemini', 'settings.json'), JSON.stringify({ security: { auth: { selectedType: 'gemini-api-key' } } }));
+    },
     run: (root) => hostRun('gemini', ['-p', 'go', '-m', 'scripted', '--yolo', '--output-format', 'json'], { cwd: root, env: { GEMINI_API_KEY: 'scripted', GOOGLE_GEMINI_BASE_URL: model.url, GEMINI_CLI_TRUST_WORKSPACE: 'true', GEMINI_SANDBOX: 'false' } }),
   },
   opencode: {
@@ -77,7 +80,7 @@ const HOSTS = {
   cline: {
     bin: 'cline', version: ['--version'],
     setup: async () => { const r = await hostRun('cline', ['auth', '--provider', 'openai-native', '--apikey', 'scripted', '--modelid', 'scripted', '--baseurl', `${model.url}/v1`]); writeFileSync(join(OUT, 'cline-auth.log'), `${r.stdout}\n---\n${r.stderr}`); },
-    run: (root) => hostRun('cline', ['--yolo', '--json', 'go'], { cwd: root }),
+    run: (root) => hostRun('cline', ['--yolo', '--json', 'please do the work'], { cwd: root }),
   },
 };
 
@@ -128,7 +131,9 @@ if (HOSTS[which]) {
     model.setPlan([sh(PUSH)]);
     const r = await h.run(f.root);
     log(`fail-${kind}`, r);
-    record(`Gate ${kind}`, f.pushed() ? 'FAIL-OPEN' : model.seen.toolResults.length ? 'FAIL-CLOSED' : 'NOT OBSERVED', `exit ${r.status}; ${model.seen.toolResults.join(' | ').slice(0, 300)}`);
+    // A refusal must be visible. A git error, or no tool result at all, shows nothing about the gate.
+    const seenText = model.seen.toolResults.join(' | ');
+    record(`Gate ${kind}`, f.pushed() ? 'FAIL-OPEN' : seenText && !/refspec|fatal:|failed to push/.test(seenText) ? 'FAIL-CLOSED' : 'NOT OBSERVED', `exit ${r.status}; ${seenText.slice(0, 300)}`);
   }
 
   // Uninstall leaves nothing gating, so the next push goes through: a control showing the failure tests can see a push.
@@ -153,11 +158,18 @@ if (HOSTS[which]) {
     record('MCP tool answered through the real host', answered ? 'PASS' : 'NOT OBSERVED', [...model.seen.toolNames].filter((x) => /agentontrack/i.test(x)).join(','));
     record('An MCP call reached the pre-action hook', acts(m.root).some((x) => /agentontrack|status/i.test(x.tool)) ? 'PASS' : 'NOT OBSERVED', JSON.stringify(acts(m.root)));
 
+    // Repo hooks without folder trust, which is what a plain copilot -p does.
+    const u = fresh();
+    a.install(u.root, SELF(u.root));
+    model.setPlan([sh(PUSH)]);
+    log('untrusted', await h.run(u.root, []));
+    record('Plain copilot -p, folder not trusted: push', u.pushed() ? 'FAIL-OPEN' : 'PREVENTED', 'Repo hooks load only in a trusted folder');
+
     // The safety question from the audit: Copilot reads .claude hook files. Is a Claude-format deny honoured here?
     const x = fresh();
     installHooks('claude-code', x.root, `"${NODE}" "${CLI}"`);
     model.setPlan([sh(PUSH)]);
-    log('claude-file', await hostRun('copilot', ['-p', 'go', '--model', 'scripted/scripted', '--allow-all-tools', '--no-ask-user', '--output-format=json'], { cwd: x.root, env: { COPILOT_OFFLINE: 'true', AGENTONTRACK_ROOT: x.root } }));
+    log('claude-file', await hostRun('copilot', ['-p', 'go', '--trust-folder', '--model', 'scripted/scripted', '--allow-all-tools', '--no-ask-user', '--output-format=json'], { cwd: x.root, env: { COPILOT_OFFLINE: 'true', AGENTONTRACK_ROOT: x.root } }));
     record('Claude Code hook file, read by Copilot: push', x.pushed() ? 'FAIL-OPEN' : reached(x.root) ? 'PREVENTED' : 'NOT FIRED', `${JSON.stringify(acts(x.root))} pushed ${x.pushed()}`);
   }
   if (which === 'gemini') {
@@ -183,6 +195,16 @@ if (which === 'continue') {
   const r = await hostRun('cn', ['-p', '--config', cfg, '--auto', 'go'], { cwd: m.root, env: { CONTINUE_USE_BEDROCK: '0' } });
   log('mcp', r);
   record('MCP tool answered through the real host', model.seen.toolResults.some((x) => !x.startsWith('PLANNED') && /goal/i.test(x)) ? 'PASS' : 'NOT OBSERVED', `exit ${r.status}; requests ${model.seen.requests}; tools ${[...model.seen.toolNames].slice(0, 12).join(',')}; ${`${r.stdout}${r.stderr}`.slice(-400)}`);
+
+  // Its hook system is barely documented, and reported not to fire. Only a real run says.
+  const k = fresh();
+  mkdirSync(join(k.root, '.continue'));
+  writeFileSync(join(k.root, '.continue/settings.json'), JSON.stringify({ hooks: { PreToolUse: [{ matcher: '.*', hooks: [{ type: 'command', command: `"${join(k.dir, 'deny.sh')}"` }] }] } }));
+  writeFileSync(join(k.dir, 'deny.sh'), `#!/bin/sh\ntouch "${join(k.dir, 'fired')}"\ncat >/dev/null\nexit 2\n`);
+  chmodSync(join(k.dir, 'deny.sh'), 0o755);
+  model.setPlan([{ tool: /^Bash$/, args: () => ({ command: PUSH }) }]);
+  log('hooks', await hostRun('cn', ['-p', '--config', cfg, '--auto', 'go'], { cwd: k.root }));
+  record('Continue hook fired', existsSync(join(k.dir, 'fired')) ? 'PASS' : 'NOT OBSERVED', `pushed ${k.pushed()}`);
 }
 
 if (which === 'perplexity') {

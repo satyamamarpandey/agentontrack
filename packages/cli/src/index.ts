@@ -6,15 +6,15 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { approvalView, checkAnchor, isPendingLive, Project, pushAnchor, registerProject, routeIntent, type ProjectState } from '@agentontrack/core';
-import { coverageFor, handleHookSafely, hermesHookConfig, hookSelfTest, hooksInstalled, installHooks, probeLocalModel, uninstallHooks, type RuntimeId } from '@agentontrack/adapters';
+import { coverageFor, handleHookSafely, handleProviderHookSafely, installMcpClient, isProvider, MCP_CLIENTS, perplexityMcpConfig, PROVIDERS, providerInstalled, hermesHookConfig, hookSelfTest, hooksInstalled, installHooks, probeLocalModel, uninstallHooks, type RuntimeId } from '@agentontrack/adapters';
 import { runSelf, stableCommand, VERSION } from './self.js';
 import { planProjectFiles, applyProjectFiles } from './init.js';
 
 // github.io redirects to the account's custom domain, so that domain is the only origin a browser reports.
 const PUBLIC_SITE_ORIGINS = ['https://pandeysatyam.com'];
-const root = process.env.AGENTONTRACK_ROOT ?? process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
 const argv = process.argv.slice(2);
 const opt = (name: string) => { const i = argv.indexOf(`--${name}`); return i >= 0 ? argv[i + 1] : undefined; };
+const root = opt('root') ?? process.env.AGENTONTRACK_ROOT ?? process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
 const has = (name: string) => argv.includes(`--${name}`);
 const print = (v: unknown) => console.log(typeof v === 'string' ? v : JSON.stringify(v, null, 2));
 
@@ -78,7 +78,7 @@ function selfCommand(): string {
 }
 
 const toolVersion = (cmd: string) => {
-  const v = spawnSync(cmd, ['--version'], { encoding: 'utf8', shell: true, timeout: 15_000 });
+  const v = spawnSync(cmd.includes(' ') ? cmd : `${cmd} --version`, { encoding: 'utf8', shell: true, timeout: 15_000 });
   return v.status === 0 ? v.stdout.trim().split('\n')[0]! : null;
 };
 
@@ -118,6 +118,13 @@ async function main(): Promise<void> {
   const [cmd, sub, arg] = argv;
   switch (cmd) {
     case 'hook': {
+      if (isProvider(sub)) {
+        const out = handleProviderHookSafely(() => new Project(root), PROVIDERS[sub!]!, await readStdin());
+        if (out.stdout) process.stdout.write(out.stdout);
+        if (out.stderr) process.stderr.write(out.stderr);
+        process.exitCode = out.exitCode;
+        return;
+      }
       const out = handleHookSafely(() => new Project(root), sub as RuntimeId, await readStdin());
       if (out.stdout) process.stdout.write(out.stdout);
       if (out.stderr) process.stderr.write(out.stderr);
@@ -157,6 +164,15 @@ async function main(): Promise<void> {
       });
       return;
     case 'install': {
+      if (isProvider(sub)) {
+        const a = PROVIDERS[sub!]!;
+        const stable = `${selfCommand()} --root "${root.replace(/\\/g, '/')}"`;
+        const files = a.install(root, stable, { v2: has('v2') });
+        registerProject(root);
+        print(`Wrote ${files.join(', ')}`);
+        print({ provider: a.id, kind: a.kind, surfaces: a.surfaces, ifTheHookFails: a.failure, limitations: a.limitations });
+        return;
+      }
       if (sub === 'hermes') {
         print(`Add this to your Hermes config.yaml. AgentOnTrack does not edit global Hermes config.\n\n${hermesHookConfig(selfCommand())}`);
         print(coverageFor('hermes'));
@@ -171,6 +187,7 @@ async function main(): Promise<void> {
       return;
     }
     case 'uninstall':
+      if (isProvider(sub)) { print(PROVIDERS[sub!]!.uninstall(root) ? 'Hooks removed.' : 'No hook file found.'); return; }
       print(uninstallHooks(nativeRuntime(sub), root) ? 'Hooks removed.' : 'No hook file found.');
       return;
     case 'doctor': {
@@ -222,6 +239,21 @@ async function main(): Promise<void> {
     case 'version': case '--version': case '-v':
       print(VERSION);
       return;
+    case 'providers': {
+      print(Object.values(PROVIDERS).map((a) => { const v = toolVersion(`${a.bin} ${a.versionArgs.join(' ')}`); return { id: a.id, name: a.name, kind: a.kind, version: v ?? 'NOT FOUND', hooksInstalled: providerInstalled(a, root), surfaces: a.surfaces, ifTheHookFails: a.failure, limitations: a.limitations }; }));
+      return;
+    }
+    case 'mcp-config': {
+      if (!sub || !MCP_CLIENTS[sub]) throw new Error(`Usage: agentontrack mcp-config ${Object.keys(MCP_CLIENTS).join('|')}. This gives goals, evidence and state. It does not enforce anything.`);
+      const script = realpathSync.native(fileURLToPath(import.meta.url));
+      print(`Wrote ${installMcpClient(sub, [process.execPath, script], root)}\nThis gives ${MCP_CLIENTS[sub]!.name} goals, evidence and project state. It does not stop any action.`);
+      return;
+    }
+    case 'research': {
+      print('Optional research through Perplexity, on your own key, billed by Perplexity. It enforces nothing, and an answer is never evidence that work is done. Add this to your agent\'s MCP config:\n');
+      print(perplexityMcpConfig());
+      return;
+    }
     case 'probe': {
       if (!sub) throw new Error('Usage: agentontrack probe <baseUrl> [--model name]');
       print(await probeLocalModel(sub, opt('model')));
@@ -412,7 +444,7 @@ async function main(): Promise<void> {
       });
       return;
     default:
-      print(`AgentOnTrack ${VERSION}\nStart with: agentontrack setup\nCommands: setup|doctor|run|init|sync-docs|install|uninstall|status|dashboard|approver|goal|decision|policy|task|approvals|approve|deny|revoke|ack|verify|audit|anchor|probe|suggest|mcp|hook|self|version`);
+      print(`AgentOnTrack ${VERSION}\nStart with: agentontrack setup\nCommands: setup|doctor|providers|mcp-config|research|run|init|sync-docs|install|uninstall|status|dashboard|approver|goal|decision|policy|task|approvals|approve|deny|revoke|ack|verify|audit|anchor|probe|suggest|mcp|hook|self|version`);
       process.exitCode = cmd ? 1 : 0;
   }
 }

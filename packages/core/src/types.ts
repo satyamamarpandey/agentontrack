@@ -43,7 +43,7 @@ export const PolicySchema = z.object({
   ]),
   denied: z.array(z.enum(EFFECT_KINDS)).default(['self.tamper']),
   protectedPaths: z.array(z.string()).default([
-    '.env', '.env.*', '**/.env', '**/.env.*', '**/*.pem', '**/id_rsa', '.claude/**', '.codex/**', '.hermes/**', 'SAFETY.md', 'GOAL.md',
+    '.env', '.env.*', '**/.env', '**/.env.*', '**/*.pem', '**/id_rsa', '.claude/**', '.codex/**', '.hermes/**', '.cursor/**', '.github/hooks/**', '.github/copilot/**', '.gemini/**', '.devin/**', '.opencode/**', '.kiro/**', '.cline/**', '.clinerules/**', '.continue/**', '.roo/**', 'SAFETY.md', 'GOAL.md',
   ]),
   /** approval is the only preventive control for opaque code where no OS sandbox exists. */
   opaqueExec: z.enum(['allow', 'approval']).default('allow'),

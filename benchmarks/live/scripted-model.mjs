@@ -77,6 +77,17 @@ export async function startScriptedModel() {
     ]);
   };
 
+  const gemini = (b, url, res) => {
+    for (const c of b.contents ?? []) for (const part of c.parts ?? []) if (part.functionResponse) seen.toolResults.push(JSON.stringify(part.functionResponse.response ?? ''));
+    const names = (b.tools ?? []).flatMap((t) => (t.functionDeclarations ?? []).map((f) => f.name)).filter(Boolean);
+    names.forEach((n) => seen.toolNames.add(n));
+    const call = names.length ? pick(names) : null;
+    const body = { candidates: [{ index: 0, finishReason: 'STOP', content: { role: 'model', parts: [call ? { functionCall: { name: call.name, args: call.args } } : { text: 'Finished.' }] } }], usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5, totalTokenCount: 15 } };
+    if (url.includes('streamGenerateContent')) { sse(res, [['', body]]); return; }
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(body));
+  };
+
   const server = createServer((req, res) => {
     let raw = '';
     req.on('data', (d) => { raw += d; });
@@ -86,6 +97,9 @@ export async function startScriptedModel() {
       let b = {};
       try { b = JSON.parse(raw || '{}'); } catch { /* not JSON */ }
       const ok = (o) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
+      if (url.includes(':countTokens')) return ok({ totalTokens: 10 });
+      if (url.includes(':embedContent') || url.includes(':batchEmbedContents')) return ok({ embeddings: [] });
+      if (url.includes(':generateContent') || url.includes(':streamGenerateContent')) return gemini(b, url, res);
       if (url.endsWith('/models')) return ok({ object: 'list', data: [{ id: 'scripted', object: 'model', context_length: 200000 }] });
       if (url.endsWith('/count_tokens')) return ok({ input_tokens: 10 });
       if (url.endsWith('/messages')) return anthropic(b, res);

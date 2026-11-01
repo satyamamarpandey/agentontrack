@@ -1,0 +1,47 @@
+name: provider-checks
+# Real agent programs with a scripted model, in disposable runners, with no credentials of any kind.
+on:
+  push:
+    branches: [integrations]
+  workflow_dispatch:
+    inputs:
+      hosts:
+        description: JSON list, so a repair reruns only what it affects
+        default: '["copilot","gemini","opencode","cline","continue","perplexity"]'
+permissions:
+  contents: read
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        which: ${{ fromJSON(inputs.hosts || '["copilot","gemini","opencode","cline","continue","perplexity"]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsc -b packages/cli
+      - name: Install the real host
+        env:
+          WHICH: ${{ matrix.which }}
+        run: |
+          case "$WHICH" in
+            copilot) npm install -g @github/copilot ;;
+            gemini) npm install -g @google/gemini-cli ;;
+            opencode) npm install -g opencode-ai ;;
+            cline) npm install -g cline ;;
+            continue) npm install -g @continuedev/cli ;;
+          esac
+      - run: node benchmarks/live/provider-checks.mjs ${{ matrix.which }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: provider-${{ matrix.which }}
+          path: runtime-results/
+          retention-days: 30

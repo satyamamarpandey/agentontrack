@@ -5,7 +5,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from 'node:net';
 import { dirname, extname, relative, isAbsolute, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { coverageFor, hooksInstalled, installHooks, probeLocalModel, uninstallHooks } from '@agentontrack/adapters';
+import { coverageFor, PROVIDERS, providerInstalled, hooksInstalled, installHooks, probeLocalModel, uninstallHooks } from '@agentontrack/adapters';
 import { approvalView, agentontrackHome, computeAnalytics, isPendingLive, loadRegistry, Project, registerProject, saveRegistry, stateDirFor, type Registered } from '@agentontrack/core';
 import * as z from 'zod/v4';
 
@@ -63,6 +63,11 @@ const saveSettings = (s: Settings) => { mkdirSync(dirname(settingsPath()), { rec
 const TaskInput = z.object({ title: z.string().min(1).max(300), criteria: z.array(z.unknown()).max(50).default([]), limits: z.unknown().optional() });
 const RunInput = z.object({ runtime: z.enum(['claude-code', 'codex', 'hermes']), prompt: z.string().min(1).max(20_000).regex(/^[^-]/, 'A prompt cannot start with a hyphen'), model: z.string().regex(/^\w[\w.:-]{0,79}$/).default('haiku'), maxBudgetUsd: z.number().positive().max(5).default(0.5) });
 const HumanFields = { confirm: z.string(), passphrase: z.string().optional() };
+
+function detectVersionArgs(cmd: string, args: string[]): string | null {
+  const r = spawnSync(cmd, args, { encoding: 'utf8', timeout: 8000, shell: process.platform === 'win32' });
+  return r.status === 0 ? r.stdout.trim().split('\n')[0]!.slice(0, 80) : null;
+}
 
 function detectVersion(cmd: string): string | null {
   const r = spawnSync(cmd, ['--version'], { encoding: 'utf8', timeout: 8000, shell: process.platform === 'win32' });
@@ -346,6 +351,10 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
         { id: 'codex', name: 'Codex', version: codexV, installed: !!codexV, authenticated: null, hooksInstalled: hooksInstalled('codex', entry.root), coverage: coverageFor('codex'), liveStatus: codexV ? 'Installed here. Connect to use it' : 'Not installed on this machine' },
         { id: 'hermes', name: 'Hermes', version: hermesV, installed: !!hermesV, authenticated: null, hooksInstalled: false, coverage: coverageFor('hermes'), liveStatus: hermesV ? 'Installed here. Add its hook config to use it' : 'Not installed on this machine' },
       ]);
+    }
+    if (path === '/api/providers' && method === 'GET') {
+      const { entry } = projectFor(projectId);
+      return json(res, 200, Object.values(PROVIDERS).map((a) => { const version = detectVersionArgs(a.bin, a.versionArgs); return { id: a.id, name: a.name, kind: a.kind, surfaces: a.surfaces, version, installed: !!version, hooksInstalled: providerInstalled(a, entry.root), failure: a.failure, limitations: a.limitations, connect: `agentontrack install ${a.id}` }; }));
     }
     const agentAction = /^\/api\/agents\/(claude-code|codex)\/(connect|disconnect)$/.exec(path);
     if (agentAction && method === 'POST') {

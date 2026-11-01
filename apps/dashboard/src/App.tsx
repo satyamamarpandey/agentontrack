@@ -323,6 +323,22 @@ const CONTAINMENT: Record<string, string> = {
   'codex-sandbox': 'Codex\'s own sandbox, when started with agentontrack run codex. Network stays off unless you allow it.',
 };
 
+/** Other platforms, from the same adapter list as the command line. Connecting one is a terminal step, so its files can be reviewed. */
+function OtherPlatforms() {
+  const { data, error } = useLoad(() => get<any[]>('/api/providers'), []);
+  if (!data) return error ? <p className="muted small">Other platforms: Unavailable</p> : null;
+  return (
+    <section className="card stack" data-testid="other-platforms">
+      <h2>Other platforms</h2>
+      <div className="table-wrap" tabIndex={0}><table>
+        <thead><tr><th scope="col">Platform</th><th scope="col">On this machine</th><th scope="col">Hooks in this project</th><th scope="col">If its hook crashes</th><th scope="col">To connect</th></tr></thead>
+        <tbody>{data.map((p) => <tr key={p.id} data-testid={`platform-${p.id}`}><th scope="row">{p.name}</th><td>{p.version ?? 'Not found'}</td><td>{p.hooksInstalled ? 'Yes' : 'No'}</td><td>{p.failure.crash}</td><td><code>{p.connect}</code></td></tr>)}</tbody>
+      </table></div>
+      <p className="muted small">See the integrations page for what has really been tested on each.</p>
+    </section>
+  );
+}
+
 function Agents({ tick }: { tick: number }) {
   const { data, error, reload } = useLoad(() => get('/api/agents'), []);
   const runs = useLoad(() => get('/api/runs'), [tick]);
@@ -388,6 +404,7 @@ function Agents({ tick }: { tick: number }) {
         <div className="row wrap"><label className="grow">Base URL<input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} name="baseUrl" /></label><button className="btn end-self" type="submit">Probe</button></div>
         {probe ? <pre tabIndex={0} className="code small" data-testid="probe">{JSON.stringify(probe, null, 2)}</pre> : null}
       </form>
+      <OtherPlatforms />
     </Page>
   );
 }

@@ -65,3 +65,5 @@ input:not([type='checkbox']), textarea { background: var(--bg); color: var(--tex
 .plain li { padding: 8px 0; border-bottom: 1px solid var(--border); align-items: center; }
 .alert { background: var(--warn-bg); color: var(--warn); padding: 10px 12px; border-radius: 8px; overflow-wrap: anywhere; }
 .alert a, .alert code { color: inherit; background: none; }
+
+.monogram { display: inline-block; min-width: 1.8em; text-align: center; border: 1px solid var(--border, currentColor); border-radius: 6px; font-size: .8em; padding: 0 .2em; }

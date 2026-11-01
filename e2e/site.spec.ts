@@ -112,15 +112,20 @@ test('security states each runtime\'s failure mode and the limits', async ({ pag
   for (const text of ['External anchor', 'withhold VERIFIED', 'shows a code in your terminal']) await expect(main).toContainText(text);
 });
 
-test('integrations keep the runtime separate from the model, and say what was run', async ({ page }) => {
+test('integrations are searchable, and never call a blocked or MCP-only platform enforced', async ({ page }) => {
   await page.goto(`${SITE}/integrations/`);
   const rt = page.getByTestId('runtime-table');
-  await expect(rt.getByRole('row', { name: /Codex/ })).toContainText('scripted model');
-  await expect(rt.getByRole('row', { name: /Codex/ })).toContainText('Fails open');
-  await expect(rt.getByRole('row', { name: /Hermes/ })).toContainText('scripted model only');
+  await expect(page.getByTestId('integration-cursor')).toHaveAttribute('data-status', 'BLOCKED');
+  await expect(page.getByTestId('integration-kiro')).toHaveAttribute('data-status', 'BLOCKED');
+  await expect(page.getByTestId('integration-continue')).toHaveAttribute('data-status', 'MCP_VERIFIED');
+  await expect(page.getByTestId('integration-codex')).toContainText('RUNS THE ACTION');
+  await expect(rt).not.toContainText('Fully Supported');
+  await page.getByTestId('integration-search').fill('gemini');
+  await expect(page.getByTestId('integration-gemini')).toBeVisible();
+  await expect(page.getByTestId('integration-cursor')).toHaveCount(0);
   const models = page.getByTestId('model-table');
   await expect(models.getByRole('row', { name: /OpenAI/ })).toContainText('Not tested');
-  await expect(models.getByRole('row', { name: /LM Studio/ })).toContainText('Not tested');
+  await expect(models.getByRole('row', { name: /vLLM/ })).toContainText('Not tested');
 });
 
 test('benchmarks keep the negative results as recorded, claim no savings, and mark v4', async ({ page }) => {

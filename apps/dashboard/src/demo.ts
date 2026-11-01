@@ -34,6 +34,7 @@ export function demoGet(path: string): unknown {
       safety: { actions: 43, allow: 37, deny: 1, requestApproval: 5, unsupported: 0, byAssurance: { enforced: 31, partial: 12 }, detectedAfter: 1, reverted: 0, unresolved: 1, blocksHumanApproved: 0, blocksHumanApprovedAndUsed: 1, loopDenied: 0, repeatWarned: 1, goalDrift: { outOfScope: 2, of: 43 } },
       approvals: { views: { pending: 1, consumed: 1, denied: 1 }, medianWaitMs: 42_000 }, time: { runWallClockMs: 240_000, runApiMs: 160_000, approvalWaitMs: 84_000, verificationMs: 9000, runs: 3 }, tasks: [{ id: task.id, title: task.title, status: evaluation.status }], taskTotals: { NEEDS_HUMAN_APPROVAL: 1 }, runs: [], goals: { current: goal, versions: 2, status: 'active' },
     };
+    case '/api/providers': return [];
     case '/api/agents': return [
       { id: 'claude-code', name: 'Claude Code', version: 'demo', installed: true, authenticated: true, method: 'demo', hooksInstalled: true, coverage: coverage('live-tested', 'closed', 'claude-sandbox-available'), liveStatus: 'demo' },
       { id: 'codex', name: 'Codex', version: null, installed: false, authenticated: null, hooksInstalled: false, coverage: coverage('live-local-model', 'open', 'codex-sandbox'), liveStatus: 'Demo: not connected' },

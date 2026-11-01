@@ -69,8 +69,8 @@ jobs:
           curl -fsSL https://ollama.com/install.sh | sh
           sudo systemctl set-property ollama MemoryMax=6G || true
           sleep 3
-          ollama pull qwen2.5:1.5b
-          printf 'FROM qwen2.5:1.5b\nPARAMETER num_ctx 16384\n' > /tmp/Modelfile
+          ollama pull qwen2.5:3b
+          printf 'FROM qwen2.5:3b\nPARAMETER num_ctx 16384\n' > /tmp/Modelfile
           ollama create aot:latest -f /tmp/Modelfile
           node benchmarks/live/local-model-checks.mjs ollama http://127.0.0.1:11434/v1 aot:latest
           sudo systemctl stop ollama
@@ -80,9 +80,10 @@ jobs:
         run: |
           mkdir -p /tmp/llama && cd /tmp/llama
           curl -fsSL -o m.gguf "$GGUF"
-          URL=$(gh api repos/ggml-org/llama.cpp/releases/latest --jq '.assets[]|select(.name|test("ubuntu-x64.*\\.(zip|tar.gz)$"))|select(.name|test("vulkan|cuda|sycl")|not)|.browser_download_url' | head -1)
+          URL=$(gh api repos/ggml-org/llama.cpp/releases/latest --jq '.assets[].browser_download_url' | grep -E 'bin-ubuntu-x64' | grep -vE 'vulkan|cuda|sycl' | head -1)
+          echo "asset: $URL"
           curl -fsSL -o l.bin "$URL"
-          (unzip -qo l.bin || tar -xzf l.bin)
+          case "$URL" in *.zip) unzip -qo l.bin ;; *) tar -xzf l.bin ;; esac
           S=$(find . -name llama-server -type f | head -1); chmod +x "$S"
           (LD_LIBRARY_PATH=$(dirname "$S") nohup "$S" -m m.gguf --port 8181 --jinja -c 16384 > /tmp/llama.log 2>&1 &)
           sleep 15

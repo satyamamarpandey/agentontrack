@@ -18,7 +18,7 @@ const results = [];
 const record = (name, outcome, detail = '') => { results.push({ name, outcome, label: 'real host, scripted model', detail: String(detail).slice(0, 900) }); console.log(`${outcome}\t${name}\t${String(detail).slice(0, 300)}`); };
 const model = await startScriptedModel();
 // Cline ends a task only through its own tool, so a scripted run must call it, or Cline keeps asking.
-if (which === 'cline') { const set = model.setPlan; model.setPlan = (p) => set([...p, { tool: /^submit_and_exit$/, args: () => ({ summary: 'done' }) }]); }
+if (which === 'cline') { const set = model.setPlan; model.setPlan = (p) => set([...p, { tool: /^submit_and_exit$/, args: () => ({ summary: 'The work is finished.', verified: true }) }]); }
 const SHELL = /^(bash|Bash|terminal|shell|run_shell_command|execute_command|run_commands|exec)$/;
 const sh = (c) => ({ tool: SHELL, args: (name) => (name === 'run_commands' ? { commands: [c] } : name === 'execute_command' ? { command: c, requires_approval: false } : shellArgs(c)(name)) });
 const PUSH = 'git push origin main';
@@ -83,7 +83,7 @@ const HOSTS = {
   cline: {
     bin: 'cline', version: ['--version'],
     setup: async () => { const r = await hostRun('cline', ['auth', '--provider', 'openai', '--apikey', 'scripted', '--modelid', 'scripted', '--baseurl', `${model.url}/v1`]); writeFileSync(join(OUT, 'cline-auth.log'), `${r.stdout}\n---\n${r.stderr}`); },
-    run: (root) => hostRun('cline', ['--yolo', '--json', 'please do the work'], { cwd: root, timeout: 60_000 }),
+    run: (root) => hostRun('cline', ['--yolo', '--json', '--hooks-dir', join(root, '.cline/hooks'), 'please do the work'], { cwd: root, timeout: 60_000 }),
   },
 };
 

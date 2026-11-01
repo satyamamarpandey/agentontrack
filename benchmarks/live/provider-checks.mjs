@@ -17,6 +17,8 @@ mkdirSync(OUT, { recursive: true });
 const results = [];
 const record = (name, outcome, detail = '') => { results.push({ name, outcome, label: 'real host, scripted model', detail: String(detail).slice(0, 900) }); console.log(`${outcome}\t${name}\t${String(detail).slice(0, 300)}`); };
 const model = await startScriptedModel();
+// Cline ends a task only through its own tool, so a scripted run must call it, or Cline keeps asking.
+if (which === 'cline') { const set = model.setPlan; model.setPlan = (p) => set([...p, { tool: /^submit_and_exit$/, args: () => ({ summary: 'done' }) }]); }
 const SHELL = /^(bash|Bash|terminal|shell|run_shell_command|execute_command|run_commands|exec)$/;
 const sh = (c) => ({ tool: SHELL, args: (name) => (name === 'run_commands' ? { commands: [c] } : name === 'execute_command' ? { command: c, requires_approval: false } : shellArgs(c)(name)) });
 const PUSH = 'git push origin main';
@@ -80,12 +82,13 @@ const HOSTS = {
   cline: {
     bin: 'cline', version: ['--version'],
     setup: async () => { const r = await hostRun('cline', ['auth', '--provider', 'openai', '--apikey', 'scripted', '--modelid', 'scripted', '--baseurl', `${model.url}/v1`]); writeFileSync(join(OUT, 'cline-auth.log'), `${r.stdout}\n---\n${r.stderr}`); },
-    run: (root) => hostRun('cline', ['--yolo', '--json', 'please do the work'], { cwd: root }),
+    run: (root) => hostRun('cline', ['--yolo', '--json', 'please do the work'], { cwd: root, timeout: 60_000 }),
   },
 };
 
 const log = (name, r) => writeFileSync(join(OUT, `${which}-${name}.log`), `exit ${r.status}\n${r.stdout}\n---\n${r.stderr}\nTOOLS ${[...model.seen.toolNames].join(',')}\nRESULTS ${model.seen.toolResults.join('|')}\nREQUESTS ${model.seen.requests}`);
-const SELF = (root) => `"${NODE}" "${CLI}" --root "${root}"`;
+// Some hosts strip the environment from hooks, so the test's state folder is named in the command. A normal install uses the default.
+const SELF = (root) => `AGENTONTRACK_HOME="${process.env.AGENTONTRACK_HOME}" "${NODE}" "${CLI}" --root "${root}"`;
 const version = (h) => spawnSync(h.bin, h.version, { encoding: 'utf8' }).stdout?.trim().split('\n')[0] ?? null;
 
 if (HOSTS[which]) {
@@ -113,7 +116,7 @@ if (HOSTS[which]) {
     model.setPlan([sh(PUSH)]);
     log('approved', await h.run(s.root));
     record('Allowed once after approval', s.pushed() ? 'PASS' : 'NOT OBSERVED');
-    model.setPlan([{ tool: /^(write_file|write|create|write_to_file)$/, args: () => ({ file_path: join(s.root, 'outside.txt'), filePath: join(s.root, 'outside.txt'), path: join(s.root, 'outside.txt'), content: 'x', file_text: 'x' }) }]);
+    model.setPlan([{ tool: /^(write_file|write|create|write_to_file|editor)$/, args: () => ({ command: 'create', file_path: join(s.root, 'outside.txt'), filePath: join(s.root, 'outside.txt'), path: join(s.root, 'outside.txt'), content: 'x', file_text: 'x' }) }]);
     log('write', await h.run(s.root));
     record('Out-of-scope file write held', existsSync(join(s.root, 'outside.txt')) ? 'MISSED' : acts(s.root).some((x) => x.kinds.includes('fs.write')) ? 'PREVENTED' : 'NOT OBSERVED', JSON.stringify(acts(s.root).at(-1)));
     record('Runtime recorded', acts(s.root).every((x) => x.runtime === which) ? 'PASS' : 'FAIL');
@@ -176,7 +179,7 @@ if (HOSTS[which]) {
     const m = fresh();
     a.install(m.root, SELF(m.root));
     const cfg = JSON.parse(readFileSync(join(m.root, '.gemini/settings.json'), 'utf8'));
-    cfg.mcpServers = { agentontrack: { command: NODE, args: [CLI, 'mcp', 'gemini'], env: { AGENTONTRACK_ROOT: m.root }, trust: true } };
+    cfg.mcpServers = { agentontrack: { command: NODE, args: [CLI, 'mcp', 'gemini'], env: { AGENTONTRACK_ROOT: m.root, AGENTONTRACK_HOME: process.env.AGENTONTRACK_HOME }, trust: true } };
     writeFileSync(join(m.root, '.gemini/settings.json'), JSON.stringify(cfg));
     model.setPlan([{ tool: /agentontrack.*project.?status|mcp_.*status/i, args: () => ({}) }]);
     log('mcp', await h.run(m.root));

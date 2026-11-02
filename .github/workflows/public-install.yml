@@ -1,0 +1,47 @@
+name: public-install
+# A stranger's first run: the published commands, on a clean runner, with no checkout and no token.
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+permissions: {}
+jobs:
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15-intel, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - name: Install from the public site, then use it
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          curl -fsSL https://pandeysatyam.com/agentontrack/install.sh | sh
+          export PATH="$HOME/.agentontrack/app/bin:$PATH"
+          agentontrack --version
+          mkdir p && cd p && git init -q
+          agentontrack setup --yes
+          agentontrack doctor --json > d.json
+          node -e "const d=require('./d.json');if(!d.integrity.ok)process.exit(1);console.log(d.version,d.node)" 2>/dev/null || grep -q '"ok": true' d.json
+          agentontrack install claude-code
+          echo '{"session_id":"s","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"agentontrack approve x"}}' | sh -c "$(grep -o '"command": "[^,]*hook claude-code' .claude/settings.local.json | head -1 | sed 's/"command": "//; s/\\"/"/g')" | grep -q '"permissionDecision":"deny"'
+          agentontrack self uninstall
+      - name: Install from the public site, then use it
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          irm https://pandeysatyam.com/agentontrack/install.ps1 | iex
+          $b = Join-Path $HOME '.agentontrack\app\bin\agentontrack.cmd'
+          & $b --version
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          New-Item -ItemType Directory p | Out-Null; Set-Location p; git init -q
+          & $b setup --yes
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          & $b doctor --json | Out-String | Select-String '"ok": true' | Out-Null
+          if (-not $?) { exit 1 }
+          & $b install claude-code
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          & $b self uninstall
+          exit 0

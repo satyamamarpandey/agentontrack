@@ -57,7 +57,18 @@ test('no page offers accounts, sign-in or sync', async ({ page }) => {
   }
 });
 
+test('a published release links to its real files', async ({ page }) => {
+  test.skip(process.env.NEXT_PUBLIC_RELEASE_PUBLISHED !== '1', 'This build has no published release.');
+  await page.goto(`${SITE}/install/`);
+  await expect(page.getByTestId('release-state')).toHaveAttribute('data-published', 'true');
+  await expect(page.getByTestId('download-unavailable')).toHaveCount(0);
+  const hrefs = await page.getByTestId('download').evaluateAll((els) => els.map((e) => e.getAttribute('href') ?? ''));
+  expect(hrefs.length).toBeGreaterThanOrEqual(5);
+  for (const h of hrefs) expect(h).toContain(`/releases/download/v${process.env.NEXT_PUBLIC_RELEASE_VERSION}/`);
+});
+
 test('an unpublished release is never presented as working', async ({ page }) => {
+  test.skip(process.env.NEXT_PUBLIC_RELEASE_PUBLISHED === '1', 'This build has a published release.');
   await page.goto(`${SITE}/install/`);
   const main = page.locator('main');
   await expect(page.getByTestId('release-state')).toHaveAttribute('data-published', 'false');

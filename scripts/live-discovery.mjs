@@ -1,0 +1,35 @@
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { installHooks } from '../packages/adapters/dist/index.js';
+import { Project } from '../packages/core/dist/index.js';
+import { startCompanion } from '../packages/companion/dist/index.js';
+
+const dir = mkdtempSync(join(tmpdir(), 'aot-live-'));
+process.env.AGENTONTRACK_HOME = join(dir, 'home');
+const root = join(dir, 'repo'); mkdirSync(root);
+writeFileSync(join(root, 'README.md'), '# t\n');
+const p = new Project(root); p.human.setGoal({ statement: 'Reply with OK', scope: { include: ['**'] } }); p.close();
+installHooks('claude-code', root, `"${process.execPath}" "${join(process.cwd(), 'packages/cli/dist/index.js')}"`);
+const c = await startCompanion({ root, uiDir: join(dir, 'ui') });
+const origin = c.url.slice(0, -1);
+const r = await fetch(`${origin}/api/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: c.newPairingCode() }) });
+const s = { cookie: r.headers.get('set-cookie').split(';')[0], csrf: (await r.json()).csrf };
+const api = (path, body) => fetch(`${origin}${path}`, { method: body === undefined ? 'GET' : 'POST', headers: { cookie: s.cookie, 'x-agentontrack-csrf': s.csrf, 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+const before = await (await api('/api/discovery')).json();
+console.log('BEFORE agents:', before.agents.filter((a) => ['claude-code', 'codex', 'hermes'].includes(a.id)).map((a) => `${a.id}:${a.status}:${a.authenticated}`).join(' '));
+console.log('BEFORE models:', before.models.map((m) => `${m.agent}/${m.id}/${m.source}`).join(', ') || 'none');
+const ch = await (await api('/api/challenge', {})).json();
+const run = await api('/api/runs', { runtime: 'claude-code', prompt: 'Reply with the single word OK and do nothing else.', model: 'haiku', maxBudgetUsd: 0.1, challengeId: ch.challengeId, confirm: ch.code });
+console.log('RUN start', run.status);
+for (let i = 0; i < 120; i++) { const rs = await (await api('/api/runs')).json(); if (rs.length && rs.every((x) => x.status !== 'running')) { console.log('RUN end', rs[0].status, JSON.stringify(rs[0].events.slice(-2))); break; } await new Promise((ok) => setTimeout(ok, 1000)); }
+const after = await (await api('/api/discovery')).json();
+const cc = after.agents.find((a) => a.id === 'claude-code');
+console.log('HAS goal/plan/loop/review:', ['goal','plan','loop','review','code-review'].map((n) => n + '=' + cc.commands.includes(n)).join(' '));
+console.log('AFTER commands source:', cc.commandsSource, 'count:', cc.commands.length, 'sample:', cc.commands.slice(0, 15).join(','));
+console.log('AFTER models:', after.models.map((m) => `${m.agent}/${m.id}/${m.source}/${m.entitlement}`).join(', '));
+const o = await (await api('/api/orchestrate', { text: 'review the change', agent: 'claude-code' })).json();
+console.log('ORCH review:', JSON.stringify({ recommended: o.recommended, native: o.native?.command ?? null }));
+const g = await api('/api/runs', { runtime: 'claude-code', prompt: '/definitely-not-a-command x', model: 'haiku', maxBudgetUsd: 0.1, ...(await (async () => { const c2 = await (await api('/api/challenge', {})).json(); return { challengeId: c2.challengeId, confirm: c2.code }; })()) });
+console.log('UNSUPPORTED slash ->', g.status, (await g.json()).error?.slice(0, 120));
+await c.close(); rmSync(dir, { recursive: true, force: true, maxRetries: 5 });

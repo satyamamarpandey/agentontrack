@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.0-rc.3
+
+- A redesigned dashboard and site: one set of design tokens, a command palette, grouped navigation, light and dark themes, and an accessible dialog that traps focus.
+- A **Workspace** screen: project files with a hash-checked editor that refuses to overwrite a changed file, Markdown preview, a prompt composer with live output (Claude Code), team roles, approvals, handoffs, isolated git worktrees with diffs and merge, verification and receipts. Resizable panels, saved layout, focused mobile views.
+- VS Code extension (`agentontrack-vscode.vsix`): a sidebar over the same companion. It confirms nothing by itself, and only reads in an untrusted workspace.
+- CLI commands for projects, agents, team, handoff and usage, with JSON output.
+- Team roles and workflows, including `spec-review` (draft, structure check, fresh-session reviewers, go or no-go, a person approves) and a deterministic spec structure check.
+- Handoff v2 with revalidation: approvals are never carried over, and a stale handoff needs a person's acknowledgement.
+- Not changed, and not claimed: AgentOnTrack still used more tokens and time than the agent alone in its own benchmarks. Only Claude Code starts from the product. Cursor, Antigravity, Devin and Kiro are not tested on the real programs.
+
 ## Unreleased
 
 - The dashboard opens on a grid of projects. A project page shows its overview, workflow timeline, usage, verification and environment, using only companion endpoints from 1.0.0-rc.2.

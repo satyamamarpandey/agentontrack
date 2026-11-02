@@ -264,7 +264,7 @@
   "scripts": {
     "build": "node build.mjs",
     "typecheck": "tsc -p . --noEmit",
-    "package": "node build.mjs && vsce package --no-dependencies --allow-missing-repository --out ../../dist-release/agentontrack-vscode.vsix"
+    "package": "node build.mjs && node -e \"require('fs').mkdirSync('../../dist-release',{recursive:true})\" && vsce package --no-dependencies --allow-missing-repository --out ../../dist-release/agentontrack-vscode.vsix"
   },
   "devDependencies": {
     "@types/vscode": "1.90.0",

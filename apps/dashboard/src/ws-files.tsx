@@ -55,7 +55,7 @@ function Markdown({ text }: { text: string }) {
     if (/^\s*[-*]\s+/.test(l)) { const items: string[] = []; while (i < lines.length && /^\s*[-*]\s+/.test(lines[i]!)) items.push(lines[i++]!.replace(/^\s*[-*]\s+/, '')); i--; out.push(<ul key={i}>{items.map((x, n) => <li key={n}>{x}</li>)}</ul>); continue; }
     if (l.trim()) out.push(<p key={i}>{l}</p>);
   }
-  return <div className="preview" data-testid="md-preview">{out}</div>;
+  return <div className="preview" tabIndex={0} role="region" aria-label="Preview" data-testid="md-preview">{out}</div>;
 }
 
 export function Editor({ buf, onChange, onSaved, onReload }: { buf: Buffer; onChange: (content: string) => void; onSaved: (hash: string, saved: string) => void; onReload: () => void }) {

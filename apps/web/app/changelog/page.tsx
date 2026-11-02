@@ -5,6 +5,14 @@ export const metadata = { title: 'Changelog' };
 export default function Changelog() {
   return (
     <Article title="Changelog" intro="Changes that matter to users.">
+      <h2>1.0.0-rc.3</h2>
+      <ul>
+        <li>A redesigned dashboard and site, with a command palette, light and dark themes, and dialogs that trap focus</li>
+        <li>A Workspace screen: files with a hash-checked editor, a prompt composer with live output for Claude Code, team roles, approvals, handoffs, isolated git worktrees with diffs, and verification receipts</li>
+        <li>A VS Code extension, in the release as <code>agentontrack-vscode.vsix</code>. It confirms nothing by itself and only reads in an untrusted workspace</li>
+        <li>Team workflows including <code>spec-review</code>, and a handoff that never carries approvals over</li>
+        <li>Not changed: in its own benchmarks AgentOnTrack still used more tokens and time than the agent alone. Only Claude Code starts from the product. Cursor and Antigravity are not tested</li>
+      </ul>
       <h2>1.0.0-rc.2</h2>
       <ul>
         <li>Adapters over the same engine. Verified on the real programs with a scripted model: Copilot CLI, Gemini CLI, OpenCode and Cline CLI</li>

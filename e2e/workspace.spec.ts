@@ -203,6 +203,8 @@ for (const theme of ['dark', 'light']) {
     test.skip(test.info().project.name !== 'chromium', 'Axe runs once, in Chromium.');
     env.hook('git push origin main');
     env.project((p) => p.human.activateTask('t1'));
+    // A short window, so the panes overflow and scroll, as they do on other machines' fonts and screens.
+    await page.setViewportSize({ width: 1180, height: 560 });
     await env.pair(page);
     await page.evaluate((t) => localStorage.setItem('bl-theme', t), theme);
     await page.reload();

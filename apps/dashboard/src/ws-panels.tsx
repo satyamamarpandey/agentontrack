@@ -237,7 +237,7 @@ function Activity({ tick, open }: { tick: number; open: (seq: number) => void })
   const ac = useLoad<any[]>(() => get('/api/actions'), [tick]);
   const rows = (ac.data ?? []).filter((e) => e.type === 'action.requested').slice(0, 40);
   if (!rows.length) return <Empty>No agent action has been recorded yet.</Empty>;
-  return <div className="table-wrap"><table>
+  return <div className="table-wrap" tabIndex={0}><table>
     <thead><tr><th scope="col">When</th><th scope="col">Agent</th><th scope="col">Tool</th><th scope="col">Decision</th><th scope="col">Detail</th><th scope="col"><span className="sr-only">Record</span></th></tr></thead>
     <tbody>{rows.map((e) => <tr key={e.seq} data-testid="ws-action"><td>{ago(e.ts)}</td><td>{e.actor?.runtime ?? e.payload.runtime ?? ''}</td><td>{e.payload.tool}</td><td><Badge value={e.payload.decision} /></td><td className="small clip">{e.payload.reasons?.[0] ?? e.payload.effects?.map((x: any) => x.kind).join(', ')}</td><td><button className="link small" onClick={() => open(e.seq)}>source</button></td></tr>)}</tbody>
   </table></div>;
@@ -303,7 +303,7 @@ function Verification({ state, reload }: { state: any; reload: () => void }) {
         {t.evaluation.reasons.filter((r: string) => !r.startsWith('Criterion')).map((r: string) => <p className="muted small" key={r}>{r}</p>)}
       </div> : <Empty>No active task. Create one in the Tasks list.</Empty>}
       <h3 style={{ marginTop: 10 }}>Latest receipts</h3>
-      {state.receipts.length ? <div className="table-wrap"><table><thead><tr><th scope="col">When</th><th scope="col">Criterion</th><th scope="col">Result</th><th scope="col">Observed</th></tr></thead>
+      {state.receipts.length ? <div className="table-wrap" tabIndex={0}><table><thead><tr><th scope="col">When</th><th scope="col">Criterion</th><th scope="col">Result</th><th scope="col">Observed</th></tr></thead>
         <tbody>{[...state.receipts].reverse().slice(0, 8).map((r: any) => <tr key={r.seq}><td>{ago(r.ts)}</td><td>{r.criterionId}</td><td><Badge value={r.passed ? 'pass' : 'fail'} /></td><td className="mono small clip">{r.observed}</td></tr>)}</tbody></table></div> : <Empty>No receipts yet.</Empty>}
     </>
   );

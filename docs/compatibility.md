@@ -44,6 +44,19 @@ Small local models often fail to make valid tool calls, in which case nothing re
 
 Clean install, upgrade, rollback and uninstall: Windows x64, Linux x64 and arm64, macOS x64 and arm64.  Alpine and other musl systems are not supported. Windows on Arm runs the x64 build, and is untested.
 
+## Editors
+
+| Editor | Status |
+|---|---|
+| VS Code | Extension client: PASS (unit). Real Claude Code run through the extension client: PASS (local). Real VS Code extension host, from source, from the installed VSIX, and in an untrusted workspace: see the CI record for the release. |
+| Cursor | NOT TESTED. It installs VS Code extensions, so the VSIX may work. No run on the real editor. |
+| Antigravity | NOT TESTED. Documented plugin interfaces were not exercised. |
+| JetBrains, Zed, others | Not supported. |
+
+## Agents started from the product
+
+Only **Claude Code** can be started from the web workspace or the VS Code sidebar. Codex, Hermes and the other platforms run in their own terminal, and their hooks report to the same record. Assigning a role to an agent in the Team panel records the plan. It does not start that agent.
+
 ## Browsers, for the public site
 
 Chromium, Edge, Firefox and WebKit pass pairing against a local copy of the site. The real https page has been run end to end with Chromium, the installed release and real Claude Code. Safari blocks requests from a public page to your machine, so use the local address the companion prints.

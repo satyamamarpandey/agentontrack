@@ -113,6 +113,12 @@ for (const s of ['install.sh', 'install.ps1']) {
   cpSync(join('scripts', 'release', s), join(OUT, s));
   sums.push(`${sha256(readFileSync(join(OUT, s)))}  ${s}`);
 }
+// The VS Code extension, built from the same tree, so its checksum is in the same list.
+const vsix = spawnSync('pnpm', ['--dir', 'packages/vscode', 'run', 'package'], { stdio: 'inherit', shell: process.platform === 'win32' });
+if (vsix.status !== 0) throw new Error('Could not build the VS Code extension');
+const vsixSrc = resolve('dist-release', 'agentontrack-vscode.vsix');
+if (vsixSrc !== join(OUT, 'agentontrack-vscode.vsix')) cpSync(vsixSrc, join(OUT, 'agentontrack-vscode.vsix'));
+sums.push(`${sha256(readFileSync(join(OUT, 'agentontrack-vscode.vsix')))}  agentontrack-vscode.vsix`);
 writeFileSync(join(OUT, 'SHA256SUMS'), `${sums.join('\n')}\n`);
 rmSync(work, { recursive: true, force: true });
 console.log(`Packaged ${VERSION} with Node ${NODE_VERSION} in ${OUT}`);

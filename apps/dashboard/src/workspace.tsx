@@ -147,7 +147,7 @@ export function Workspace({ tick, projectName, open, setCommands }: { tick: numb
     <div className={cls} style={style} data-view={view} data-testid="workspace">
       <aside className="ws-left" aria-label="Files and tasks">
         <div className="pane-head"><PaneTabs label="Sidebar" tabs={['Files', 'Tasks'] as const} tab={layout.leftTab} onTab={(t) => setLayout({ leftTab: t })} /></div>
-        <div className="pane-body">{layout.leftTab === 'Files' ? <FileTree onOpen={(p) => void openFile(p)} current={tab.kind === 'file' ? tab.path : null} onLoaded={setFiles} /> : <TasksPane state={state} reload={st.reload} />}</div>
+        <div className="pane-body" tabIndex={0} role="region" aria-label="Sidebar content">{layout.leftTab === 'Files' ? <FileTree onOpen={(p) => void openFile(p)} current={tab.kind === 'file' ? tab.path : null} onLoaded={setFiles} /> : <TasksPane state={state} reload={st.reload} />}</div>
       </aside>
       <Splitter cls="split-v" label="Resize the files sidebar" value={layout.left} range={LIMITS.left} axis="x" grow={1} onChange={(n) => setLayout({ left: n })} />
       <section className="ws-center" aria-label="Work area">
@@ -185,12 +185,12 @@ export function Workspace({ tick, projectName, open, setCommands }: { tick: numb
       <Splitter cls="split-h" label="Resize the bottom panel" value={layout.bottom} range={LIMITS.bottom} axis="y" grow={-1} onChange={(n) => setLayout({ bottom: n })} />
       <section className="ws-bottom" aria-label="Output and evidence">
         <div className="pane-head"><PaneTabs label="Bottom panel" tabs={BOTTOM_TABS} tab={layout.bottomTab} onTab={(t) => setLayout({ bottomTab: t })} /></div>
-        <div className="pane-body"><BottomPanel tab={layout.bottomTab} state={state} tick={tick} reloadState={st.reload} open={open} openDiff={openDiff} /></div>
+        <div className="pane-body" tabIndex={0} role="region" aria-label="Output and evidence content"><BottomPanel tab={layout.bottomTab} state={state} tick={tick} reloadState={st.reload} open={open} openDiff={openDiff} /></div>
       </section>
       <Splitter cls="split-v2" label="Resize the agents panel" value={layout.right} range={LIMITS.right} axis="x" grow={-1} onChange={(n) => setLayout({ right: n })} />
       <aside className="ws-right" aria-label="Agents and approvals">
         <div className="pane-head"><PaneTabs label="Agents panel" tabs={RIGHT_TABS} tab={layout.rightTab} onTab={(t) => setLayout({ rightTab: t })} /></div>
-        <div className="pane-body"><RightPanel tab={layout.rightTab} agents={ag.data} state={state} reloadAgents={ag.reload} reloadState={reloadAll} tick={tick} /></div>
+        <div className="pane-body" tabIndex={0} role="region" aria-label="Agents panel content"><RightPanel tab={layout.rightTab} agents={ag.data} state={state} reloadAgents={ag.reload} reloadState={reloadAll} tick={tick} /></div>
       </aside>
       <div className="mobile-tabs" role="group" aria-label="Workspace views">
         {([['files', 'folder', 'Files'], ['editor', 'file', 'Editor'], ['agents', 'users', 'Agents'], ['panel', 'terminal', 'Evidence']] as const).map(([v, icon, label]) => (

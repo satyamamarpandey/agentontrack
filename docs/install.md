@@ -45,6 +45,31 @@ agentontrack research                  # optional Perplexity config, on your own
 
 See [compatibility](compatibility.md). Do not assume an adapter works until its status says so.
 
+## VS Code and editors based on it
+
+Download `agentontrack-vscode.vsix` from the release page, next to the archives, and check it against `SHA256SUMS`. Then:
+
+```sh
+code --install-extension agentontrack-vscode.vsix
+```
+
+In a project, run `agentontrack dashboard`. In VS Code, run **AgentOnTrack: Connect to the companion** and type the pairing code the terminal printed. Approving, denying, starting a run, verifying and handing off each show a code in that terminal, and you type it in VS Code. The extension cannot confirm anything by itself.
+
+Cursor and other editors that install VS Code extensions can use the same file. That is **not tested** on Cursor yet, so treat it as unverified. Antigravity: **not tested**; its extension and plugin interfaces are separate and not covered here.
+
+### Extension troubleshooting
+
+| Symptom | What to check |
+|---|---|
+| "AgentOnTrack is not connected" | Is `agentontrack dashboard` running? Run **AgentOnTrack: Diagnostics**, which shows the address, trust, project and the last error. |
+| The address is refused | It must be `127.0.0.1` or `localhost`, and it is a machine-scoped setting: a project's own settings cannot change it. |
+| Nothing can be approved or started | The workspace is not trusted. Trust it in VS Code to allow changes; the extension only reads until you do. |
+| The code is rejected | The code is for one request and expires. Ask again, and type the one the terminal now shows. |
+| The session is gone after a restart | The companion keeps sessions in memory. Pair again with a new code. |
+| Remote or container windows | The companion address is on the machine that runs `agentontrack dashboard`. A window on another machine cannot reach `127.0.0.1` there. Not tested. |
+
+Uninstall: `code --uninstall-extension satyamamarpandey.agentontrack-vscode`.
+
 ## Upgrade, roll back, remove
 
 ```sh

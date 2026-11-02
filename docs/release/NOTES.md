@@ -7,6 +7,12 @@ First installable release candidate of AgentOnTrack: a free, local-first control
 
 Then, in a project: `agentontrack setup`, and `agentontrack doctor` to see what is enforced on your machine.
 
+**New in rc.3**
+
+A redesigned dashboard and a **Workspace** screen: files with a hash-checked editor, a prompt composer with live output (Claude Code), team roles, approvals, handoffs, isolated git worktrees with diffs, and verification receipts. A **VS Code extension** (`agentontrack-vscode.vsix`, in this release's files, checked by `SHA256SUMS`): `code --install-extension agentontrack-vscode.vsix`. It confirms nothing by itself. A `spec-review` workflow and a spec structure check. Handoffs never carry approvals.
+
+**What rc.3 does not show:** AgentOnTrack still used more tokens and time than the agent alone in its own benchmarks, and no saving is claimed. Only Claude Code starts from the product. Cursor and Antigravity are untested. Codex-reviews-Claude as a real run is not shown.
+
 **New in rc.2**
 
 Adapters over the same engine. Verified on the real programs, with a scripted model and no account: GitHub Copilot CLI, Gemini CLI, OpenCode and Cline CLI. Continue gets state over MCP, with no enforcement. Cursor, Devin and Kiro adapters are written from their docs and **have never run on the real programs**, since those need accounts. See `agentontrack providers`.

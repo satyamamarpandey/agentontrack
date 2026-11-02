@@ -182,6 +182,8 @@ function ProjectScreen({ be, cid, project, tab, go }: { be: Backend; cid: string
   useEffect(() => { let off = () => undefined as void; void be.snapshotKey(cid, project).then((k) => { off = be.watchSnapshot(cid, k, setSnap); }); return () => off(); }, [be, cid, project]);
   const s = snap?.body;
   const act = useAction();
+  // Loaded once per project screen, so switching tabs does not ask the computer again.
+  const choices = useChoices(be, cid, project, true);
   const call = useCallback(<T,>(action: string, params: object = {}, ok = 'Done.') => act.run(() => be.call<T>(cid, action, { project, ...params }), ok), [act, be, cid, project]);
   const phoneOnline = useOnline();
   const can = online && phoneOnline && !act.busy;
@@ -193,7 +195,7 @@ function ProjectScreen({ be, cid, project, tab, go }: { be: Backend; cid: string
     }>
       <Freshness online={online} last={last} snap={snap} />
       {act.msg ? <p role={act.ok ? 'status' : 'alert'} className={act.ok ? 'm-note' : 'alert bad'} data-testid="m-result">{act.msg}</p> : null}
-      {!s ? <p className="m-note" role="status">Waiting for the project…</p> : tab === 'progress' ? <Progress s={s} can={can} call={call} be={be} cid={cid} project={project} />
+      {!s ? <p className="m-note" role="status">Waiting for the project…</p> : tab === 'progress' ? <Progress s={s} can={can} call={call} choices={choices} />
         : tab === 'activity' ? <Activity s={s} can={can} call={call} />
         : tab === 'evidence' ? <Evidence s={s} be={be} cid={cid} project={project} online={online} />
         : tab === 'approvals' ? <Approvals s={s} can={can} call={call} />
@@ -223,14 +225,15 @@ function useChoices(be: Backend, cid: string, project: string, online: boolean) 
   return { agents, models, err };
 }
 
-function Progress({ s, can, call, be, cid, project }: { s: any; can: boolean; call: Call; be: Backend; cid: string; project: string }) {
+function Progress({ s, can, call, choices }: { s: any; can: boolean; call: Call; choices: ReturnType<typeof useChoices> }) {
   const [extra, setExtra] = useState('');
   const [prompt, setPrompt] = useState('');
   const [agent, setAgent] = useState('');
   const [model, setModel] = useState('');
-  const { agents, models, err } = useChoices(be, cid, project, true);
+  const { agents, models, err } = choices;
   const startable = (agents ?? []).filter((a) => a.canStart);
-  const chosen = agent || startable[0]?.id || '';
+  // Until the computer has answered with its list, the usual agent is assumed and the computer decides: it refuses an agent it cannot start.
+  const chosen = agent || startable[0]?.id || (agents === null ? 'claude-code' : '');
   const modelsFor = (models ?? []).filter((m) => m.agent === chosen);
   // With nothing found yet, the small default AgentOnTrack uses everywhere is used, and the screen says so. It is never claimed to be available.
   const FALLBACK_MODEL = 'haiku';
@@ -297,7 +300,8 @@ function Progress({ s, can, call, be, cid, project }: { s: any; can: boolean; ca
           </label>
         </div>
         {agents && startable.length === 0 ? <p className="m-note" data-testid="m-no-agent">No agent can be started from AgentOnTrack on this project yet. {agents.find((a) => a.reason)?.reason ?? ''}</p> : null}
-        {err ? <p className="m-note">Could not load the agent list: {err}</p> : null}
+        {agents === null && !err ? <p className="m-note" role="status">Asking your computer which agents it can start…</p> : null}
+        {err ? <p className="m-note">Could not load the agent list: {err}. Sending still works if the computer is reachable.</p> : null}
         <p className="m-note">Models are those this computer reported or used. Whether your plan allows one is only known after a run uses it.</p>
         <button className="btn primary m-btn" disabled={!can || !prompt.trim() || !chosen || !modelChoice} onClick={() => void call('run.start', { prompt, agent: chosen, model: modelChoice }, 'Sent to your computer.').then((r) => { if (r) setPrompt(''); })} data-testid="m-send">Send</button>
 

@@ -249,7 +249,8 @@ export function phaseViews(plan: PhasePlan, approved: boolean, runs: RunFact[], 
     const mine = runs.filter((r) => r.phaseId === id);
     const spentUsd = mine.reduce((s, r) => s + (r.costUsd ?? 0), 0);
     const view = (status: PhaseStatus, why: string): PhaseView => ({ id, status, why, runs: mine.length, spentUsd });
-    const t = p.taskId ? tasks.get(p.taskId) : undefined;
+    const checks = p.acceptance.some((a) => a.kind === 'command');
+    const t = checks && p.taskId ? tasks.get(p.taskId) : undefined;
     let v: PhaseView;
     if (p.state === 'skipped') v = view('skipped', 'You skipped this phase.');
     else if (p.state === 'paused') v = view('paused', 'Paused by you. Nothing new starts here until you resume it.');
@@ -257,8 +258,8 @@ export function phaseViews(plan: PhasePlan, approved: boolean, runs: RunFact[], 
     else if (t?.status === 'VERIFIED') v = view('verified', 'Every check passes on the current code, recorded as a receipt.');
     else if (t?.status === 'FAILED') v = view('failed', 'A check ran and failed.');
     else if (t && t.criteriaStates.includes('stale') && mine.length) v = view('stale', 'The code or the goal changed since the checks last passed, so they no longer count.');
-    else if (mine.some((r) => ['finished', 'stopped', 'failed'].includes(r.status)) && t) v = view('needs-evidence', 'The agent finished. Run the checks to see whether it worked.');
-    else if (mine.some((r) => r.status === 'finished') && !t) v = view('done-unchecked', 'The agent finished. There is no check to run, so this is the agent\'s word only.');
+    else if (mine.some((r) => ['finished', 'stopped', 'failed'].includes(r.status)) && checks) v = view('needs-evidence', 'The agent finished. Run the checks to see whether it worked.');
+    else if (mine.some((r) => r.status === 'finished') && !checks) v = view('done-unchecked', 'The agent finished. There is no check to run, so this is the agent\'s word only.');
     else if (!approved) v = view('draft', 'Waiting for you to approve the plan.');
     else if (!p.dependsOn.every(settled)) v = view('blocked', `Waiting for ${p.dependsOn.filter((d) => !settled(d)).join(', ')}.`);
     else v = view('ready', 'Ready to start.');

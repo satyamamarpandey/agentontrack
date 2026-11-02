@@ -4,6 +4,7 @@ import { useHuman } from './human';
 import { Icon, type IconName } from './icons';
 import type { Command } from './palette';
 import { Badge, Empty, Loading, useLoad } from './ui';
+import { PlanPanel } from './plan';
 import { DiffView, Editor, FileTree, type Buffer } from './ws-files';
 import { AgentTab, BOTTOM_TABS, BottomPanel, RIGHT_TABS, RightPanel, type BottomTab, type RightTab } from './ws-panels';
 
@@ -11,7 +12,7 @@ interface Layout { left: number; right: number; bottom: number; showLeft: boolea
 const DEFAULT: Layout = { left: 264, right: 320, bottom: 240, showLeft: true, showRight: true, showBottom: true, leftTab: 'Files', rightTab: 'Agents', bottomTab: 'Activity' };
 const LIMITS = { left: [180, 520], right: [240, 560], bottom: [120, 640] } as const;
 const KEY = 'aot-ws-layout';
-type Tab = { key: string; kind: 'agent' } | { key: string; kind: 'file'; path: string } | { key: string; kind: 'diff'; wt: string; path: string };
+type Tab = { key: string; kind: 'plan' } | { key: string; kind: 'agent' } | { key: string; kind: 'file'; path: string } | { key: string; kind: 'diff'; wt: string; path: string };
 type View = 'files' | 'editor' | 'agents' | 'panel';
 
 const clamp = (n: number, [lo, hi]: readonly [number, number]) => Math.max(lo, Math.min(hi, n));
@@ -75,13 +76,14 @@ export function Workspace({ tick, projectName, open, setCommands }: { tick: numb
   const [layout, setLayoutState] = useState<Layout>(loadLayout);
   const setLayout = useCallback((patch: Partial<Layout>) => setLayoutState((l) => { const n = { ...l, ...patch }; localStorage.setItem(KEY, JSON.stringify(n)); return n; }), []);
   const [view, setView] = useState<View>('editor');
-  const [tabs, setTabs] = useState<Tab[]>([{ key: 'agent', kind: 'agent' }]);
-  const [active, setActive] = useState('agent');
+  const [tabs, setTabs] = useState<Tab[]>([{ key: 'plan', kind: 'plan' }, { key: 'agent', kind: 'agent' }]);
+  const [active, setActive] = useState('plan');
   const [bufs, setBufs] = useState<Record<string, Buffer>>({});
   const [files, setFiles] = useState<string[]>([]);
   const st = useLoad<any>(() => get('/api/state'), [tick]);
   const base = useLoad<any[]>(() => get('/api/agents'), []);
   const prov = useLoad<any[]>(() => get('/api/providers'), []);
+  const rt = useLoad<any[]>(() => get('/api/runtimes'), [tick]);
   // One list of every agent AgentOnTrack can govern: the three it can set up itself, and the others it has adapters for.
   const ag = { ...base, data: base.data ? [...base.data, ...(prov.data ?? []).filter((p) => !base.data!.some((a) => a.id === p.id)).map((p) => ({ id: p.id, name: p.name, provider: true, installed: !!p.version, version: p.version, hooksInstalled: p.hooksInstalled, connect: p.connect, coverage: { hostFailMode: p.failure?.crash?.toLowerCase().includes('run') ? 'open' : 'closed' }, liveStatus: 'Not found on this machine' }))] : null, reload: () => { base.reload(); prov.reload(); } };
   const [err, setErr] = useState('');
@@ -94,7 +96,7 @@ export function Workspace({ tick, projectName, open, setCommands }: { tick: numb
       const f = await get<{ path: string; content: string; hash: string; language: string }>(`/api/file?path=${encodeURIComponent(path)}`);
       setBufs((b) => (b[path] && b[path]!.content !== b[path]!.saved ? b : { ...b, [path]: { path, content: f.content, saved: f.content, hash: f.hash, language: f.language } }));
     } catch (e) {
-      setTabs((t) => t.filter((x) => x.key !== key)); setActive('agent'); setErr((e as Error).message);
+      setTabs((t) => t.filter((x) => x.key !== key)); setActive('plan'); setErr((e as Error).message);
     }
   }, []);
   const openDiff = useCallback((wt: string, path: string) => {
@@ -107,7 +109,7 @@ export function Workspace({ tick, projectName, open, setCommands }: { tick: numb
     if (tab?.kind === 'file') { const b = bufs[tab.path]; if (b && b.content !== b.saved && !window.confirm(`${tab.path} has unsaved changes. Close it and lose them?`)) return; setBufs(({ [tab.path]: _gone, ...rest }) => rest); }
     const next = tabs.filter((t) => t.key !== key);
     setTabs(next);
-    if (active === key) setActive(next.at(-1)?.key ?? 'agent');
+    if (active === key) setActive(next.at(-1)?.key ?? 'plan');
   };
 
   // The commands the palette offers while a workspace is open, and the shortcuts that match them.
@@ -154,7 +156,7 @@ export function Workspace({ tick, projectName, open, setCommands }: { tick: numb
       <section className="ws-center" aria-label="Work area">
         <div className="ws-bar">
           <div className="crumbs"><Icon name="folder" /> <b>{projectName}</b><span className="muted clip hide-m" title={state.goal?.statement}>{state.goal ? `— ${state.goal.statement}` : '— no goal set'}</span></div>
-          {tab.kind !== 'agent' ? <button className="btn small" onClick={() => close(tab.key)} data-testid="ws-close-tab"><Icon name="x" size={14} />Close tab</button> : null}
+          {tab.kind !== 'agent' && tab.kind !== 'plan' ? <button className="btn small" onClick={() => close(tab.key)} data-testid="ws-close-tab"><Icon name="x" size={14} />Close tab</button> : null}
           {pending ? <button className="btn small" onClick={() => { setLayout({ showRight: true, rightTab: 'Approvals' }); setView('agents'); }} data-testid="ws-pending"><Icon name="alert" size={14} />{pending} waiting</button> : null}
           <span className="hide-m" style={{ display: 'contents' }}>
             {toggle('Files sidebar', 'panelLeft', layout.showLeft, () => setLayout({ showLeft: !layout.showLeft }))}
@@ -165,16 +167,17 @@ export function Workspace({ tick, projectName, open, setCommands }: { tick: numb
         <div className="editor-tabs" role="tablist" aria-label="Open items">
           {tabs.map((t) => {
             const dirty = t.kind === 'file' && bufs[t.path] && bufs[t.path]!.content !== bufs[t.path]!.saved;
-            const name = t.kind === 'agent' ? 'Agent' : t.kind === 'file' ? t.path.split('/').pop()! : `Diff ${t.path.split('/').pop()}`;
+            const name = t.kind === 'plan' ? 'Plan' : t.kind === 'agent' ? 'Agent' : t.kind === 'file' ? t.path.split('/').pop()! : `Diff ${t.path.split('/').pop()}`;
             return (
-              <button key={t.key} role="tab" className="etab" aria-selected={active === t.key} onClick={() => setActive(t.key)} onAuxClick={(e) => { if (e.button === 1 && t.kind !== 'agent') close(t.key); }} title={t.kind === 'file' ? t.path : undefined}>
-                <Icon name={t.kind === 'agent' ? 'bot' : t.kind === 'diff' ? 'branch' : 'file'} size={14} />{name}{dirty ? <><span className="dot" aria-hidden="true" /><span className="sr-only"> unsaved</span></> : null}
+              <button key={t.key} role="tab" className="etab" aria-selected={active === t.key} onClick={() => setActive(t.key)} onAuxClick={(e) => { if (e.button === 1 && t.kind !== 'agent' && t.kind !== 'plan') close(t.key); }} title={t.kind === 'file' ? t.path : undefined}>
+                <Icon name={t.kind === 'plan' ? 'target' : t.kind === 'agent' ? 'bot' : t.kind === 'diff' ? 'branch' : 'file'} size={14} />{name}{dirty ? <><span className="dot" aria-hidden="true" /><span className="sr-only"> unsaved</span></> : null}
               </button>
             );
           })}
         </div>
         {err ? <div className="alert bad" role="alert">{err} <button className="link" onClick={() => setErr('')}>Dismiss</button></div> : null}
         <div role="tabpanel" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+          {tab.kind === 'plan' ? <PlanPanel tick={tick} agents={ag.data.map((a: any) => ({ id: a.id, name: a.name, startable: !!rt.data?.find((r: any) => r.id === a.id)?.canStart }))} onRunStarted={() => st.reload()} reloadShell={() => st.reload()} /> : null}
           {tab.kind === 'agent' ? <AgentTab tick={tick} /> : null}
           {tab.kind === 'diff' ? <DiffView wt={tab.wt} path={tab.path} /> : null}
           {tab.kind === 'file' ? (bufs[tab.path] ? <Editor key={tab.path} buf={bufs[tab.path]!}

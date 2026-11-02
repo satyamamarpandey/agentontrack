@@ -62,6 +62,7 @@ test('a model server is configured by testing its address, and is never called a
 test('the workspace offers no Run control for an agent that cannot start, and says why', async ({ page, env }) => {
   await env.pair(page);
   await go(page, 'Workspace');
+  await page.getByRole('tab', { name: 'Agent', exact: true }).click();
   await expect(page.getByTestId('ws-run')).toBeDisabled();
   await expect(page.getByTestId('run-note')).toContainText(/Claude Code|No agent can be started/);
   // Codex is listed, but only as unavailable: it cannot be chosen.

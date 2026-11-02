@@ -87,7 +87,7 @@ test('the project summary is off by default, and its preview holds only counts a
     await expect(page.getByTestId('probe-status')).toContainText('Found AgentOnTrack on this computer', { timeout: 30_000 });
     await page.getByLabel('Pairing code').fill(c.newPairingCode());
     await page.getByRole('button', { name: 'Pair', exact: true }).click();
-    await page.getByTestId('project-card').getByRole('button').click();
+    await page.getByTestId('project-card').locator('.project-open').click();
     const saver = page.getByTestId('summary-saver');
     await expect(saver).toContainText('Sign in on the account page');
     await expect(saver.getByRole('link')).toHaveAttribute('rel', 'noopener');

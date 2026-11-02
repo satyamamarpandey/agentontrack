@@ -50,7 +50,9 @@ export function AccountPanel() {
     setUser(u);
     await refresh(a, u);
     // Came from the dashboard's welcome page: go back there, now signed in. Signing in grants nothing on the computer.
-    if (new URLSearchParams(location.search).get('next') === 'dashboard') location.href = `${process.env.NEXT_PUBLIC_BASE_PATH ?? ''}/dashboard/`;
+    const next = new URLSearchParams(location.search).get('next');
+    if (next === 'dashboard') location.href = `${process.env.NEXT_PUBLIC_BASE_PATH ?? ''}/dashboard/`;
+    if (next === 'mobile') location.href = `${process.env.NEXT_PUBLIC_BASE_PATH ?? ''}/dashboard/?m=1`;
   };
   const withApi = async () => { const a = api ?? await loadAccounts!(); loadedApi = a; setApi(a); return a; };
 
@@ -71,7 +73,7 @@ export function AccountPanel() {
           if (mode === 'reset') { await a.resetPassword(email); setNote('If that address has an account, a reset link is on its way.'); return; }
           await finishWith(a, mode === 'create' ? await a.emailSignUp(name, email, password, theme()) : await a.emailSignIn(email, password, theme()));
         }).catch(() => undefined); }}>
-          <div className="row" role="group" aria-label="Email">
+          <div className="row" role="group" aria-label="How to use email">
             {(['signin', 'create', 'reset'] as const).map((m) => <button key={m} type="button" className={`btn small ${mode === m ? 'primary' : ''}`} aria-pressed={mode === m} onClick={() => { setMode(m); setError(''); setNote(''); }}>{m === 'signin' ? 'Sign in with email' : m === 'create' ? 'Create an account' : 'Reset password'}</button>)}
           </div>
           {mode === 'create' ? <label>Name<input value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" name="name" /></label> : null}

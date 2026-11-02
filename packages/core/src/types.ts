@@ -114,7 +114,7 @@ export interface Actor {
 
 export const HUMAN_ONLY_EVENTS = new Set([
   'goal.approved', 'goal.rejected', 'goal.closed', 'goal.reopened', 'policy.set', 'approval.granted', 'approval.denied', 'approval.revoked',
-  'task.created', 'task.activated', 'task.accepted', 'task.closed', 'mismatch.acknowledged', 'verification.accepted', 'team.set', 'weak.accepted', 'anchor.configured', 'approver.enrolled', 'decision.approved', 'decision.rejected',
+  'task.created', 'task.activated', 'task.accepted', 'task.closed', 'mismatch.acknowledged', 'verification.accepted', 'team.set', 'plan.approved', 'weak.accepted', 'anchor.configured', 'approver.enrolled', 'decision.approved', 'decision.rejected',
 ]);
 
 export interface StoredEvent {

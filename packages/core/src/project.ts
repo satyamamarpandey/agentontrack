@@ -13,6 +13,7 @@ import { ALL_FEATURES, CriterionSchema, GoalContractSchema, POLICY_PROFILES, Pol
 import { checkRemote } from './anchor.js';
 import { cleanRelative, MAX_FILE_BYTES, readTextFile, writeTextFile } from './workspace.js';
 import { TeamSchema } from './team.js';
+import { PhasePlanSchema, planSha, type PhasePlan, type RunFact, type TaskFact } from './plan.js';
 import { addWorktree, behindBy, changedSince, commitAll, git, mergeBranch, previewMerge, removeWorktree, safeName, type MergePreview } from './worktrees.js';
 import { assessCriteria, compareManifests, inspectVerificationFile, type VerificationManifest } from './verification.js';
 
@@ -222,6 +223,23 @@ export class Project {
     setGoal: (goal: unknown, fromProposal?: string) => {
       const parsed: GoalContract = GoalContractSchema.parse(goal);
       return this.humanAppend({ type: 'goal.approved', payload: { goal: parsed, ...(fromProposal ? { fromProposal } : {}) } });
+    },
+    /**
+     * Approves the plan exactly as it is: the content hash is part of the event, so any later edit needs a new approval. Each phase with a
+     * command to run gets its own task, with that command as its check. Nothing is started here.
+     */
+    approvePlan: (sha: string, expectVersion: number) => {
+      const cur = this.state().plan;
+      if (!cur) throw new Error('There is no plan to approve');
+      if (cur.version !== expectVersion || cur.sha !== sha) throw new Error('The plan changed since you looked at it. Review it again before approving.');
+      const plan = PhasePlanSchema.parse(cur.doc);
+      const tasks: Record<string, string> = {};
+      for (const ph of plan.phases) {
+        const commands = ph.acceptance.filter((a) => a.kind === 'command');
+        if (ph.state === 'skipped') continue;
+        tasks[ph.id] = this.human.createTask({ id: `ph-${plan.id}-${ph.id}-v${expectVersion}`, title: `${ph.title} (phase ${ph.id})`, criteria: commands.map((a) => ({ id: a.id, description: a.description, kind: 'command', command: a.command })), activate: false });
+      }
+      return this.humanAppend({ type: 'plan.approved', payload: { sha, version: expectVersion, tasks } });
     },
     setTeam: (members: unknown, expectVersion?: number) => {
       const parsed = TeamSchema.parse(members);
@@ -723,6 +741,56 @@ export class Project {
   }
 
   /** Whether a path is one only a human may change, through the proof path: goals, safety, instruction and hook files. */
+  /**
+   * Saves a draft of the plan. It is validated, bounded, and its system-managed fields (which task a phase is checked by) are kept from
+   * the plan already saved, so a page cannot point a phase at somebody else's verified task. Saving never approves anything.
+   */
+  savePlan(input: unknown, expectVersion?: number): { version: number; sha: string } {
+    const cur = this.state().plan;
+    if (expectVersion !== undefined && (cur?.version ?? 0) !== expectVersion) throw new Error(`The plan is at version ${cur?.version ?? 0}, not ${expectVersion}. Reload it and look again.`);
+    const plan: PhasePlan = PhasePlanSchema.parse(input);
+    const before = new Map<string, string | undefined>((cur?.doc?.phases ?? []).map((p: any) => [p.id, p.taskId]));
+    for (const ph of plan.phases) { delete (ph as any).taskId; const t = before.get(ph.id); if (t) ph.taskId = t; }
+    if (JSON.stringify(plan).length > 60_000) throw new Error('This plan is too large');
+    const sha = planSha(plan);
+    this.store.append({ type: 'plan.saved', actor: { kind: 'system' }, payload: { plan, sha } });
+    return { version: this.state().plan!.version, sha };
+  }
+
+  /** Makes a phase's own task the active one, so that an approval asked for while it runs is bound to it. Only a task the approved plan created. */
+  activatePhase(phaseId: string): string {
+    const cur = this.state().plan;
+    if (!cur || cur.approvedSha !== cur.sha) throw new Error('The plan is not approved');
+    const taskId = cur.doc.phases.find((x: any) => x.id === phaseId)?.taskId as string | undefined;
+    if (!taskId || !this.state().tasks.has(taskId)) throw new Error('This phase has no task from the approved plan');
+    this.store.append({ type: 'plan.phase_started', actor: { kind: 'system' }, payload: { phaseId, taskId } });
+    if (this.state().activeTaskId !== taskId) throw new Error('The phase could not be made the active task');
+    return taskId;
+  }
+
+  /** What each run of a phase did, from the record. A run with no end is reported as running; the caller knows whether it still is. */
+  planRuns(): RunFact[] {
+    const started = new Map<string, { phaseId: string }>();
+    const out = new Map<string, RunFact>();
+    for (const e of this.store.byType(['run.started', 'run.finished'])) {
+      const id = String(e.payload.id);
+      if (e.type === 'run.started' && e.payload.phaseId) { started.set(id, { phaseId: String(e.payload.phaseId) }); out.set(id, { id, phaseId: String(e.payload.phaseId), status: 'running', costUsd: null, wallClockMs: null }); }
+      if (e.type === 'run.finished' && started.has(id)) out.set(id, { id, phaseId: started.get(id)!.phaseId, status: String(e.payload.status ?? 'finished'), costUsd: typeof e.payload.totalCostUsd === 'number' ? e.payload.totalCostUsd : null, wallClockMs: typeof e.payload.wallClockMs === 'number' ? e.payload.wallClockMs : null });
+    }
+    return [...out.values()];
+  }
+
+  /** The engine's own reading of each phase's task, which is the only thing that can make a phase verified. */
+  planTasks(): Map<string, TaskFact> {
+    const out = new Map<string, TaskFact>();
+    for (const ph of this.state().plan?.doc?.phases ?? []) {
+      if (!ph.taskId || !this.state().tasks.has(ph.taskId)) continue;
+      const ev = this.evaluate(ph.taskId);
+      out.set(ph.taskId, { status: ev.status, criteriaStates: ev.criteria.map((c: any) => c.state) });
+    }
+    return out;
+  }
+
   isProtectedPath(rel: string): boolean {
     return matchesAny(rel, this.state().policy.protectedPaths);
   }

@@ -202,6 +202,9 @@ importers:
 
   apps/dashboard:
     dependencies:
+      '@agentontrack/remote':
+        specifier: workspace:*
+        version: link:../../packages/remote
       firebase:
         specifier: 13.1.0
         version: 13.1.0
@@ -285,6 +288,12 @@ importers:
       '@agentontrack/core':
         specifier: workspace:*
         version: link:../core
+      '@agentontrack/remote':
+        specifier: workspace:*
+        version: link:../remote
+      firebase:
+        specifier: 13.1.0
+        version: 13.1.0
       zod:
         specifier: ^4.6.7
         version: 4.6.7
@@ -306,6 +315,8 @@ importers:
       zod:
         specifier: ^4.6.7
         version: 4.6.7
+
+  packages/remote: {}
 
   packages/vscode:
     devDependencies:

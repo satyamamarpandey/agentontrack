@@ -8,6 +8,15 @@ import { Project } from '../packages/core/dist/index.js';
 
 const CLI = resolve('packages/cli/dist/index.js');
 
+const FAKE_AGENT = `
+import { writeFileSync } from 'node:fs';
+const prompt = process.argv[process.argv.indexOf('-p') + 1] ?? '';
+console.log(JSON.stringify({ type: 'system', subtype: 'init', model: 'fake' }));
+if (/Make the change/.test(prompt)) { await new Promise((ok) => setTimeout(ok, Number(process.env.AOT_FAKE_DELAY_MS ?? 0))); writeFileSync('done.txt', 'ok'); }
+console.log(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Done. All tests pass, everything is verified.' }] } }));
+console.log(JSON.stringify({ type: 'result', subtype: 'success', total_cost_usd: 0.01, duration_ms: 5, duration_api_ms: 3, num_turns: 1, usage: { input_tokens: 1, output_tokens: 1 } }));
+`;
+
 export interface Env {
   c: Companion;
   root: string;
@@ -19,16 +28,17 @@ export interface Env {
 }
 
 /** The real companion and engine in a disposable folder. No API is mocked. */
-export const test = base.extend<{ env: Env }>({
-  // oxlint-disable-next-line no-empty-pattern -- Playwright requires destructuring here.
-  env: async ({}, use) => {
+export const test = base.extend<{ env: Env; fakeAgent: boolean }>({
+  fakeAgent: [false, { option: true }],
+  env: async ({ fakeAgent }, use) => {
     const dir = mkdtempSync(join(tmpdir(), 'bl-e2e-'));
     const home = join(dir, 'home');
     const root = join(dir, 'repo');
     mkdirSync(join(root, 'src'), { recursive: true });
     writeFileSync(join(root, 'src', 'a.txt'), 'a');
     process.env.AGENTONTRACK_HOME = home;
-    const c = await startCompanion({ root });
+    if (fakeAgent) writeFileSync(join(dir, 'fake-claude.mjs'), FAKE_AGENT);
+    const c = await startCompanion({ root, ...(fakeAgent ? { claudeCommand: [process.execPath, join(dir, 'fake-claude.mjs')] } : {}) });
     const env: Env = {
       c, root, dir, home,
       project: (fn) => { const p = new Project(root); try { return fn(p); } finally { p.close(); } },

@@ -86,7 +86,7 @@ jobs:
       - run: pnpm build:pages
       - run: pnpm exec playwright install --with-deps chromium
       - name: Sign-in, saved data, feedback, delete and rules, against the Firebase emulators
-        run: pnpm dlx firebase-tools@15 emulators:exec --only auth,firestore --project demo-agentontrack "pnpm exec playwright test accounts.spec accounts-configured.spec --project=chromium --workers=1"
+        run: pnpm dlx firebase-tools@15 emulators:exec --only auth,firestore --project demo-agentontrack "pnpm exec playwright test accounts.spec accounts-configured.spec phone.spec --project=chromium --workers=1"
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

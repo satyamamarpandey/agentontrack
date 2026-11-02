@@ -20,3 +20,16 @@ export async function sendCounts(installId: string, counts: import('./telemetry'
   const { sendUsageCounts } = await import('./accounts-firebase');
   await sendUsageCounts(CONFIG, installId, counts);
 }
+
+/** The phone link's two halves are loaded only on request, and only in a build with accounts, so any other build holds no Firebase code at all. */
+export async function linkBackend() {
+  if (!CONFIG) throw new Error('Accounts are not set up on this site.');
+  const m = await import('./link-backend');
+  return { config: CONFIG, ...m };
+}
+
+export async function mobileBackend() {
+  if (!CONFIG) throw new Error('Accounts are not set up on this site.');
+  const m = await import('./mobile-backend');
+  return m.openBackend(CONFIG);
+}

@@ -3,17 +3,23 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { homedir } from 'node:os';
+import { homedir, hostname } from 'node:os';
 import { basename, dirname, extname, relative, sep, isAbsolute, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { failoverOptions, runtimeFacts, coverageFor, PROVIDERS, providerInstalled, hooksInstalled, installHooks, probeLocalModel, uninstallHooks } from '@agentontrack/adapters';
-import { renderHandoffMarkdown, acceptHandoff2, buildHandoff, listHandoffs, loadHandoff, planWorkflow, checkSpec, saveHandoff, validateHandoff, hashText, listDir, WorkspaceError, updateRegistered, approvalView, agentontrackHome, computeAnalytics, isPendingLive, loadRegistry, Project, registerProject, saveRegistry, stateDirFor, type Registered } from '@agentontrack/core';
+import { planFacts as planFactsOf, planView as planViewOf } from './plan-view.js';
+import { makeExecutor, snapshotOf } from './remote-actions.js';
+import { loadRemote, newRemoteFile, Refusal, saveRemote, type RemoteFile } from './remote-host.js';
+import { RemoteService } from './remote-service.js';
+import { fingerprint as fingerprintOf } from '@agentontrack/remote';
+import { FirestoreTransport, type Emulators, type FirebaseConfig } from './remote-transport.js';
+import { renderHandoffMarkdown, acceptHandoff2, buildHandoff, listHandoffs, loadHandoff, planWorkflow, checkSpec, decompose, phasePrompt, PhasePlanSchema, planSha, startBlock, saveHandoff, validateHandoff, hashText, listDir, WorkspaceError, updateRegistered, approvalView, agentontrackHome, computeAnalytics, isPendingLive, loadRegistry, Project, registerProject, saveRegistry, stateDirFor, type Registered } from '@agentontrack/core';
 import * as z from 'zod/v4';
 
 const SESSION_TTL_MS = 8 * 3_600_000;
 const REMOTE_SESSION_TTL_MS = 2 * 3_600_000;
 /** Things a paired outside page may do without a terminal code: none of them grants or disables anything. */
-const REMOTE_FREE = new Set(['/api/challenge', '/api/unpair', '/api/feedback', '/api/files/revoke']);
+const REMOTE_FREE = new Set(['/api/challenge', '/api/unpair', '/api/feedback', '/api/files/revoke', '/api/plan/draft']);
 const MAX_TERMINAL_FAILURES = 5;
 const MAX_SHOWN_REQUEST = 4000;
 const CODE_TTL_MS = 5 * 60_000;
@@ -36,6 +42,8 @@ export interface CompanionOptions {
   benchmarksDir?: string;
   /** Exact origins allowed to call the API. Empty by default. They still need a pairing code. */
   allowedOrigins?: string[];
+  /** For tests: where the Firebase emulators are, and how often snapshots go out. A real build leaves both unset. */
+  remote?: { emulators?: Emulators; snapshotEveryMs?: number; heartbeatEveryMs?: number };
   /** Hook command for this install. Without it, the dev build's own path is used. */
   selfCommand?: string;
   /** Shows a code to the person at the terminal. A session from an outside origin changes nothing without one. */
@@ -151,6 +159,111 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
     return { entry, p };
   };
 
+  /** Why a phase could not be started, with the HTTP status the dashboard should show. */
+  class PhaseBlocked extends Error { constructor(readonly status: number, message: string) { super(message); } }
+
+  /** Starts one phase of the approved plan, or says why not. The dashboard's route and the phone link both come through here, so both obey the same limits. */
+  const startPhaseRun = (entry: Registered, p: Project, phaseId: string, extra: string, source?: string): Run => {
+    const view = planViewOf(entry, p, (id) => runs.get(id)?.status === 'running');
+    if (!view.plan || !view.views || !view.runs) throw new PhaseBlocked(409, 'There is no plan');
+    const phase = view.plan.phases.find((x) => x.id === phaseId);
+    if (!phase) throw new PhaseBlocked(404, 'No such phase');
+    const cur = p.state().plan!;
+    const why = startBlock(view.plan, phase.id, cur.approvedSha, view.views, view.runs, Date.now(), cur.approvedAt ? Date.parse(cur.approvedAt) : null);
+    if (why) throw new PhaseBlocked(409, why);
+    const pick = view.plan.defaults[phase.role];
+    const runtime = phase.agent ?? pick?.agent ?? 'claude-code';
+    if (runtime !== 'claude-code') throw new PhaseBlocked(409, `Starting ${runtime} from AgentOnTrack is not built yet, so this phase cannot run here. Assign it to an agent that can start, or run it yourself in that agent's terminal.`);
+    const remainingUsd = view.plan.limits.maxUsd - view.spent!.usd;
+    // The phase's own task becomes the active one first, so anything the agent asks for is bound to it.
+    try { p.activatePhase(phase.id); } catch (err) { throw new PhaseBlocked(409, (err as Error).message); }
+    return startRun(entry, p, RunInput.parse({ runtime: 'claude-code', prompt: phasePrompt(view.plan, phase, extra), model: phase.model ?? pick?.model ?? 'haiku', maxBudgetUsd: Math.max(0.01, Math.min(phase.budget.maxUsd ?? 1, remainingUsd, 5)) }), { planId: view.plan.id, phaseId: phase.id, ...(source ? { source } : {}) });
+  };
+
+  /** Bounded continuation of an approved plan, run here and not in a browser, so it goes on while a phone is the only thing watching. */
+  const continuing = new Map<string, { cancel: boolean }>();
+  const continuePlan = (entry: Registered, p: Project, maxPhases: number, source: string) => {
+    if (continuing.has(entry.id)) return { started: false, note: 'It is already continuing.' };
+    const me = { cancel: false };
+    continuing.set(entry.id, me);
+    const running = (id: string) => runs.get(id)?.status === 'running';
+    void (async () => {
+      try {
+        for (let i = 0; i < maxPhases && !me.cancel; i++) {
+          // A held approval always stops it. It never decides anything itself.
+          if ([...p.state().approvals.values()].some((a) => approvalView(a, new Date()) === 'pending')) break;
+          let v = planViewOf(entry, p, running);
+          if (!v.views || !v.plan) break;
+          const needs = v.views.find((x) => ['needs-evidence', 'stale'].includes(x.status));
+          if (needs && v.plan.phases.find((x) => x.id === needs.id)?.taskId) { p.verifyTask(v.plan.phases.find((x) => x.id === needs.id)!.taskId!); v = planViewOf(entry, p, running); }
+          if (v.views!.some((x) => x.status === 'failed')) break;
+          const ready = v.views!.find((x) => x.status === 'ready');
+          const phase = ready && v.plan!.phases.find((x) => x.id === ready.id);
+          if (!phase || phase.kind === 'release') break;
+          const run = startPhaseRun(entry, p, phase.id, '', source);
+          const until = Date.now() + 30 * 60_000;
+          while (run.status === 'running' && Date.now() < until) {
+            await new Promise((ok) => setTimeout(ok, 400));
+            if (me.cancel && run.status === 'running') { run.status = 'stopped'; run.child.kill(); }
+          }
+          const after = planViewOf(entry, p, running);
+          const done = after.plan?.phases.find((x) => x.id === phase.id);
+          if (done?.taskId && done.acceptance.some((a) => a.kind === 'command') && !me.cancel) p.verifyTask(done.taskId);
+        }
+      } catch { /* a phase that cannot start ends the continuation; the plan view says why */ } finally { continuing.delete(entry.id); }
+    })();
+    return { started: true, note: `Running up to ${maxPhases} phase${maxPhases === 1 ? '' : 's'}, and stopping at any failure, held approval or release.` };
+  };
+
+  /* ---------- The phone link ---------- */
+  let remote: RemoteService | null = null;
+  const remoteFileNow = (): RemoteFile | null => loadRemote();
+  const stopRunOf = (projectId: string, runId: string) => { const r = runs.get(runId); if (!r || r.project !== projectId || r.status !== 'running') return false; r.status = 'stopped'; r.child.kill(); return true; };
+  const asRefusal = <T,>(fn: () => T): T => {
+    try { return fn(); } catch (e) {
+      if (e instanceof PhaseBlocked || e instanceof HttpError) throw new Refusal('blocked', (e as Error).message);
+      throw e;
+    }
+  };
+  const makeRemote = async (file: RemoteFile): Promise<RemoteService> => {
+    const link = file.link!;
+    const exec = makeExecutor({
+      registry: () => loadRegistry(),
+      projectFor: (id) => projectFor(id),
+      isRunning: (id) => runs.get(id)?.status === 'running',
+      stopRun: stopRunOf,
+      recentRuns: (pid) => [...runs.values()].filter((r) => r.project === pid).map((r) => ({ id: r.id, status: r.status, started: r.started, events: r.events })),
+      startPhase: (entry, p, phaseId, extra, source) => asRefusal(() => { const r = startPhaseRun(entry, p, phaseId, extra, source); return { id: r.id, status: r.status }; }),
+      startPrompt: (entry, p, o, source) => asRefusal(() => {
+        if (o.agent !== 'claude-code') throw new PhaseBlocked(409, `Starting ${o.agent} from AgentOnTrack is not built yet. Start it in its own terminal: its hooks still report to this project.`);
+        const r = startRun(entry, p, RunInput.parse({ runtime: 'claude-code', prompt: o.prompt, model: o.model, maxBudgetUsd: o.maxUsd }), { source });
+        return { id: r.id, status: r.status };
+      }),
+      continuePlan: (entry, p, n, source) => asRefusal(() => continuePlan(entry, p, n, source)),
+      cancelContinue: (pid) => { const c = continuing.get(pid); if (!c) return false; c.cancel = true; for (const r of runs.values()) if (r.project === pid && r.status === 'running') { r.status = 'stopped'; r.child.kill(); } return true; },
+      models: async () => ({ agents: [] }),
+      agents: async () => [],
+      maxUsdPerRun: () => remoteFileNow()?.maxUsdPerRun ?? 1,
+      version: 'companion',
+    });
+    const svc = new RemoteService({
+      file, save: (f2) => saveRemote(f2), executor: exec, version: 'companion',
+      transport: new FirestoreTransport({ firebase: link.firebase as FirebaseConfig, uid: link.uid, cid: file.computerId, email: link.computer.email, password: link.computer.password, ...(opts.remote?.emulators ? { emulators: opts.remote.emulators } : {}) }),
+      list: () => loadRegistry().filter((r) => existsSync(r.root)).map((r) => { try { const { p } = projectFor(r.id); const st = p.state(); const t = st.activeTaskId ? st.tasks.get(st.activeTaskId) : null; return { id: r.id, name: r.name, archived: !!r.archived, goal: st.goal?.statement ?? null, activeTask: t ? { title: t.title, status: p.evaluate(t.id).status } : null, pendingApprovals: [...st.approvals.values()].filter((x) => approvalView(x, new Date()) === 'pending').length }; } catch { return { id: r.id, name: r.name, archived: !!r.archived, missing: true }; } }),
+      projects: () => loadRegistry().filter((r) => existsSync(r.root) && !r.archived).map((r) => ({ id: r.id, snapshot: () => { const { entry, p } = projectFor(r.id); return snapshotOf(entry, p, { isRunning: (id) => runs.get(id)?.status === 'running', recentRuns: (pid) => [...runs.values()].filter((x) => x.project === pid).map((x) => ({ id: x.id, status: x.status, started: x.started, events: x.events })) }); } })),
+      ...(opts.remote?.snapshotEveryMs ? { snapshotEveryMs: opts.remote.snapshotEveryMs } : {}),
+      ...(opts.remote?.heartbeatEveryMs ? { heartbeatEveryMs: opts.remote.heartbeatEveryMs } : {}),
+    });
+    await svc.start();
+    return svc;
+  };
+  const startRemoteIfLinked = () => {
+    const file = remoteFileNow();
+    if (!file?.link || remote) return;
+    void makeRemote(file).then((svc) => { remote = svc; }).catch(() => undefined);
+  };
+  startRemoteIfLinked();
+
   const json = (res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) => {
     res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', ...headers });
     res.end(JSON.stringify(body));
@@ -262,7 +375,7 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
     p.store.append({ type: 'run.finished', actor: { kind: 'system', runtime: 'claude-code' }, payload: { id: run.id, status: run.status, exitCode, wallClockMs, durationApiMs: result?.duration_api_ms ?? null, totalCostUsd: result?.total_cost_usd ?? null, numTurns: result?.num_turns ?? null, sessionId: result?.session_id ?? null, resultText: typeof result?.result === 'string' ? result.result.slice(0, 2000) : null } });
   };
 
-  const startRun = (entry: Registered, p: Project, input: z.infer<typeof RunInput>): Run => {
+  const startRun = (entry: Registered, p: Project, input: z.infer<typeof RunInput>, meta?: { planId?: string; phaseId?: string; source?: string }): Run => {
     if (input.runtime !== 'claude-code') throw new HttpError(409, `Starting ${input.runtime} from the dashboard is not built yet. Run it yourself: its hooks still report here.`);
     if (!hooksInstalled('claude-code', entry.root)) throw new HttpError(409, 'Connect Claude Code to this project first, so its hooks are in place');
     const [cmd, ...pre] = opts.claudeCommand ?? ['claude'];
@@ -270,7 +383,7 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
     const child = spawn(cmd!, args, { cwd: entry.root, stdio: ['ignore', 'pipe', 'pipe'], env: process.env });
     const run: Run = { id: `run_${randomBytes(5).toString('hex')}`, project: entry.id, child, started: Date.now(), events: [], status: 'running' };
     runs.set(run.id, run);
-    p.store.append({ type: 'run.started', actor: { kind: 'human' }, payload: { id: run.id, runtime: input.runtime, model: input.model, maxBudgetUsd: input.maxBudgetUsd, promptSha256: hash(input.prompt) } });
+    p.store.append({ type: 'run.started', actor: { kind: 'human' }, payload: { id: run.id, runtime: input.runtime, model: input.model, maxBudgetUsd: input.maxBudgetUsd, ...(meta?.planId ? { planId: meta.planId, phaseId: meta.phaseId } : {}), ...(meta?.source ? { source: meta.source } : {}), promptSha256: hash(input.prompt) } });
     let buf = '';
     let result: any = null;
     child.stdout!.setEncoding('utf8').on('data', (d: string) => {
@@ -591,6 +704,104 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
       const run = startRun(entry, p, RunInput.parse(await readBody(req)));
       return json(res, 200, { id: run.id, status: run.status });
     }
+
+    /* ---------- Phase plans ---------- */
+    const planFacts = () => planFactsOf(entry, p);
+    const planView = () => planViewOf(entry, p, (id) => runs.get(id)?.status === 'running');
+    if (path === '/api/plan' && method === 'GET') return json(res, 200, planView());
+    // Saving a draft changes nothing about what is allowed: it grants nothing until a person approves exactly this content.
+    if (path === '/api/plan/draft' && method === 'POST') {
+      const b = z.object({ goal: z.string().min(1).max(2000).optional(), plan: z.unknown().optional(), expectVersion: z.number().int().min(0).optional(), agents: z.record(z.string(), z.object({ agent: z.string(), model: z.string().optional() })).optional() }).parse(await readBody(req));
+      try {
+        const doc = b.plan !== undefined ? b.plan : decompose(b.goal ?? '', planFacts(), { id: `plan-${(s().plan?.version ?? 0) + 1}`, ...(b.agents ? { agents: b.agents as never } : {}) });
+        if (b.plan === undefined && !b.goal) throw new Error('Give a goal, or a plan');
+        return json(res, 200, { ...p.savePlan(doc, b.expectVersion), ...planView() });
+      } catch (err) { throw new HttpError(err instanceof z.ZodError ? 400 : 409, err instanceof z.ZodError ? `That plan is not valid: ${err.issues.map((i) => i.message).slice(0, 3).join('; ')}` : (err as Error).message); }
+    }
+    if (path === '/api/plan/phases/start' && method === 'POST') {
+      const b = z.object({ phaseId: z.string(), extra: z.string().max(2000).default('') }).parse(await readBody(req));
+      try { const run = startPhaseRun(entry, p, b.phaseId, b.extra); return json(res, 200, { id: run.id, status: run.status }); }
+      catch (err) { if (err instanceof PhaseBlocked) throw new HttpError(err.status, err.message); throw err; }
+    }
+    if (path === '/api/plan/phases/prompt' && method === 'GET') {
+      const view = planView();
+      const phase = view.plan?.phases.find((x) => x.id === url.searchParams.get('phaseId'));
+      if (!view.plan || !phase) throw new HttpError(404, 'No such phase');
+      return json(res, 200, { prompt: phasePrompt(view.plan, phase) });
+    }
+    if (path === '/api/plan/phases/verify' && method === 'POST') {
+      const b = z.object({ phaseId: z.string() }).parse(await readBody(req));
+      const phase = s().plan?.doc.phases.find((x: any) => x.id === b.phaseId);
+      if (!phase) throw new HttpError(404, 'No such phase');
+      if (!phase.taskId || !phase.acceptance.some((a: any) => a.kind === 'command') || s().plan!.approvedSha !== planSha(PhasePlanSchema.parse(s().plan!.doc))) throw new HttpError(409, 'This phase has no check to run, or the plan changed since it was approved.');
+      p.verifyTask(phase.taskId);
+      return json(res, 200, planView());
+    }
+    /* ---------- The phone link, from the desktop ---------- */
+    const RemoteHuman = { challengeId: z.string(), ...HumanFields };
+    /** A change that gives a phone something needs a person here, with the usual confirmation, then runs, and always locks the approver again. */
+    const humanThen = async <S extends z.ZodType<any>>(schema: S, action: (b: z.infer<S>) => string, fn: (b: z.infer<S>) => Promise<unknown>) => {
+      const body = schema.parse(await readBody(req));
+      requireHumanProof(req, key, body, p, action(body));
+      try { return json(res, 200, await fn(body)); } catch (err) { if (err instanceof HttpError) throw err; throw new HttpError(409, (err as Error).message); } finally { p.lock(); }
+    };
+    if (path === '/api/remote/status' && method === 'GET') {
+      const file = remoteFileNow();
+      if (!file) return json(res, 200, { exists: false });
+      const fp = await fingerprintOf(file.identity.pub);
+      if (remote) return json(res, 200, { exists: true, linked: true, ...(await remote.status()) });
+      return json(res, 200, { exists: true, linked: !!file.link, running: false, online: false, lastError: file.link ? 'Starting, or not reachable yet' : '', degraded: null, computerId: file.computerId, name: file.name, fingerprint: fp, devices: [], pending: [], maxUsdPerRun: file.maxUsdPerRun });
+    }
+    if (path === '/api/remote/prepare' && method === 'POST') {
+      let file = remoteFileNow();
+      if (!file) { file = await newRemoteFile(hostname().slice(0, 50) || 'This computer'); saveRemote(file); }
+      return json(res, 200, { computerId: file.computerId, name: file.name, pub: file.identity.pub, fingerprint: await fingerprintOf(file.identity.pub), linked: !!file.link });
+    }
+    if (path === '/api/remote/link' && method === 'POST') {
+      return humanThen(z.object({ uid: z.string().min(1).max(128), computerUid: z.string().min(1).max(128), email: z.string().email().max(200), password: z.string().min(8).max(200), firebase: z.object({ apiKey: z.string().min(1).max(200), projectId: z.string().min(1).max(100), authDomain: z.string().max(200).optional(), appId: z.string().max(200).optional() }), ...RemoteHuman }),
+        (b) => `link this computer to the account ${b.uid.slice(0, 6)}… so a phone signed in to it can ask this computer for things (each phone is still approved here one by one)`,
+        async (b) => {
+          const file = remoteFileNow();
+          if (!file) throw new HttpError(409, 'Prepare this computer first');
+          if (remote) { await remote.stop(); remote = null; }
+          file.link = { uid: b.uid, firebase: b.firebase, computer: { email: b.email, password: b.password }, linkedAt: new Date().toISOString() };
+          saveRemote(file);
+          try { remote = await makeRemote(file); } catch (err) { delete file.link; saveRemote(file); throw new HttpError(409, `Could not connect to Firebase with that link: ${(err as Error).message}`); }
+          return { linked: true, ...(await remote.status()) };
+        });
+    }
+    if (path === '/api/remote/devices/trust' && method === 'POST') {
+      return humanThen(z.object({ did: z.string().min(1).max(64), level: z.enum(['view', 'control']), fingerprint: z.string().min(10).max(40), ...RemoteHuman }),
+        (b) => `trust the phone ${b.did.slice(0, 8)}\u2026 with fingerprint ${b.fingerprint}, to ${b.level === 'control' ? 'look and control (start and stop runs, pause, continue, decline approvals, approve small file writes)' : 'look only'}`,
+        async (b) => {
+          if (!remote) throw new HttpError(409, 'This computer is not linked to an account yet');
+          // What the person looked at is what is trusted: if the phone's key changed since, the fingerprints differ and nothing is trusted.
+          const waiting = (await remote.status()).pending.find((d) => d.did === b.did);
+          if (!waiting || waiting.fingerprint !== b.fingerprint) throw new HttpError(409, 'That phone changed or is no longer waiting. Look at its fingerprint again.');
+          await remote.trust(b.did, b.level);
+          return remote.status();
+        });
+    }
+    if (path === '/api/remote/devices/level' && method === 'POST') {
+      return humanThen(z.object({ did: z.string().min(1).max(64), level: z.enum(['view', 'control']), ...RemoteHuman }), (b) => `change what the phone ${b.did.slice(0, 8)}\u2026 may do to ${b.level}`,
+        async (b) => { if (!remote?.host.setLevel(b.did, b.level)) throw new HttpError(404, 'No such phone'); return remote.status(); });
+    }
+    if (path === '/api/remote/settings' && method === 'POST') {
+      return humanThen(z.object({ maxUsdPerRun: z.number().min(0.05).max(5).optional(), name: z.string().min(1).max(50).optional(), ...RemoteHuman }), (b) => `change the phone link's settings: ${JSON.stringify({ maxUsdPerRun: b.maxUsdPerRun, name: b.name })}`,
+        async (b) => { const file = remoteFileNow(); if (!file) throw new HttpError(409, 'Nothing to change'); if (b.maxUsdPerRun) file.maxUsdPerRun = b.maxUsdPerRun; if (b.name) file.name = b.name; saveRemote(file); if (remote) { remote.host.state.maxUsdPerRun = file.maxUsdPerRun; remote.host.state.name = file.name; } return { ok: true }; });
+    }
+    // Taking access away needs no ceremony: it only ever does less.
+    if (path === '/api/remote/devices/revoke' && method === 'POST') {
+      const b = z.object({ did: z.string().min(1).max(64) }).parse(await readBody(req));
+      if (!remote || !(await remote.revoke(b.did))) throw new HttpError(404, 'No such phone');
+      return json(res, 200, await remote.status());
+    }
+    if (path === '/api/remote/unlink' && method === 'POST') {
+      const file = remoteFileNow();
+      if (remote) { for (const d of (await remote.status()).devices.filter((x) => !x.revokedAt)) await remote.revoke(d.did); await remote.stop(); remote = null; }
+      if (file) { delete file.link; saveRemote(file); }
+      return json(res, 200, { linked: false });
+    }
     const stop = /^\/api\/runs\/(run_\w+)\/stop$/.exec(path);
     if (stop && method === 'POST') {
       const run = runs.get(stop[1]!);
@@ -614,6 +825,7 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
         if (b.expectGoalVersion !== undefined && (s().goal?.version ?? null) !== b.expectGoalVersion) throw new Error(`The goal is at version ${s().goal?.version ?? 'none'}, not ${b.expectGoalVersion}. Reload and review it first.`);
         return p.human.setGoal(b.goal);
       } },
+      '/api/plan/approve': { schema: z.object({ sha256: z.string().length(64), expectVersion: z.number().int().min(1), challengeId: z.string(), ...HumanFields }), action: (b) => `approve plan version ${b.expectVersion} (${b.sha256.slice(0, 12)})`, run: (b) => { p.human.approvePlan(b.sha256, b.expectVersion); return planView(); } },
       '/api/team': { schema: z.object({ members: z.array(z.unknown()), expectVersion: z.number().int().optional(), challengeId: z.string(), ...HumanFields }), action: () => 'set the agent team', run: (b) => { p.human.setTeam(b.members, b.expectVersion); return s().team; } },
       '/api/worktrees/merge': { schema: z.object({ id: z.string(), challengeId: z.string(), ...HumanFields }), action: (b) => `merge worktree ${b.id} into the project`, run: (b) => p.mergeWorktree(b.id) },
       '/api/worktrees/discard': { schema: z.object({ id: z.string(), challengeId: z.string(), ...HumanFields }), action: (b) => `discard worktree ${b.id}`, run: (b) => { p.discardWorktree(b.id); return { discarded: true }; } },
@@ -738,6 +950,8 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
       return value;
     },
     async close() {
+      for (const c of continuing.values()) c.cancel = true;
+      try { await remote?.stop(); } catch { /* closing */ }
       for (const r of runs.values()) { if (r.status === 'running') r.child.kill(); }
       for (const t of streams) clearInterval(t);
       server.closeAllConnections();

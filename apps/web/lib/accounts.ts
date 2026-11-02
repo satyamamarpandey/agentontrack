@@ -161,6 +161,11 @@ export async function deleteEverything(user: User, password?: string): Promise<v
     await deleteDoc(d.ref);
   }
   for (const d of summaries.docs) await deleteDoc(d.ref);
+  // Linked computers, and what they and their phones left behind: sealed requests, responses, snapshots, presence and the phone list.
+  for (const comp of (await getDocs(collection(db, 'users', user.uid, 'computers'))).docs) {
+    for (const sub of ['devices', 'requests', 'responses', 'snapshots', 'presence']) for (const d of (await getDocs(collection(comp.ref, sub))).docs) await deleteDoc(d.ref);
+    await deleteDoc(comp.ref);
+  }
   await deleteDoc(doc(db, 'users', user.uid));
   try {
     await deleteUser(user);

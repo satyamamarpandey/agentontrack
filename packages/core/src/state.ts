@@ -90,6 +90,8 @@ export interface ProjectState {
   anchor?: { remote: string; every: number };
   worktrees: WorktreeRec[];
   team: { version: number; members: { agent: string; role: string; budgetTokens?: number; budgetUsd?: number }[] };
+  /** The current phase plan. Editing it saves a new version. Approving it is a human-only event bound to the plan's content hash. */
+  plan: { doc: any; version: number; sha: string; approvedSha: string | null; approvedAt: string | null; approvedVersion: number | null } | null;
   rejectedEvents: { seq: number; type: string; reason: string }[];
   goal: (GoalContract & { version: number; status: string }) | null;
   goals: (GoalContract & { version: number; ts: string; fromProposal?: string })[];
@@ -116,7 +118,7 @@ export function emptyState(): ProjectState {
   return {
     lastSeq: 0, instance: null, approverKey: null, rejectedEvents: [], goal: null, goals: [], proposals: [], decisions: [],
     policy: PolicySchema.parse({}), policyVersion: 0, tasks: new Map(), activeTaskId: null, sessions: new Map(), approvals: new Map(),
-    worktrees: [], team: { version: 0, members: [] }, receipts: [], claims: [], actions: [], actionCounts: new Map(), lastDigest: '', mismatches: [], failures: [], seenNonces: new Set(), reads: new Map(),
+    worktrees: [], team: { version: 0, members: [] }, plan: null, receipts: [], claims: [], actions: [], actionCounts: new Map(), lastDigest: '', mismatches: [], failures: [], seenNonces: new Set(), reads: new Map(),
   };
 }
 
@@ -178,6 +180,14 @@ export function applyEvent(s: ProjectState, e: StoredEvent): void {
       s.tasks.set(p.id, { id: p.id, title: p.title, goalVersion: e.goalVersion ?? 0, criteria: p.criteria, limits: p.limits ?? {}, createdAt: e.ts, accepted: false, verificationBaseline: p.verificationBaseline ?? {} });
       break;
     case 'task.activated': s.activeTaskId = p.id; break;
+    // Not a human-only event, and not a loophole: it changes the active task only to one that the person's approval of this exact plan created
+    // for this phase, and only while that approval still matches the plan.
+    case 'plan.phase_started': {
+      const pl = s.plan;
+      const ph = pl?.doc.phases.find((x: any) => x.id === p.phaseId);
+      if (pl && pl.approvedSha === pl.sha && ph?.taskId && ph.taskId === p.taskId && s.tasks.has(p.taskId) && !s.tasks.get(p.taskId)!.closed) s.activeTaskId = p.taskId;
+      break;
+    }
     case 'task.accepted': { const t = s.tasks.get(p.id); if (t) t.accepted = true; break; }
     case 'task.closed': {
       const t = s.tasks.get(p.id);
@@ -196,6 +206,11 @@ export function applyEvent(s: ProjectState, e: StoredEvent): void {
       break;
     }
     case 'anchor.configured': s.anchor = { remote: p.remote, every: p.every }; break;
+    case 'plan.saved': s.plan = { doc: p.plan, version: (s.plan?.version ?? 0) + 1, sha: p.sha, approvedSha: s.plan?.approvedSha ?? null, approvedAt: s.plan?.approvedAt ?? null, approvedVersion: s.plan?.approvedVersion ?? null }; break;
+    case 'plan.approved': if (s.plan && s.plan.sha === p.sha) {
+      s.plan.approvedSha = p.sha; s.plan.approvedAt = e.ts; s.plan.approvedVersion = p.version;
+      for (const ph of s.plan.doc.phases) if (p.tasks?.[ph.id]) ph.taskId = p.tasks[ph.id]; else delete ph.taskId;
+    } break;
     case 'team.set': s.team = { version: (s.team?.version ?? 0) + 1, members: p.members }; break;
     case 'worktree.created': (s.worktrees ??= []).push({ ...p, status: 'active', createdAt: e.ts }); break;
     case 'worktree.committed': { const w = (s.worktrees ??= []).find((x) => x.id === p.id); if (w) w.commit = p.commit; break; }

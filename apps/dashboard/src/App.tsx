@@ -6,6 +6,7 @@ import { Entry, Offline } from './entry';
 import { Icon, Logo, type IconName } from './icons';
 import { Palette, type Command } from './palette';
 import { Results } from './results';
+import { PhoneAccessCard } from './remote';
 import { TelemetryCard } from './telemetry';
 import { Badge, Empty, Loading, Page, useLoad } from './ui';
 import { Workspace } from './workspace';
@@ -414,6 +415,7 @@ function SettingsPage({ theme, setTheme, onUnpair, reloadShell }: { theme: strin
         <h2>Appearance</h2>
         <div className="row" role="group" aria-label="Theme">{['dark', 'light'].map((t) => <button key={t} className={`chip ${theme === t ? 'on' : ''}`} aria-pressed={theme === t} onClick={() => setTheme(t)}>{t}</button>)}</div>
       </section>
+      <PhoneAccessCard />
       <TelemetryCard consent={!!data.telemetry} setConsent={(on) => void save({ telemetry: on })} />
       <section className="card stack">
         <h2>Diagnostics</h2>

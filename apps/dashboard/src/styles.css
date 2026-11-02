@@ -365,3 +365,14 @@ main.bleed > * { flex-shrink: 1; }
 .toolbar input[type='search'] { max-width: 320px; }
 .toolbar select { width: auto; }
 .card-action { position: relative; z-index: 1; }
+
+/* Phase plan. */
+.plan { padding: 14px; overflow: auto; flex: 1; min-height: 0; }
+.phases { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+.phase { border: 1px solid var(--border); border-left-width: 3px; border-radius: 8px; padding: 12px; background: var(--raised); display: flex; flex-direction: column; gap: 6px; }
+.phase[data-status='verified'] { border-left-color: var(--good); }
+.phase[data-status='failed'] { border-left-color: var(--bad); }
+.phase[data-status='stale'], .phase[data-status='needs-evidence'], .phase[data-status='done-unchecked'] { border-left-color: var(--warn); }
+.phase[data-status='running'], .phase[data-status='ready'] { border-left-color: var(--accent); }
+.phase p { margin: 0; }
+.plan-bar { position: sticky; bottom: 0; background: var(--bg); padding: 10px 0; border-top: 1px solid var(--border); z-index: 2; }

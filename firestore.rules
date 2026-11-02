@@ -66,6 +66,71 @@ service cloud.firestore {
         && isCount(d.tasksVerified) && isCount(d.tasksTotal) && isCount(d.activeDays) && d.activeDays <= 7
         && d.createdAt == request.time;
     }
+    // ---------- Phone link ----------
+    // Everything the phone and a computer exchange is encrypted and signed by keys Firestore never sees, so these rules do not decide what is
+    // allowed. They keep accounts apart, keep each principal to its own kind of write, and bound size and lifetime. The person's own account
+    // (the phone) writes requests. A second, limited account made for the computer writes answers and snapshots. Neither can do the other's job.
+    function isComputer(uid, cid) {
+      return request.auth != null
+        && request.auth.uid == get(/databases/$(database)/documents/users/$(uid)/computers/$(cid)).data.computerUid;
+    }
+    function shortString(v, max) { return v is string && v.size() > 0 && v.size() <= max; }
+    function validPub(p) { return p is map && p.keys().hasOnly(['sign', 'agree']) && shortString(p.sign, 200) && shortString(p.agree, 200); }
+    function validEnvelope(d, id) {
+      return d.keys().hasOnly(['v', 'uid', 'cid', 'did', 'rid', 'kind', 'ctr', 'iat', 'exp', 'iv', 'ct', 'sig', 'expireAt'])
+        && d.keys().hasAll(['v', 'uid', 'cid', 'did', 'rid', 'kind', 'ctr', 'iat', 'exp', 'iv', 'ct', 'sig'])
+        && d.v == 1 && d.rid == id
+        && shortString(d.uid, 128) && shortString(d.cid, 64) && shortString(d.did, 64) && shortString(d.kind, 40)
+        && d.ctr is int && d.ctr >= 0 && d.iat is number && d.exp is number
+        && d.exp - d.iat <= 600000 && d.exp > d.iat
+        && shortString(d.iv, 40) && shortString(d.sig, 200) && d.ct is string && d.ct.size() > 0 && d.ct.size() <= 260000;
+    }
+
+    match /users/{uid}/computers/{cid} {
+      allow read: if isOwner(uid) || isComputer(uid, cid);
+      // Made once, by the person, with the computer's key and its limited account named. After that only its display name can change, so a
+      // page cannot swap the key later.
+      allow create: if isOwner(uid)
+        && request.resource.data.keys().hasOnly(['name', 'computerUid', 'pub', 'fingerprint', 'createdAt'])
+        && request.resource.data.keys().hasAll(['name', 'computerUid', 'pub', 'fingerprint', 'createdAt'])
+        && shortString(request.resource.data.name, 60) && shortString(request.resource.data.computerUid, 128)
+        && validPub(request.resource.data.pub) && shortString(request.resource.data.fingerprint, 40)
+        && request.resource.data.createdAt == request.time;
+      allow update: if isOwner(uid) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name']) && shortString(request.resource.data.name, 60);
+      allow delete: if isOwner(uid);
+
+      match /devices/{did} {
+        allow read: if isOwner(uid) || isComputer(uid, cid);
+        // A phone asks to be trusted. Being listed here trusts nothing: only the computer's own file does that.
+        allow create: if isOwner(uid) && request.resource.data.keys().hasOnly(['name', 'pub', 'status', 'createdAt'])
+          && request.resource.data.status == 'pending' && shortString(request.resource.data.name, 60) && validPub(request.resource.data.pub)
+          && request.resource.data.createdAt == request.time;
+        allow update: if isComputer(uid, cid) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) && request.resource.data.status in ['trusted', 'revoked'];
+        allow delete: if isOwner(uid) || isComputer(uid, cid);
+      }
+      match /requests/{rid} {
+        allow create: if isOwner(uid) && validEnvelope(request.resource.data, rid)
+          && request.resource.data.uid == uid && request.resource.data.cid == cid
+          && request.resource.data.iat <= request.time.toMillis() + 120000 && request.resource.data.exp > request.time.toMillis();
+        allow read, delete: if isComputer(uid, cid) || isOwner(uid);
+      }
+      match /responses/{rid} {
+        allow create, update: if isComputer(uid, cid) && validEnvelope(request.resource.data, rid) && request.resource.data.uid == uid && request.resource.data.cid == cid;
+        allow read, delete: if isOwner(uid) || isComputer(uid, cid);
+      }
+      match /snapshots/{sid} {
+        allow create, update: if isComputer(uid, cid) && request.resource.data.keys().hasOnly(['v', 'uid', 'cid', 'did', 'rid', 'kind', 'ctr', 'iat', 'exp', 'iv', 'ct', 'sig'])
+          && request.resource.data.keys().hasAll(['v', 'uid', 'cid', 'did', 'rid', 'kind', 'ctr', 'iat', 'exp', 'iv', 'ct', 'sig'])
+          && request.resource.data.uid == uid && request.resource.data.cid == cid && request.resource.data.ct is string && request.resource.data.ct.size() <= 260000;
+        allow read, delete: if isOwner(uid) || isComputer(uid, cid);
+      }
+      match /presence/{pid} {
+        allow create, update: if isComputer(uid, cid) && request.resource.data.keys().hasOnly(['lastSeen', 'version']) && request.resource.data.lastSeen == request.time;
+        allow read: if isOwner(uid) || isComputer(uid, cid);
+        allow delete: if isOwner(uid);
+      }
+    }
+
     match /telemetry/{id} {
       allow create: if validCounts(request.resource.data, id);
     }

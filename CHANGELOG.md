@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased: platform integrations, tested separately from 1.0.0-rc.1
+## 1.0.0-rc.2
 
 - One provider layer over the same engine: Copilot CLI, Gemini CLI, OpenCode and Cline verified on the real programs with a scripted model; Cursor, Devin and Kiro written from docs and never run on the real programs.
 - `agentontrack providers`, `mcp-config`, `research`, and `run` and `install` for each platform.

@@ -94,6 +94,13 @@ function HomeScreen({ be, go, onOut }: { be: Backend; go: (r: { cid?: string; pr
   );
 }
 
+/** Whether this phone itself has a network. Offline, nothing can be sent, and what is shown is only what was last received. */
+function useOnline(): boolean {
+  const [on, setOn] = useState(typeof navigator === 'undefined' ? true : navigator.onLine);
+  useEffect(() => { const up = () => setOn(true); const down = () => setOn(false); addEventListener('online', up); addEventListener('offline', down); return () => { removeEventListener('online', up); removeEventListener('offline', down); }; }, []);
+  return on;
+}
+
 function usePresence(be: Backend, cid: string) {
   const [last, setLast] = useState<number | null | undefined>(undefined);
   useEffect(() => be.watchPresence(cid, setLast), [be, cid]);
@@ -158,6 +165,8 @@ function ProjectsScreen({ be, cid, go }: { be: Backend; cid: string; go: (r: { c
 }
 
 function Freshness({ online, last, snap }: { online: boolean; last: number | null | undefined; snap: Snapshot | null }) {
+  const phoneOnline = useOnline();
+  if (!phoneOnline) return <p className="m-fresh off" role="status" data-testid="m-fresh">This phone is offline. What you see is what was last received{snap?.generatedAt ? ` (${ago(snap.generatedAt)})` : ''}, nothing is live, and controls are off until it is back.</p>;
   return (
     <p className={`m-fresh ${online ? 'on' : 'off'}`} role="status" data-testid="m-fresh">
       {online ? 'Live' : 'Your computer is not reachable.'} {snap?.generatedAt ? `Updated ${ago(snap.generatedAt)}.` : ''} {!online ? `${last ? `Last seen ${ago(last)}. ` : ''}Controls are off until it is back, and nothing here is live.` : ''}
@@ -174,7 +183,8 @@ function ProjectScreen({ be, cid, project, tab, go }: { be: Backend; cid: string
   const s = snap?.body;
   const act = useAction();
   const call = useCallback(<T,>(action: string, params: object = {}, ok = 'Done.') => act.run(() => be.call<T>(cid, action, { project, ...params }), ok), [act, be, cid, project]);
-  const can = online && !act.busy;
+  const phoneOnline = useOnline();
+  const can = online && phoneOnline && !act.busy;
   return (
     <Shell title={s?.project?.name ?? 'Project'} back={() => go({ cid })} tabs={
       <nav className="m-tabs" aria-label="Project">
@@ -222,7 +232,9 @@ function Progress({ s, can, call, be, cid, project }: { s: any; can: boolean; ca
   const startable = (agents ?? []).filter((a) => a.canStart);
   const chosen = agent || startable[0]?.id || '';
   const modelsFor = (models ?? []).filter((m) => m.agent === chosen);
-  const modelChoice = model || modelsFor.find((m) => m.entitlement === 'worked')?.id || modelsFor[0]?.id || '';
+  // With nothing found yet, the small default AgentOnTrack uses everywhere is used, and the screen says so. It is never claimed to be available.
+  const FALLBACK_MODEL = 'haiku';
+  const modelChoice = model || modelsFor.find((m) => m.entitlement === 'worked')?.id || modelsFor[0]?.id || (chosen ? FALLBACK_MODEL : '');
   const phases: any[] = s.plan?.phases ?? [];
   const next = phases.find((p) => p.status === 'ready');
   const done = phases.filter((p) => ['verified', 'done-unchecked', 'skipped'].includes(p.status)).length;
@@ -280,7 +292,7 @@ function Progress({ s, can, call, be, cid, project }: { s: any; can: boolean; ca
           </label>
           <label>Model
             <select value={modelChoice} onChange={(e) => setModel(e.target.value)} name="m-model" data-testid="m-model" disabled={modelsFor.length === 0}>
-              {modelsFor.length === 0 ? <option value="">None found yet</option> : modelsFor.map((m) => <option key={m.id} value={m.id}>{m.id}{m.entitlement === 'worked' ? ' (worked here)' : ' (found, not tried)'}</option>)}
+              {modelsFor.length === 0 ? <option value={FALLBACK_MODEL}>{FALLBACK_MODEL} (small default, none found yet)</option> : modelsFor.map((m) => <option key={m.id} value={m.id}>{m.id}{m.entitlement === 'worked' ? ' (worked here)' : ' (found, not tried)'}</option>)}
             </select>
           </label>
         </div>
@@ -288,7 +300,7 @@ function Progress({ s, can, call, be, cid, project }: { s: any; can: boolean; ca
         {err ? <p className="m-note">Could not load the agent list: {err}</p> : null}
         <p className="m-note">Models are those this computer reported or used. Whether your plan allows one is only known after a run uses it.</p>
         <button className="btn primary m-btn" disabled={!can || !prompt.trim() || !chosen || !modelChoice} onClick={() => void call('run.start', { prompt, agent: chosen, model: modelChoice }, 'Sent to your computer.').then((r) => { if (r) setPrompt(''); })} data-testid="m-send">Send</button>
-        {!modelChoice && chosen ? <p className="m-note">No model has been found for this agent, so nothing can be sent from here. Run it once on your computer first.</p> : null}
+
       </section>
     </>
   );

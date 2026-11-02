@@ -13,6 +13,7 @@ A free, open-source, local-first control layer for AI coding agents. It uses you
 - **States its own coverage.** Each record says whether the action was enforced or only partly visible.
 - **Withholds `VERIFIED`** unless your checks pass on the current code, no unauthorized change is open, and no sign of weakened tests is unreviewed. An agent saying "done" counts for nothing.
 - **Local dashboard** paired to your browser with a one-time code: goals, approvals, evidence, usage, safety.
+- **Plans and a phone remote.** A goal becomes editable phases with checks and limits; agents and models come from what your computer really reports. An optional phone page (installable) is a remote control for projects already on a computer you authorized: end-to-end encrypted, approved device by device at the computer, with no terminal and no code editing. See [Phone remote control](docs/workspace/PHONE.md).
 - **A checkable record.** Append-only log, separate witness file and an optional passphrase-protected approver key. Tamper-evident under [stated assumptions](docs/security/integrity.md). Not immutable.
 
 ## Install
@@ -63,6 +64,6 @@ From [benchmark v4](benchmarks/README.md): self-run, small fixtures we wrote, on
 
 ## Docs
 
-[Install and troubleshooting](docs/install.md) · [Compatibility](docs/compatibility.md) · [Security limits](SECURITY.md) · [Integrity trust model](docs/security/integrity.md) · [Benchmarks](benchmarks/README.md) · [Evaluate it yourself](docs/evaluation/INDEPENDENT.md) · [Changelog](CHANGELOG.md)
+[Install and troubleshooting](docs/install.md) · [Phone remote control](docs/workspace/PHONE.md) · [Compatibility](docs/compatibility.md) · [Security limits](SECURITY.md) · [Integrity trust model](docs/security/integrity.md) · [Benchmarks](benchmarks/README.md) · [Evaluate it yourself](docs/evaluation/INDEPENDENT.md) · [Changelog](CHANGELOG.md)
 
 Not affiliated with or endorsed by Anthropic, OpenAI or Nous Research. Licensed under Apache-2.0.

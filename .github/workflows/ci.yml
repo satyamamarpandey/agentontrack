@@ -60,7 +60,7 @@ jobs:
       - run: pnpm build
       - run: pnpm build:pages
       - run: pnpm exec playwright install --with-deps firefox webkit chromium
-      - run: pnpm exec playwright test --project=firefox --project=webkit --project=mobile
+      - run: pnpm exec playwright test --project=firefox --project=webkit --project=mobile --project=android --project=iphone
 
   accounts:
     runs-on: ubuntu-latest
@@ -91,7 +91,7 @@ jobs:
         run: |
           node -e "const r=require('./test-results/e2e.json');const n=r.stats.skipped+r.stats.unexpected;console.log(JSON.stringify(r.stats));if(r.stats.skipped>0||r.stats.expected<20){console.error('skipped or too few tests ran');process.exit(1)}"
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: always()
         with:
           name: playwright-accounts
           path: test-results/

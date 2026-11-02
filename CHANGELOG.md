@@ -11,6 +11,14 @@
 - Optional anonymous usage counts, off by default, with a preview of exactly what would be sent.
 - Not changed or not claimed: sign-in is written and tested against emulators only, and is off until the owner creates a Firebase project. Only Claude Code starts from the product. AgentOnTrack still used more tokens and time than the agent alone in its own benchmarks.
 
+- **Phone remote control** for projects that already exist on a computer you have linked: sign in with the same account, compare fingerprints, approve the phone at the computer, then see progress, phases, activity, evidence and suggestions, send a prompt, stop, pause, continue or loop a phase, handle handoffs, and decline or (for small file writes only) approve. Everything is signed and encrypted end to end, rate-limited, and the computer checks every request against the current goal, plan and approvals. It has no terminal, no code editing and no project creation. Installable as a PWA. Details and limits: docs/workspace/PHONE.md.
+- **Plans**: a goal becomes editable phases with dependencies and acceptance checks; limits are enforced by the computer; a managed loop repeats a phase until its checks pass (at most five rounds) and can be cancelled.
+- **Agent and model discovery** from what the computer really reports (a runtime's own session init, its config, models used in recorded runs, local model servers). A listed model is never called available to you; only a run that used it says "worked here".
+- **Commands**: a prompt starting with a slash is sent only if that agent reported the command. Otherwise it is refused with the reason.
+- **Next-prompt suggestions** (at most three, from the record, each with the fact it came from, an editable prompt and a recommended agent), in the website, on the phone and with `agentontrack next`. `agentontrack models` lists models.
+- Fixes: a configured agent command counts as installed; password reset says the same thing whether or not an account exists.
+- Not claimed: sign-in and the phone link are verified only against the Firebase emulators until the owner creates a project; Android and iPhone results are device profiles, not physical phones.
+
 ## 1.0.0-rc.3
 
 - A redesigned dashboard and site: one set of design tokens, a command palette, grouped navigation, light and dark themes, and an accessible dialog that traps focus.

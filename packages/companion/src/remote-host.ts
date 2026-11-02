@@ -59,11 +59,17 @@ export type Executor = (action: string, params: unknown, ctx: HostContext) => Pr
 export type Failure = { ok: false; code: string; message: string };
 export type Outcome = { ok: true; result: unknown } | Failure;
 
+/** Most genuine requests per phone per minute: looking is cheap, controlling is not. */
+export const RATE_READ = 60;
+export const RATE_CONTROL = 12;
+
 export class RemoteHost {
   private identity!: Identity;
   private keys = new Map<string, CryptoKey>();
   /** One request at a time per device, so two requests with the same counter cannot both pass the check. */
   private gate = new Map<string, Promise<unknown>>();
+  /** When each approved phone's recent genuine requests happened, so a stuck or stolen phone cannot flood this computer or the free Firebase allowance. */
+  private hits = new Map<string, number[]>();
 
   constructor(private file: RemoteFile, private run: Executor, private persist: (f: RemoteFile) => void = (f) => saveRemote(f), private now: () => number = Date.now) {}
 
@@ -154,7 +160,13 @@ export class RemoteHost {
     let out: Outcome;
     const isRead = (READ_ACTIONS as readonly string[]).includes(String(plain.action));
     const isControl = (CONTROL_ACTIONS as readonly string[]).includes(String(plain.action));
-    if (typeof plain.action !== 'string' || plain.action.length > 60) out = { ok: false, code: 'malformed', message: 'The request names no action.' };
+    const bucket = `${device.did}:${(CONTROL_ACTIONS as readonly string[]).includes(String(plain.action)) ? 'control' : 'read'}`;
+    const recent = (this.hits.get(bucket) ?? []).filter((x) => t - x < 60_000);
+    const limited = recent.length >= (bucket.endsWith(':control') ? RATE_CONTROL : RATE_READ);
+    if (!limited) { recent.push(t); }
+    this.hits.set(bucket, recent);
+    if (limited) out = { ok: false, code: 'rate-limited', message: 'This phone is sending requests too fast. Nothing was run. Wait a minute and try again.' };
+    else if (typeof plain.action !== 'string' || plain.action.length > 60) out = { ok: false, code: 'malformed', message: 'The request names no action.' };
     else if (!isRead && !isControl) out = { ok: false, code: 'unknown-action', message: 'A phone cannot ask for that.' };
     else if (isControl && device.level !== 'control') out = { ok: false, code: 'view-only', message: 'This phone was approved to look, not to control. Change that on the computer.' };
     else {

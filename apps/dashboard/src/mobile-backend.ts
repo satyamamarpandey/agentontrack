@@ -2,6 +2,7 @@
 import { getApp, getApps, initializeApp, type FirebaseOptions } from 'firebase/app';
 import { connectAuthEmulator, getAuth, indexedDBLocalPersistence, initializeAuth, signOut as fbSignOut } from 'firebase/auth';
 import { collection, connectFirestoreEmulator, deleteDoc, doc, getDocs, getFirestore, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore';
+import { protect } from './app-check';
 import { createIdentity, fingerprint, newId, open, pairKey, seal, snapshotKey, type Envelope, type Identity, type PublicIdentity } from '@agentontrack/remote';
 
 const EMULATORS = import.meta.env.VITE_FIREBASE_EMULATORS === '1';
@@ -25,6 +26,7 @@ export async function openBackend(config: string) {
   const fresh = getApps().length === 0;
   const opts = JSON.parse(config) as FirebaseOptions;
   const app = fresh ? initializeApp(opts) : getApp();
+  if (fresh) protect(app, EMULATORS);
   const auth = fresh ? initializeAuth(app, { persistence: indexedDBLocalPersistence }) : getAuth(app);
   const db = getFirestore(app);
   if (fresh && EMULATORS) { connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true }); connectFirestoreEmulator(db, '127.0.0.1', 8080); }

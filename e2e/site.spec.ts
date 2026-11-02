@@ -263,3 +263,12 @@ for (const theme of ['dark', 'light']) {
     }
   });
 }
+
+test('the dashboard page policy allows reCAPTCHA hosts only in a build that has App Check', () => {
+  const html = readFileSync(join('dist-pages', 'dashboard', 'index.html'), 'utf8');
+  const withKey = !!process.env.NEXT_PUBLIC_APPCHECK_SITE_KEY && !!process.env.NEXT_PUBLIC_FIREBASE_CONFIG;
+  expect(/recaptcha/.test(html)).toBe(withKey);
+  expect(html).toContain("default-src 'none'");
+  expect(html).not.toContain("'unsafe-eval'");
+  expect(html).not.toMatch(/script-src[^;]*'unsafe-inline'/);
+});

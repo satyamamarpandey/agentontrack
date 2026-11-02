@@ -1,6 +1,7 @@
 // Loaded only when a signed-in person presses Save.
 // This page holds the companion session token, so it uses no popup resolver: Google's sign-in script loads only on the account page, in another tab.
 import { getApp, getApps, initializeApp } from 'firebase/app';
+import { protect } from './app-check';
 import { connectAuthEmulator, indexedDBLocalPersistence, initializeAuth } from 'firebase/auth';
 import { connectFirestoreEmulator, doc, getFirestore, serverTimestamp, setDoc } from 'firebase/firestore';
 import type { ProjectSummary } from './metrics';
@@ -11,6 +12,7 @@ const EMULATORS = import.meta.env.VITE_FIREBASE_EMULATORS === '1';
 function connect(config: string) {
   const fresh = getApps().length === 0;
   const app = fresh ? initializeApp(JSON.parse(config)) : getApp();
+  if (fresh) protect(app, EMULATORS);
   const auth = initializeAuth(app, { persistence: indexedDBLocalPersistence });
   const db = getFirestore(app);
   if (fresh && EMULATORS) {

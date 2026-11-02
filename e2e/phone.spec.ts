@@ -5,8 +5,11 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import AxeBuilder from '@axe-core/playwright';
 import { devices, expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { installHooks } from '../packages/adapters/dist/index.js';
 import { startCompanion, type Companion } from '../packages/companion/dist/index.js';
+import { classifyCommand, Project } from '../packages/core/dist/index.js';
 
 const ORIGIN = 'http://127.0.0.1:4199';
 const SITE = `${ORIGIN}/agentontrack`;
@@ -18,7 +21,9 @@ test.describe.configure({ mode: 'serial' });
 const FAKE_AGENT = `
 import { writeFileSync } from 'node:fs';
 console.log(JSON.stringify({ type: 'system', subtype: 'init', model: 'fake' }));
-writeFileSync('from-phone.txt', 'ok');
+const prompt = process.argv[process.argv.indexOf('-p') + 1] ?? '';
+if (/slow job/.test(prompt)) { await new Promise((ok) => setTimeout(ok, 25000)); writeFileSync('slow-finished.txt', 'ran to the end'); }
+else writeFileSync('from-phone.txt', 'ok');
 console.log(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Wrote the file.' }] } }));
 console.log(JSON.stringify({ type: 'result', subtype: 'success', total_cost_usd: 0.01, duration_ms: 5, duration_api_ms: 3, num_turns: 1, usage: { input_tokens: 1, output_tokens: 1 } }));
 `;
@@ -72,6 +77,11 @@ test.beforeAll(async ({ browser }) => {
   writeFileSync(join(root, 'README.md'), '# Readme for the phone\n');
   writeFileSync(join(dir, 'fake-claude.mjs'), FAKE_AGENT);
   process.env.AGENTONTRACK_HOME = join(dir, 'home');
+  const seed = new Project(root);
+  seed.human.setGoal({ statement: 'Keep the phone link honest', scope: { include: ['**'] } });
+  seed.human.createTask({ id: 't1', title: 'A task', criteria: [] });
+  seed.close();
+  installHooks('claude-code', root, 'agentontrack');
   c = await startCompanion({
     root, allowedOrigins: [ORIGIN], claudeCommand: [process.execPath, join(dir, 'fake-claude.mjs')],
     onTerminalChallenge: (code) => { codes.push(code); },
@@ -134,6 +144,17 @@ test('after the person approves the phone, the project appears and shows live st
   await expect(project).toBeVisible({ timeout: 40_000 });
   await project.click();
   await expect(ppage.getByTestId('m-fresh')).toContainText('Live', { timeout: 30_000 });
+  // The bottom bar is one short row that never covers the controls, and every tab is a real touch target.
+  const bar = (await ppage.locator('.m-tabs').boundingBox())!;
+  expect(bar.height).toBeLessThan(90);
+  for (const b of await ppage.locator('.m-tabs button').all()) { const box = (await b.boundingBox())!; expect(box.height).toBeGreaterThanOrEqual(44); expect(box.width).toBeGreaterThanOrEqual(44); }
+  for (const tab of ['progress', 'activity', 'evidence', 'approvals', 'more']) {
+    await ppage.getByTestId(`m-tab-${tab}`).click();
+    await ppage.screenshot({ path: `test-results/phone-screens/${tab}.png` });
+    const axe = await new AxeBuilder({ page: ppage }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze();
+    expect(axe.violations.filter((v) => ['serious', 'critical'].includes(v.impact ?? '')).map((v) => `${tab}: ${v.id}`), 'accessibility').toEqual([]);
+  }
+  await ppage.getByTestId('m-tab-progress').click();
 });
 
 test('a prompt sent from the phone runs the desktop agent, and the evidence comes back', async () => {
@@ -147,6 +168,111 @@ test('a prompt sent from the phone runs the desktop agent, and the evidence come
   await ppage.getByTestId('m-files').click();
   await ppage.getByRole('button', { name: 'README.md' }).click();
   await expect(ppage.getByTestId('m-file')).toContainText('Readme for the phone');
+});
+
+test('a prompt can be cancelled from the phone, and the agent really stops', async () => {
+  await ppage.getByTestId('m-tab-progress').click();
+  await ppage.getByTestId('m-prompt').fill('slow job please');
+  await ppage.getByTestId('m-send').click();
+  await expect(ppage.getByTestId('m-result')).toContainText('Sent to your computer', { timeout: 60_000 });
+  await ppage.getByTestId('m-tab-activity').click();
+  const running = ppage.locator('[data-testid=m-run][data-status=running]').first();
+  await expect(running).toBeVisible({ timeout: 40_000 });
+  await running.getByTestId('m-stop-run').click();
+  await expect(ppage.locator('[data-testid=m-run][data-status=running]')).toHaveCount(0, { timeout: 30_000 });
+  await ppage.waitForTimeout(2000);
+  expect(existsSync(join(root, 'slow-finished.txt'))).toBe(false);
+});
+
+test('a held approval shows on the phone: a push cannot be approved there, and can be declined', async () => {
+  const p = new Project(root);
+  const cmd = classifyCommand('git push origin main');
+  p.preAction({ runtime: 'claude-code', tool: 'Bash', effects: cmd.effects, opaque: false, coverage: 'enforced', rawInput: 'git push origin main' });
+  p.close();
+  await ppage.getByTestId('m-tab-approvals').click();
+  const card = ppage.getByTestId('m-approval').first();
+  await expect(card).toBeVisible({ timeout: 30_000 });
+  await expect(card).toContainText('approved at your computer');
+  await expect(card.getByTestId('m-approve')).toHaveCount(0);
+  await card.getByTestId('m-deny').click();
+  await expect(ppage.getByTestId('m-approval')).toHaveCount(0, { timeout: 30_000 });
+  const after = new Project(root);
+  expect([...after.state().approvals.values()].some((a) => a.effect.kind === 'vcs.push' && a.status === 'denied')).toBe(true);
+  after.close();
+});
+
+test('a handoff made on the phone carries evidence and no approval, and is on the computer', async () => {
+  await ppage.getByTestId('m-tab-more').click();
+  await ppage.getByTestId('m-handoff').click();
+  await expect(ppage.getByTestId('m-result')).toContainText('Handoff saved', { timeout: 60_000 });
+  const p = new Project(root);
+  const { listHandoffs } = await import('../packages/core/dist/index.js');
+  expect(listHandoffs(p).length).toBeGreaterThan(0);
+  p.close();
+});
+
+test('offline: the phone says nothing is live and turns controls off, and they come back when it does', async () => {
+  await ppage.getByTestId('m-tab-progress').click();
+  await ppage.getByTestId('m-prompt').fill('anything');
+  await expect(ppage.getByTestId('m-send')).toBeEnabled();
+  await phone.setOffline(true);
+  await expect(ppage.getByTestId('m-fresh')).toContainText('This phone is offline', { timeout: 15_000 });
+  await expect(ppage.getByTestId('m-send')).toBeDisabled();
+  await phone.setOffline(false);
+  await expect(ppage.getByTestId('m-fresh')).toContainText('Live', { timeout: 40_000 });
+  await expect(ppage.getByTestId('m-send')).toBeEnabled();
+});
+
+test('a second phone on the same account is a separate device: it needs its own approval, and "look only" cannot control', async ({ browser }) => {
+  const second = await browser.newContext({ ...devices['iPhone 14'] });
+  try {
+    const pg = await second.newPage();
+    await signIn(pg);
+    await pg.goto(phoneUrl);
+    const card = pg.locator('[data-testid^=m-computer-]').first();
+    await expect(card).toBeVisible({ timeout: 30_000 });
+    await expect(card.getByTestId('m-open')).toHaveCount(0);
+    await card.getByTestId('m-connect').click();
+    await card.getByTestId('m-match').click();
+    await expect(card.getByTestId('m-waiting')).toBeVisible({ timeout: 20_000 });
+    const fp = (await card.getByTestId('m-phone-fp').textContent())!.trim();
+    expect(fp).not.toBe(phoneFingerprint);
+    await expect(dpage.getByTestId('phone-pending')).toContainText(fp, { timeout: 30_000 });
+    const approve = dpage.locator('[data-testid^=trust-]').first();
+    const did2 = ((await approve.getAttribute('data-testid')) ?? '').replace('trust-', '');
+    await approve.click();
+    await dpage.locator('[role=dialog]:not([data-testid=terminal-code-dialog])').getByRole('button', { name: 'Confirm' }).click();
+    await expect(dpage.getByTestId('phone-devices')).toContainText(fp.slice(0, 4), { timeout: 20_000 });
+    await expect(card.getByTestId('m-open')).toBeVisible({ timeout: 30_000 });
+    await card.getByTestId('m-open').click();
+    await pg.locator('[data-testid^=m-project-]').first().click();
+    await pg.getByTestId('m-prompt').fill('Make another change');
+    await pg.getByTestId('m-send').click();
+    await expect(pg.getByTestId('m-result')).toContainText('approved to look, not to control', { timeout: 60_000 });
+    // Revoking the second phone does not touch the first.
+    await dpage.getByTestId(`revoke-${did2}`).click();
+    await expect(ppage.getByTestId('m-fresh')).toContainText('Live');
+  } finally { await second.close(); }
+});
+
+test('a different account sees none of this computer', async ({ browser }) => {
+  const stranger = await browser.newContext({ ...devices['Pixel 7'] });
+  try {
+    const pg = await stranger.newPage();
+    await pg.goto(`${SITE}/account/`);
+    const [popup] = await Promise.all([pg.waitForEvent('popup'), pg.getByTestId('sign-in').click()]);
+    await expect(async () => {
+      await popup.getByText('Add new account').click({ timeout: 3000 });
+      await expect(popup.locator('#email-input')).toBeVisible({ timeout: 2000 });
+    }).toPass({ timeout: 30_000 });
+    await popup.locator('#email-input').fill('someone-else@example.com');
+    await popup.locator('#display-name-input').fill('Someone Else');
+    await popup.locator('#sign-in').click();
+    await expect(pg.getByTestId('signed-in')).toBeVisible({ timeout: 20_000 });
+    await pg.goto(phoneUrl);
+    await expect(pg.getByRole('heading', { name: 'No computer is linked yet' })).toBeVisible({ timeout: 30_000 });
+    await expect(pg.locator('[data-testid^=m-computer-]')).toHaveCount(0);
+  } finally { await stranger.close(); }
 });
 
 test('the phone has no way to run a terminal, write code or make a project, and a high-risk approval is left to the desktop', async () => {

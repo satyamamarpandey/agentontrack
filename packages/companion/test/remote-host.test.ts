@@ -39,6 +39,17 @@ describe('a request from a trusted phone', () => {
     expect(ran).toEqual([{ action: 'projects.list', params: {}, did }]);
   });
 
+  it('limits how fast a phone can ask, separately for looking and controlling, and recovers after a minute', async () => {
+    for (let i = 0; i < 12; i++) expect((await answer(await host.handle(await ask('run.stop', { runId: `run_${i}` }))))!.ok).toBe(true);
+    const over = await answer(await host.handle(await ask('run.stop', { runId: 'run_x' })));
+    expect(over).toMatchObject({ ok: false, code: 'rate-limited' });
+    expect(ran).toHaveLength(12);
+    // Looking has its own allowance, so a phone that is being limited can still see what is happening.
+    expect((await answer(await host.handle(await ask('ping'))))!.ok).toBe(true);
+    T += 61_000;
+    expect((await answer(await host.handle(await ask('run.stop', { runId: 'run_after' }))))!.ok).toBe(true);
+  });
+
   it('is run once, however many times Firestore delivers it, and always gets the same answer', async () => {
     const env = await ask('run.stop', { runId: 'run_1' });
     const first = await host.handle(env);

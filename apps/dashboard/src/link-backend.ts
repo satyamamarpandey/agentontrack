@@ -1,6 +1,7 @@
 // Desktop side of the phone link, in the browser: the signed-in person makes the computer's own limited account and registers its key.
 // Loaded only when someone presses the button, and only in a build with accounts.
 import { deleteApp, getApp, getApps, initializeApp, type FirebaseOptions } from 'firebase/app';
+import { protect } from './app-check';
 import { connectAuthEmulator, createUserWithEmailAndPassword, getAuth, indexedDBLocalPersistence, initializeAuth, signOut } from 'firebase/auth';
 import { collection, connectFirestoreEmulator, deleteDoc, doc, getDocs, getFirestore, serverTimestamp, setDoc } from 'firebase/firestore';
 
@@ -10,6 +11,7 @@ function primary(config: string) {
   const fresh = getApps().length === 0;
   const opts = JSON.parse(config) as FirebaseOptions;
   const app = fresh ? initializeApp(opts) : getApp();
+  if (fresh) protect(app, EMULATORS);
   const auth = fresh ? initializeAuth(app, { persistence: indexedDBLocalPersistence }) : getAuth(app);
   const db = getFirestore(app);
   if (fresh && EMULATORS) { connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true }); connectFirestoreEmulator(db, '127.0.0.1', 8080); }

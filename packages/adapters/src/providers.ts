@@ -421,7 +421,7 @@ export const perplexityMcpConfig = () => ({ mcpServers: { perplexity: { command:
 
 /** The hook command as written for this host. Reading it back tests what the host will really run. */
 export function providerHookCommand(a: ProviderAdapter, root: string): string | null {
-  const ends = new RegExp(`hook ${a.id}$`);
+  const ends = new RegExp(`hook ${a.id}( --event \\w+)?$`);
   for (const f of a.hookFiles) {
     const path = join(root, f);
     if (!existsSync(path)) continue;

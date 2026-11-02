@@ -1,0 +1,92 @@
+{
+  "which": "cline",
+  "label": "real host, scripted model",
+  "ranAt": "2026-11-01T23:43:30.314Z",
+  "runner": "Linux",
+  "results": [
+    {
+      "name": "Real program present",
+      "outcome": "PASS",
+      "label": "real host, scripted model",
+      "detail": "3.0.74"
+    },
+    {
+      "name": "Installed",
+      "outcome": "PASS",
+      "label": "real host, scripted model",
+      "detail": ".cline/hooks/PreToolUse, .cline/hooks/PostToolUse, .cline/hooks/TaskStart, .cline/hooks/TaskResume"
+    },
+    {
+      "name": "Push held by the gate",
+      "outcome": "PREVENTED",
+      "label": "real host, scripted model",
+      "detail": "[{\"tool\":\"run_commands\",\"decision\":\"request_approval\",\"kinds\":[\"vcs.push\"],\"runtime\":\"cline\"}]"
+    },
+    {
+      "name": "Still held after a denial",
+      "outcome": "PREVENTED",
+      "label": "real host, scripted model",
+      "detail": ""
+    },
+    {
+      "name": "Allowed once after approval",
+      "outcome": "PASS",
+      "label": "real host, scripted model",
+      "detail": ""
+    },
+    {
+      "name": "Out-of-scope file write held",
+      "outcome": "PREVENTED",
+      "label": "real host, scripted model",
+      "detail": "{\"tool\":\"editor\",\"decision\":\"request_approval\",\"kinds\":[\"fs.write\"],\"runtime\":\"cline\"}"
+    },
+    {
+      "name": "Runtime recorded",
+      "outcome": "PASS",
+      "label": "real host, scripted model",
+      "detail": ""
+    },
+    {
+      "name": "Record intact",
+      "outcome": "PASS",
+      "label": "real host, scripted model",
+      "detail": ""
+    },
+    {
+      "name": "Gate crash",
+      "outcome": "FAIL-OPEN",
+      "label": "real host, scripted model",
+      "detail": "exit 0; [{\"query\":\"git push origin main\",\"result\":\"\\n[stderr]\\nTo /tmp/aot-prov-BT8Poz/remote.git\\n * [new branch]      main -> main\\n\",\"success\":true}]"
+    },
+    {
+      "name": "Gate malformed",
+      "outcome": "FAIL-OPEN",
+      "label": "real host, scripted model",
+      "detail": "exit 0; [{\"query\":\"git push origin main\",\"result\":\"\\n[stderr]\\nTo /tmp/aot-prov-37IUuX/remote.git\\n * [new branch]      main -> main\\n\",\"success\":true}]"
+    },
+    {
+      "name": "Gate exit3",
+      "outcome": "FAIL-OPEN",
+      "label": "real host, scripted model",
+      "detail": "exit 0; [{\"query\":\"git push origin main\",\"result\":\"\\n[stderr]\\nTo /tmp/aot-prov-bMTUd2/remote.git\\n * [new branch]      main -> main\\n\",\"success\":true}]"
+    },
+    {
+      "name": "Gate timeout",
+      "outcome": "FAIL-OPEN",
+      "label": "real host, scripted model",
+      "detail": "exit null; [{\"query\":\"git push origin main\",\"result\":\"\\n[stderr]\\nTo /tmp/aot-prov-TkJGLT/remote.git\\n * [new branch]      main -> main\\n\",\"success\":true}]"
+    },
+    {
+      "name": "Gate missing",
+      "outcome": "FAIL-OPEN",
+      "label": "real host, scripted model",
+      "detail": "exit 0; [{\"query\":\"git push origin main\",\"result\":\"\\n[stderr]\\nTo /tmp/aot-prov-IZH1fJ/remote.git\\n * [new branch]      main -> main\\n\",\"success\":true}]"
+    },
+    {
+      "name": "Control: with hooks removed, the same push happens",
+      "outcome": "PASS",
+      "label": "real host, scripted model",
+      "detail": "Without this, a held push could mean the tool call never ran"
+    }
+  ]
+}

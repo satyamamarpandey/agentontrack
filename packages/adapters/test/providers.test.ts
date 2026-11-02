@@ -73,7 +73,6 @@ describe.each(Object.keys(PROVIDERS))('%s contract', (id) => {
   });
 
   it('the real program, called as installed with --root first, refuses a push; and the self-test passes, then fails if the program goes', () => {
-    if (id === 'cline' && process.platform === 'win32') return;
     p.close();
     const cli = resolve('packages/cli/dist/index.js').replace(/\\/g, '/');
     const cmd = `"${process.execPath.replace(/\\/g, '/')}" "${cli}" --root "${root.replace(/\\/g, '/')}"`;

@@ -79,7 +79,12 @@ test('the project summary is off by default, and its preview holds only counts a
   try {
     const seen = await watch(page);
     await page.goto(`${SITE}/dashboard/`);
+    await expect(page.getByRole('heading', { name: 'Keep your AI coding agents on track' })).toBeVisible();
+    await page.getByTestId('continue-local').click();
+    await page.getByText('This computer uses a different port').click();
     await page.getByLabel('Companion port').fill(String(c.port));
+    await page.getByTestId('retry').click();
+    await expect(page.getByTestId('probe-status')).toContainText('Found AgentOnTrack on this computer', { timeout: 30_000 });
     await page.getByLabel('Pairing code').fill(c.newPairingCode());
     await page.getByRole('button', { name: 'Pair', exact: true }).click();
     await page.getByTestId('project-card').getByRole('button').click();

@@ -59,13 +59,7 @@ service cloud.firestore {
     function validCounts(d, id) {
       return d.keys().hasOnly(['week', 'version', 'runtimesConnected', 'tasksVerified', 'tasksTotal', 'activeDays', 'installId', 'createdAt'])
         && d.keys().hasAll(['week', 'version', 'runtimesConnected', 'tasksVerified', 'tasksTotal', 'activeDays', 'installId', 'createdAt'])
-        && d.week is string && d.week.matches('^[0-9]{4}-W[0-9]{2}
-        && (request.resource.data.uid == null || isOwner(request.resource.data.uid));
-      allow delete: if request.auth != null && resource.data.uid == request.auth.uid;
-    }
-  }
-}
-)
+        && d.week is string && d.week.matches('^[0-9]{4}-W[0-9]{2}$')
         && isString(d.version, 30) && isString(d.installId, 64)
         && id == d.installId + '_' + d.week
         && d.runtimesConnected is list && d.runtimesConnected.size() <= 12

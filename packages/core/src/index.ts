@@ -1,5 +1,6 @@
 export * from './types.js';
 export * from './spec.js';
+export * from './plan.js';
 export * from './store.js';
 export * from './paths.js';
 export * from './classify.js';

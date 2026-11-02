@@ -169,7 +169,7 @@ function Freshness({ online, last, snap }: { online: boolean; last: number | nul
   if (!phoneOnline) return <p className="m-fresh off" role="status" data-testid="m-fresh">This phone is offline. What you see is what was last received{snap?.generatedAt ? ` (${ago(snap.generatedAt)})` : ''}, nothing is live, and controls are off until it is back.</p>;
   return (
     <p className={`m-fresh ${online ? 'on' : 'off'}`} role="status" data-testid="m-fresh">
-      {online ? 'Live' : 'Your computer is not reachable.'} {snap?.generatedAt ? `Updated ${ago(snap.generatedAt)}.` : ''} {!online ? `${last ? `Last seen ${ago(last)}. ` : ''}Controls are off until it is back, and nothing here is live.` : ''}
+      {online ? 'Live.' : 'Your computer is not reachable.'} {snap?.generatedAt ? `Updated ${ago(snap.generatedAt)}.` : ''} {!online ? `${last ? `Last seen ${ago(last)}. ` : ''}Controls are off until it is back, and nothing here is live.` : ''}
     </p>
   );
 }

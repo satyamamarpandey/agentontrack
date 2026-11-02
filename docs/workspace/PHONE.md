@@ -40,4 +40,4 @@ Per-phone rate limits (60 reads and 12 controls per minute), request lifetime at
 
 ## Verification status
 
-See `docs/STATE.md` for the dated results. Emulator results are never production results; real Firebase remains owner-activated (docs/accounts-setup.md). Emulated device profiles (Pixel, iPhone) are not physical phones; a physical-device pass is recorded separately and is NOT DONE unless marked otherwise there.
+The dated results are in the release notes and the CI runs linked from them. Emulator results are never production results; real Firebase remains owner-activated (docs/accounts-setup.md). Emulated device profiles (Pixel, iPhone) are not physical phones; a physical-device pass is recorded separately and is NOT DONE unless marked otherwise there.

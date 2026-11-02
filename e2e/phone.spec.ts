@@ -283,11 +283,14 @@ test('the phone has no way to run a terminal, write code or make a project, and 
 });
 
 test('revoking the phone at the computer stops it at once', async () => {
+  // A revoked phone gets no answer at all, so the phone waits its full minute and then says so plainly.
+  test.setTimeout(180_000);
   await dpage.getByTestId(`revoke-${did}`).click();
   await expect(dpage.getByTestId('phone-devices')).toHaveCount(0, { timeout: 20_000 });
   await ppage.getByTestId('m-tab-progress').click();
   await ppage.getByTestId('m-prompt').fill('Make another change');
   await ppage.getByTestId('m-send').click();
-  await expect(ppage.getByTestId('m-result')).not.toContainText('Sent to your computer', { timeout: 70_000 });
+  await expect(ppage.getByTestId('m-result')).toContainText('did not answer', { timeout: 90_000 });
+  await expect(ppage.getByTestId('m-result')).not.toContainText('Sent to your computer');
   expect(existsSync(join(root, 'second.txt'))).toBe(false);
 });

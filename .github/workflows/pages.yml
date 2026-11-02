@@ -12,7 +12,8 @@ concurrency:
 env:
   PLAYWRIGHT_BROWSERS_PATH: .pw-browsers
   NEXT_PUBLIC_RELEASE_PUBLISHED: '1'
-  NEXT_PUBLIC_RELEASE_VERSION: 1.0.0-rc.4
+  # Downloads point at the last PUBLISHED release. Change this to the new version only after its draft has been published.
+  NEXT_PUBLIC_RELEASE_VERSION: 1.0.0-rc.3
   # Optional accounts: unset builds a site with none. See docs/accounts-setup.md.
   NEXT_PUBLIC_FIREBASE_CONFIG: ${{ vars.FIREBASE_WEB_CONFIG }}
   NEXT_PUBLIC_APPCHECK_SITE_KEY: ${{ vars.APPCHECK_SITE_KEY }}

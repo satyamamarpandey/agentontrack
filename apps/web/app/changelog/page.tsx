@@ -1,3 +1,4 @@
+import { RELEASE_VERSION } from '../../lib/release';
 import { Article } from '../content';
 
 export const metadata = { title: 'Changelog' };
@@ -6,7 +7,9 @@ export default function Changelog() {
   return (
     <Article title="Changelog" intro="Changes that matter to users.">
       <h2>1.0.0-rc.4</h2>
+      {RELEASE_VERSION === '1.0.0-rc.4' ? null : <p className="alert" role="note" data-testid="unpublished-rc">Not published yet. Downloads on this site are still {RELEASE_VERSION}.</p>}
       <ul>
+        <li>Phone remote control for projects already on a computer you authorized: signed and encrypted end to end, approved device by device at the computer, with no terminal and no code editing, installable as an app. Plans with limits, a bounded loop, agent and model discovery from what the computer reports, commands sent only if the agent reported them, and next-prompt suggestions. Verified against the Firebase emulators, not a real Firebase project, and with device profiles, not physical phones.</li>
         <li>A new first screen: choose to continue on this computer, use an optional account (Google, GitHub or email, once the site's owner switches accounts on), or look at a labelled demo. An account never gives the website access to your computer.</li>
         <li>Connecting a computer is a guided step. The page looks for AgentOnTrack on your computer by itself, shows how to get and start it if it is not there, and asks for the one-time code from your terminal. If the computer stops answering, a clear screen offers Retry, Connect again, Download and the local dashboard.</li>
         <li>Projects registered on your computer appear as soon as it is connected, with search, sort, archive, and a way to find Git repositories inside one folder you name, import a folder, or copy a GitHub repository.</li>

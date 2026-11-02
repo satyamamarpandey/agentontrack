@@ -9,7 +9,7 @@ export default function Integrations() {
   return (
     <Article title="Integrations" intro="An agent runtime and a model API are different things. A runtime has tools, hooks and sessions, and is what AgentOnTrack gates. A model API only answers. Each row says exactly what was run. All of it is self-run.">
       <h2 id="runtimes">Platforms</h2>
-      <p><b>Release 1.0.0-rc.1 includes Claude Code, Codex and Hermes.</b> The other platforms here are in the source and were tested from it, and arrive in the next release. Until then, installing them needs a build from source.</p>
+      <p>Everything here is in release 1.0.0-rc.2, including adapters that have never run on the real programs. Check a platform's status before relying on it.</p>
       <p>Only what was seen on the real program counts. A scripted model means the real program, hooks and shell, with planned tool calls, which tests the host and the gate, not how a model behaves. Blocked means it needs an account or paid plan we do not have, so it has <b>not</b> been shown to work. Connection status for your own machine is on the <a href="../dashboard/">dashboard</a>, in Agents. Names are shown as text, since these products' logos belong to their owners, and this project is not affiliated with any of them.</p>
       {data ? <Catalog entries={data.entries} /> : <p>Unavailable</p>}
 

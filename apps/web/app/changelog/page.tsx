@@ -1,12 +1,18 @@
 import { Article } from '../content';
-import { RELEASE_PUBLISHED } from '../../lib/release';
 
 export const metadata = { title: 'Changelog' };
 
 export default function Changelog() {
   return (
     <Article title="Changelog" intro="Changes that matter to users.">
-      <h2>1.0.0-rc.1 {RELEASE_PUBLISHED ? null : '(awaiting publication)'}</h2>
+      <h2>1.0.0-rc.2</h2>
+      <ul>
+        <li>Adapters over the same engine. Verified on the real programs with a scripted model: Copilot CLI, Gemini CLI, OpenCode and Cline CLI</li>
+        <li>Cursor, Devin and Kiro adapters are written from their docs, and have never run on the real programs</li>
+        <li>State over MCP for Continue, with no enforcement. Optional Perplexity config, on your own key</li>
+        <li>A pre-action hook that cannot read a request now refuses it</li>
+      </ul>
+      <h2>1.0.0-rc.1</h2>
       <ul>
         <li>Installers and release archives for Linux, macOS and Windows, with checksums, and no prerequisites</li>
         <li><code>agentontrack setup</code>, a first-run path, and a hook self-test in <code>doctor</code></li>

@@ -34,8 +34,6 @@ Then use your agent as usual. On Codex, start it with `agentontrack run codex`. 
 
 ## Other platforms
 
-Release 1.0.0-rc.1 includes Claude Code, Codex and Hermes. These commands are in the source and arrive in the next release.
-
 ```sh
 agentontrack providers                 # what is found here, and how each behaves if its hook fails
 agentontrack install copilot           # or gemini, opencode, cline, cursor, devin, kiro

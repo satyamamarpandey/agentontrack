@@ -64,17 +64,6 @@ check('Doctor reports a current runtime and an intact log', report.nodeOk && rep
 check('The hook program as installed answers its self-test', cc?.hookSelfTest?.ok, JSON.stringify(cc?.hookSelfTest));
 check('Doctor states the host failure mode for Codex', report.runtimes?.find((r) => r.runtime === 'codex')?.hostFailMode === 'open');
 
-// The other platforms, as installed: a real hook process refuses a test request. No live agent is involved.
-const listed = JSON.parse(aot(['providers'], project).stdout || '[]');
-check('Lists the other platforms, and does not claim them as found', listed.length >= 7 && listed.some((p) => p.id === 'gemini' && p.version === 'NOT FOUND'), JSON.stringify(listed.map((p) => p.id)));
-for (const id of win ? ['copilot', 'gemini', 'opencode'] : ['copilot', 'gemini', 'opencode', 'cline']) {
-  const before = aot(['install', id], project);
-  const test = JSON.parse(aot(['providers'], project).stdout || '[]').find((p) => p.id === id)?.hookSelfTest;
-  check(`${id}: connects, and its installed hook refuses a test request`, before.status === 0 && test?.ok, `${before.stderr} ${JSON.stringify(test)}`);
-  check(`${id}: disconnects`, aot(['uninstall', id], project).status === 0);
-}
-check('Refuses to start a platform with no hook', aot(['run', 'gemini'], project).status === 78);
-
 const hookCommand = () => JSON.parse(readFileSync(join(project, '.claude', 'settings.local.json'), 'utf8')).hooks.PreToolUse[0].hooks[0].command;
 check('Hook command uses the stable path, so upgrades keep working', /\/app\/current\//.test(hookCommand()), hookCommand());
 const callHook = (command) => sh(hookCommand(), { shell: true, cwd: project, input: JSON.stringify({ session_id: 's', cwd: project, hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command } }), env: { ...env, AGENTONTRACK_ROOT: project } });

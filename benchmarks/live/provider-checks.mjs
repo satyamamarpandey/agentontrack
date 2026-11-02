@@ -20,7 +20,7 @@ const model = await startScriptedModel();
 // Cline ends a task only through its own tool, so a scripted run must call it, or Cline keeps asking.
 if (which === 'cline') { const set = model.setPlan; model.setPlan = (p) => set([...p, { tool: /^submit_and_exit$/, args: () => ({ summary: 'The work is finished.', verified: true }) }]); }
 const SHELL = /^(bash|Bash|terminal|shell|run_shell_command|execute_command|run_commands|exec)$/;
-const sh = (c) => ({ tool: SHELL, args: (name) => (name === 'run_commands' ? { commands: [c] } : name === 'execute_command' ? { command: c, requires_approval: false } : shellArgs(c)(name)) });
+const sh = (c) => ({ tool: SHELL, args: (name) => (which === 'opencode-v2' ? { command: c } : name === 'run_commands' ? { commands: [c] } : name === 'execute_command' ? { command: c, requires_approval: false } : shellArgs(c)(name)) });
 const PUSH = 'git push origin main';
 
 const hostRun = (cmd, args, { timeout = 150_000, cwd, env = {}, shell = false } = {}) => new Promise((ok) => {

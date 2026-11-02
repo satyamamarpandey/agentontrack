@@ -6,7 +6,7 @@
 //   dev        the source tree is loaded as the extension under development (default)
 //   vsix       the packaged .vsix (AOT_VSIX) is installed with VS Code's own CLI, as a person would, and that copy is tested
 //   untrusted  a workspace that is not trusted: the extension may read and must confirm nothing
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -70,13 +70,21 @@ try {
   } else {
     launch.push('--disable-extensions');
   }
-  await runTests({
-    version,
-    extensionDevelopmentPath: developmentPath,
-    extensionTestsPath: join(ext, 'test', 'host', 'suite.cjs'),
-    launchArgs: launch,
-    extensionTestsEnv: { AOT_PAIR_CODE: c.newPairingCode(), AOT_CODES_FILE: codesFile, AOT_COMPANION: c.url.replace(/\/$/, ''), AOT_HOST_MODE: MODE },
-  });
+  const testEnv = { AOT_PAIR_CODE: c.newPairingCode(), AOT_CODES_FILE: codesFile, AOT_COMPANION: c.url.replace(/\/$/, ''), AOT_HOST_MODE: MODE };
+  if (MODE === 'untrusted') {
+    // The official runner always adds --disable-workspace-trust, which would make this workspace trusted. So VS Code is started
+    // directly, with the same arguments minus that one, and trust left to its own default for an unknown folder.
+    const exe = await downloadAndUnzipVSCode(version);
+    const args = [root, `--extensionDevelopmentPath=${ext}`, `--extensionTestsPath=${join(ext, 'test', 'host', 'suite.cjs')}`, '--no-sandbox', '--disable-gpu-sandbox', '--disable-updates', '--skip-welcome', '--skip-release-notes', ...launch.slice(1), '--disable-extensions'];
+    const child = spawn(exe, args, { env: { ...process.env, ...testEnv }, stdio: 'inherit' });
+    const status = await new Promise((done) => {
+      const t = setTimeout(() => { child.kill(); done(124); }, 240_000);
+      child.on('exit', (c2) => { clearTimeout(t); done(c2 ?? 1); });
+    });
+    if (status !== 0) throw new Error(`VS Code exited with ${status}`);
+  } else {
+    await runTests({ version, extensionDevelopmentPath: developmentPath, extensionTestsPath: join(ext, 'test', 'host', 'suite.cjs'), launchArgs: launch, extensionTestsEnv: testEnv });
+  }
   code = 0;
 } catch (err) {
   console.error('Extension host tests failed:', err?.message ?? err);

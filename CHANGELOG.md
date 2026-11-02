@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- The dashboard opens on a grid of projects. A project page shows its overview, workflow timeline, usage, verification and environment, using only companion endpoints from 1.0.0-rc.2.
+- A saving appears only against a baseline the user enters, kept in the browser. A negative one is shown as a cost. Without a baseline, it says Unavailable.
+- The website has a new layout, and optional accounts, off unless a Firebase config is set at build time.
+
 ## 1.0.0-rc.2
 
 - One provider layer over the same engine: Copilot CLI, Gemini CLI, OpenCode and Cline verified on the real programs with a scripted model; Cursor, Devin and Kiro written from docs and never run on the real programs.

@@ -13,7 +13,7 @@ export default defineConfig({
   reporter: [['list'], ['json', { outputFile: 'test-results/e2e.json' }]],
   use: { trace: 'retain-on-failure', screenshot: 'only-on-failure' },
   webServer: process.env.AGENTONTRACK_LIVE ? [] : [
-    { command: 'node e2e/serve.mjs', port: SITE_PORT, reuseExistingServer: false, timeout: 30_000, env: { SITE_ROOT: 'dist-pages', SITE_PORT: String(SITE_PORT) } },
+    { command: 'node e2e/serve.mjs', port: SITE_PORT, reuseExistingServer: false, timeout: 30_000, env: { SITE_ROOT: process.env.SITE_ROOT ?? 'dist-pages', SITE_PORT: String(SITE_PORT) } },
   ],
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] }, testIgnore: /live/ },

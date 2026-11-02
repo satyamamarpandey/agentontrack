@@ -40,6 +40,14 @@ An adapter on a host that fails open is a gate only while the hook runs. Start s
 
 The site is static. It reaches only the companion on your own machine, and only if you start `agentontrack dashboard --allow-public-site`. A browser must pair with a code from your terminal. After that, any change or check needs another code, shown only in your terminal and tied to that exact request and project. Five wrong codes end the session. So a compromised page can read your record, and save a local feedback note, but cannot approve anything. A project with an approver passphrase refuses human actions from the site, since a page could read what is typed into it. The allowed origin is the whole of `pandeysatyam.com`, so everything on that domain shares this trust. The local address needs no outside origin at all.
 
+## Optional accounts on the website
+
+Off unless the site's owner sets a Firebase config, and then still optional: nothing needs an account. With no config, the build holds no Firebase code and the site makes no third-party request. With one, Google and Firebase become third parties only for a visitor who signs in or sends feedback, and only from that moment.
+
+Stored in Firestore: a signed-in person's name and email from Google, theme, feedback, and any project summary they chose to save, which holds a label they typed, totals and pass rates. Code, prompts, paths, commands and project records are never sent. `firestore.rules` limits each person to their own documents and validates fields. Feedback can be created by anyone, read by no client, and deleted only by the signed-in person who sent it. A person can export and delete their data on the account page. Feedback sent while signed out is not linked to anyone, so only the maintainer can remove it.
+
+Google's sign-in script runs only on the account page, which the dashboard opens as a separate tab, so it does not run in a page that holds a companion session. Saving a summary does load Firebase's code into the dashboard page, when the person presses Save. That code is served from the site itself, so it has the same trust as the site, and a compromised site can already read a paired session, as above. The companion's own local address never loads any of this. These rules have only been exercised in the Firebase emulator's CI job, which has not yet run.
+
 ## Supply chain
 
 Release archives list a SHA-256 in `SHA256SUMS`, and the installers refuse a mismatch. Note that a checksum fetched from the same place as the file only catches corruption. Where GitHub build attestations are available, verify with `gh attestation verify <file> -R satyamamarpandey/agentontrack`. Binaries are not code-signed, so Windows and macOS may warn.

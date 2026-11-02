@@ -1,14 +1,22 @@
 import Link from './link';
 import { ReleaseNotice, Term } from './content';
+import { ACCOUNTS_ENABLED } from '../lib/accounts-config';
 import { readResult } from '../lib/results';
 import { INSTALL_PS1, INSTALL_SH, RELEASE_PUBLISHED, RELEASE_VERSION, REPO } from '../lib/release';
 
+const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
 const STEPS = [
   ['Goal', 'You approve a goal with a scope, exclusions and acceptance checks. It gets a version number.'],
   ['Authorize', 'Each action is checked against the current goal, task and policy before it runs. Consequential ones wait for you.'],
   ['Execute', 'Your own agent does the work, under its own login and your own model plan.'],
   ['Observe', 'The workspace is compared afterwards with what was authorized. Differences are recorded.'],
   ['Verify', 'AgentOnTrack runs your checks itself. "Done" from the agent counts for nothing.'],
+];
+const PROJECT_VIEW = [
+  ['Workflow', 'goal, task, actions, what was held and approved, and verification, in order'],
+  ['Usage', 'tokens, time and list-price cost as recorded. A saving appears only against a baseline you enter'],
+  ['Verification', 'the share of your own checks with current passing evidence'],
+  ['Environment', 'Unavailable, unless you supply the factors. Then it is labelled an estimate'],
 ];
 
 export default function Home() {
@@ -17,16 +25,19 @@ export default function Home() {
   return (
     <>
       <section className="hero wrap">
-        <p className="eyebrow">Free · Local-first · Bring your own agent · No account needed</p>
-        <h1>Agents that finish the right task, inside the lines you set.</h1>
-        <p className="lead">AgentOnTrack is a control layer for AI coding agents. You set the goal and approve what matters. Your agent does the work. Independent checks decide when it is done.</p>
-        <div className="cta">
-          <Link className="btn primary" href="/install">Install</Link>
-          <Link className="btn" href="/install#download" data-testid="home-download">{RELEASE_PUBLISHED ? `Download ${RELEASE_VERSION}` : 'Download: not published yet'}</Link>
-          <a className="btn" href={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ''}/dashboard/?demo=1`}>Try the dashboard demo</a>
-          <a className="btn" href={REPO}>GitHub</a>
+        <div>
+          <p className="eyebrow">Free · Local-first · Bring your own agent · No account needed</p>
+          <h1>Agents that finish the right task, inside the lines you set.</h1>
+          <p className="lead">AgentOnTrack is a control layer for AI coding agents. You set the goal and approve what matters. Your agent does the work. Independent checks decide when it is done.</p>
+          <div className="cta">
+            <Link className="btn primary" href="/install">Install</Link>
+            <a className="btn" href={`${BASE}/dashboard/?demo=1`}>Try the dashboard demo</a>
+            <Link className="btn" href="/install#download" data-testid="home-download">{RELEASE_PUBLISHED ? `Download ${RELEASE_VERSION}` : 'Download: not published yet'}</Link>
+            <a className="btn" href={REPO}>GitHub</a>
+          </div>
         </div>
-        <pre className="term" tabIndex={0} aria-label="Example terminal session"><code>{`$ agentontrack setup
+        <div>
+          <pre className="term" tabIndex={0} aria-label="Example terminal session"><code>{`$ agentontrack setup
 $ agentontrack goal set --file goal.json
 Goal v1 approved.
 
@@ -36,12 +47,22 @@ Ask the user to run: agentontrack approve apr_5dfc47af1da5
 
 $ agentontrack verify
 { "status": "VERIFIED", "progress": { "passed": 1, "total": 1 } }`}</code></pre>
-        <p className="small muted">Example output shape. Approval IDs and results vary.</p>
-        <h2 id="install">Install</h2>
-        <ReleaseNotice />
-        <Term label="Install command for Linux and macOS">{INSTALL_SH}</Term>
-        <Term label="Install command for Windows PowerShell">{INSTALL_PS1}</Term>
-        <p className="small muted">Manual download, checksums, upgrade and troubleshooting: <Link href="/install">the install page</Link>.</p>
+          <p className="small muted">Example output shape. Approval IDs and results vary.</p>
+        </div>
+      </section>
+
+      <section className="wrap band">
+        <div className="projects-entry" data-testid="projects-entry">
+          <div>
+            <h2>Every project, in one place</h2>
+            <p className="section-lead">The dashboard opens on your projects. Click one to see how its work went. It reads the companion on your own machine, so your records do not come to this website. The demo shows invented data, and says so.</p>
+            <div className="cta">
+              <a className="btn primary" href={`${BASE}/dashboard/#projects`} data-testid="open-projects">Open your projects</a>
+              <a className="btn" href={`${BASE}/dashboard/?demo=1#projects`} data-testid="demo-projects">See the demo projects</a>
+            </div>
+          </div>
+          <ul className="entry-list">{PROJECT_VIEW.map(([t, d]) => <li key={t}><b>{t}:</b> <span className="muted">{d}</span></li>)}</ul>
+        </div>
       </section>
 
       <section className="wrap band">
@@ -64,7 +85,7 @@ $ agentontrack verify
       </section>
 
       <section className="wrap band grid2">
-        <div>
+        <div className="tile">
           <h2>Measured, including the misses</h2>
           {full ? <>
             <p>On {held.scenarios} held-out scenarios of fixed action traces with no model in the loop, AgentOnTrack stopped or caught {full.prevented + full.detectedAfter} of {full.unauthorized} unauthorized actions: {full.prevented} prevented, {full.detectedAfter} detected afterwards, {full.missed} missed, with {full.falseBlocks} false blocks.</p>
@@ -72,7 +93,7 @@ $ agentontrack verify
           </> : <p>No results available.</p>}
           <Link href="/benchmarks">See the comparisons, including where it costs more →</Link>
         </div>
-        <div>
+        <div className="tile">
           <h2>What it will not do</h2>
           <ul>
             <li>It cannot see the network activity of a script the agent runs.</li>
@@ -83,15 +104,12 @@ $ agentontrack verify
           </ul>
           <Link href="/security">Read the threat model →</Link>
         </div>
-      </section>
-
-      <section className="wrap band grid2">
-        <div>
+        <div className="tile">
           <h2>Your code stays on your machine</h2>
-          <p>Code, prompts, transcripts and credentials stay local. Your agent keeps its own login. There are no accounts, and AgentOnTrack has no server to send anything to.</p>
+          <p>Code, prompts, transcripts and credentials stay local. Your agent keeps its own login. {ACCOUNTS_ENABLED ? 'Accounts on this site are optional, hold no code or records, and nothing needs one.' : 'There are no accounts, and AgentOnTrack has no server to send anything to.'}</p>
           <Link href="/privacy">Privacy details →</Link>
         </div>
-        <div>
+        <div className="tile">
           <h2>Supported agents</h2>
           <ul>
             <li><b>Claude Code:</b> live-tested</li>
@@ -99,6 +117,16 @@ $ agentontrack verify
           </ul>
           <Link href="/integrations">Compatibility details →</Link>
         </div>
+      </section>
+
+      <section className="wrap band">
+        <h2 id="install">Install</h2>
+        <ReleaseNotice />
+        <div className="install-grid">
+          <Term label="Install command for Linux and macOS">{INSTALL_SH}</Term>
+          <Term label="Install command for Windows PowerShell">{INSTALL_PS1}</Term>
+        </div>
+        <p className="small muted">Manual download, checksums, upgrade and troubleshooting: <Link href="/install">the install page</Link>.</p>
       </section>
     </>
   );

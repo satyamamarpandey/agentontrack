@@ -13,6 +13,8 @@ env:
   PLAYWRIGHT_BROWSERS_PATH: .pw-browsers
   NEXT_PUBLIC_RELEASE_PUBLISHED: '1'
   NEXT_PUBLIC_RELEASE_VERSION: 1.0.0-rc.2
+  # Optional accounts: unset builds a site with none. See docs/accounts-setup.md.
+  NEXT_PUBLIC_FIREBASE_CONFIG: ${{ vars.FIREBASE_WEB_CONFIG }}
 jobs:
   build:
     runs-on: ubuntu-latest

@@ -1,10 +1,11 @@
 // The public site exactly as it would be published: run `pnpm build:pages`, and this serves dist-pages under the same base path.
 import AxeBuilder from '@axe-core/playwright';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 
 const SITE = 'http://127.0.0.1:4199/agentontrack';
-const PAGES = ['/', '/install/', '/features/', '/how-it-works/', '/integrations/', '/benchmarks/', '/security/', '/pricing/', '/docs/', '/community/', '/roadmap/', '/changelog/', '/feedback/', '/privacy/', '/terms/', '/dashboard/'];
+const PAGES = ['/', '/install/', '/features/', '/how-it-works/', '/integrations/', '/benchmarks/', '/security/', '/pricing/', '/docs/', '/community/', '/roadmap/', '/changelog/', '/feedback/', '/privacy/', '/terms/', '/account/', '/dashboard/'];
 
 test('all pages load, with working navigation and no console errors', async ({ page }) => {
   const errors: string[] = [];
@@ -39,6 +40,68 @@ test('sends no third-party requests and sets no cookie for visitors', async ({ p
   for (const p of PAGES) await page.goto(`${SITE}${p}`);
   expect(foreign).toEqual([]);
   expect(await context.cookies()).toEqual([]);
+});
+
+test('with no config, the published build holds no Firebase code at all', async () => {
+  test.skip(!!process.env.NEXT_PUBLIC_FIREBASE_CONFIG, 'This build has accounts.');
+  const hits: string[] = [];
+  const walk = (dir: string) => {
+    for (const name of readdirSync(dir)) {
+      const p = join(dir, name);
+      if (statSync(p).isDirectory()) walk(p);
+      else if (/\.(js|html)$/.test(name) && /identitytoolkit|firestore\.googleapis|firebaseapp/.test(readFileSync(p, 'utf8'))) hits.push(p);
+    }
+  };
+  walk('dist-pages');
+  expect(hits).toEqual([]);
+});
+
+test('the home page has a clear way into projects, and the demo one is labelled', async ({ page }) => {
+  await page.goto(`${SITE}/`);
+  await expect(page.getByTestId('projects-entry')).toContainText('invented data');
+  await page.getByTestId('demo-projects').click();
+  await expect(page).toHaveURL(/dashboard\/\?demo=1#projects$/);
+  await expect(page.getByTestId('demo-banner')).toContainText('Demo data');
+  await expect(page.getByTestId('card-demo-label').first()).toHaveText('Demo data');
+  await page.goto(`${SITE}/`);
+  await page.getByTestId('open-projects').click();
+  await expect(page.getByRole('heading', { name: 'Pair this browser' })).toBeVisible();
+});
+
+test('the main menu opens on a small screen, and every link in it is reachable', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 });
+  await page.goto(`${SITE}/`);
+  const nav = page.getByRole('navigation', { name: 'Main' });
+  await expect(nav.getByRole('link', { name: 'Security' })).toBeHidden();
+  await page.getByRole('button', { name: 'Menu' }).click();
+  await nav.getByRole('link', { name: 'Security' }).click();
+  await expect(page).toHaveURL(/\/security\/$/);
+});
+
+test('with no config, there is no sign-in UI on any page', async ({ page }) => {
+  test.skip(!!process.env.NEXT_PUBLIC_FIREBASE_CONFIG, 'This build has accounts.');
+  await page.goto(`${SITE}/account/`);
+  await expect(page.locator('main')).toContainText('no accounts');
+  await expect(page.getByTestId('sign-in')).toHaveCount(0);
+  await expect(page.getByTestId('nav-account')).toHaveCount(0);
+  await page.goto(`${SITE}/dashboard/?demo=1#project/demo/overview`);
+  await expect(page.getByTestId('project-panel-overview')).toBeVisible();
+  await expect(page.getByTestId('summary-saver')).toHaveCount(0);
+  await page.goto(`${SITE}/feedback/`);
+  await expect(page.locator('main')).toContainText('public GitHub issue');
+});
+
+test('feedback refuses an empty or over-long message, and a contact goes in the issue only if given', async ({ page }) => {
+  await page.goto(`${SITE}/feedback/`);
+  await page.getByLabel('Your message').fill('   ');
+  await page.getByRole('button', { name: 'Send' }).click();
+  await expect(page.locator('main').getByRole('alert')).toContainText('Write a message');
+  await expect(page.getByLabel('Your message')).toHaveAttribute('maxlength', '2000');
+  await expect(page.getByLabel('Contact (optional)')).toHaveAttribute('maxlength', '200');
+  await page.getByLabel('Your message').fill('Fine');
+  await page.getByLabel('Contact (optional)').fill('me at example');
+  const [nav] = await Promise.all([page.waitForRequest((r) => r.url().includes('github.com')), page.getByRole('button', { name: 'Send' }).click()]);
+  expect(decodeURIComponent(nav.url())).toContain('Contact: me at example');
 });
 
 test('theme toggle persists', async ({ page }) => {

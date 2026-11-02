@@ -11,7 +11,16 @@ if (process.env.NEXT_PUBLIC_RELEASE_PUBLISHED === '1' && !process.env.NEXT_PUBLI
   console.error('NEXT_PUBLIC_RELEASE_PUBLISHED=1 needs NEXT_PUBLIC_RELEASE_VERSION, or the download links would be wrong.');
   process.exit(1);
 }
-const env = { ...process.env, NEXT_PUBLIC_BASE_PATH: BASE };
+// Optional accounts. Unset means no sign-in UI and no Firebase code in the build. Any value is a project's public identifiers, never a secret.
+const FIREBASE = (process.env.NEXT_PUBLIC_FIREBASE_CONFIG ?? '').trim();
+if (FIREBASE) {
+  let parsed = {};
+  try { parsed = JSON.parse(FIREBASE); } catch { /* reported below */ }
+  const absent = ['apiKey', 'authDomain', 'projectId', 'appId'].filter((k) => !parsed[k]);
+  if (absent.length) { console.error(`NEXT_PUBLIC_FIREBASE_CONFIG must be JSON with ${absent.join(', ')}.`); process.exit(1); }
+}
+const EMULATORS = process.env.AOT_FIREBASE_EMULATORS === '1' ? '1' : '';
+const env = { ...process.env, NEXT_PUBLIC_BASE_PATH: BASE, NEXT_PUBLIC_FIREBASE_CONFIG: FIREBASE, NEXT_PUBLIC_FIREBASE_EMULATORS: EMULATORS };
 
 rmSync(OUT, { recursive: true, force: true });
 rmSync(join(web, '.next'), { recursive: true, force: true });
@@ -21,7 +30,7 @@ cpSync(join(web, 'out'), OUT, { recursive: true });
 rmSync(join(web, 'out'), { recursive: true, force: true });
 rmSync(join(web, '.next'), { recursive: true, force: true });
 
-const dash = spawnSync('pnpm', ['--dir', 'apps/dashboard', 'exec', 'vite', 'build'], { stdio: 'inherit', shell, env: { ...process.env, VITE_BASE: `${BASE}/dashboard/`, VITE_OUT: join(OUT, 'dashboard') } });
+const dash = spawnSync('pnpm', ['--dir', 'apps/dashboard', 'exec', 'vite', 'build'], { stdio: 'inherit', shell, env: { ...process.env, VITE_BASE: `${BASE}/dashboard/`, VITE_OUT: join(OUT, 'dashboard'), VITE_FIREBASE_CONFIG: FIREBASE, VITE_FIREBASE_EMULATORS: EMULATORS } });
 if (dash.status !== 0) process.exit(dash.status ?? 1);
 writeFileSync(join(OUT, '.nojekyll'), '');
 

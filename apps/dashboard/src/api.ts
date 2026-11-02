@@ -27,7 +27,8 @@ export const setPort = (port: string) => {
 };
 export const currentPort = () => sessionStorage.getItem('aot-port') ?? '47631';
 
-const withProject = (path: string) => (project ? `${path}${path.includes('?') ? '&' : '?'}project=${project}` : path);
+/** A path that already names its project keeps it: the project grid reads several at once. */
+const withProject = (path: string) => (project && !/[?&]project=/.test(path) ? `${path}${path.includes('?') ? '&' : '?'}project=${project}` : path);
 const auth = (): Record<string, string> => (token ? { authorization: `Bearer ${token}` } : {});
 
 /** The address that needs no permission from the browser, because the page and the companion are then the same origin. */

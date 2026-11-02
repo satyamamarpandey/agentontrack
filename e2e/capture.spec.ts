@@ -35,6 +35,36 @@ test('capture dashboard screens', async ({ page, env }) => {
   await page.screenshot({ path: `${OUT}/dash-mobile.png` });
 });
 
+test('capture the project page, desktop and mobile', async ({ page, env }) => {
+  mkdirSync(OUT, { recursive: true });
+  // A disposable test project, run through the real engine. These are not results from real work.
+  env.project((p) => {
+    p.human.setGoal({ statement: 'Fix the parser', scope: { include: ['src/**'] }, prohibit: ['deploy'] });
+    p.human.createTask({ id: 't1', title: 'Parser fix', criteria: [{ id: 'c', description: 'fixed file exists', kind: 'artifact', path: 'src/a.txt' }] });
+    p.verifyTask('t1');
+    p.recordUsage({ runtime: 'claude-code', model: 'test-model', source: 'provider-reported', sessionId: 's', inputTokens: 100, outputTokens: 420 });
+  });
+  env.hook('git status');
+  env.hook('git push origin main');
+  await page.setViewportSize({ width: 1280, height: 860 });
+  await env.pair(page);
+  await page.getByRole('button', { name: 'repo' }).click();
+  await page.getByTestId('project-tab-workflow').click();
+  await expect(page.getByTestId('timeline')).toBeVisible();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/project-detail-desktop.png`, fullPage: true, mask: [page.locator('.page-head p')] });
+  await page.getByTestId('project-tab-usage').click();
+  await page.getByLabel('Input + output tokens').fill('400');
+  await page.getByRole('button', { name: 'Save baseline' }).click();
+  await expect(page.getByTestId('saved-tokens')).toContainText('cost 120 more tokens');
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/project-detail-usage-desktop.png`, fullPage: true, mask: [page.locator('.page-head p')] });
+  await page.setViewportSize({ width: 390, height: 800 });
+  await page.getByTestId('project-tab-workflow').click();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/project-detail-mobile.png`, fullPage: true, mask: [page.locator('.page-head p')] });
+});
+
 test('capture site', async ({ page }) => {
   mkdirSync(OUT, { recursive: true });
   await page.setViewportSize({ width: 1280, height: 860 });

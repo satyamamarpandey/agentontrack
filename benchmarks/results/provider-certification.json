@@ -110,14 +110,14 @@
       "id": "opencode-v2",
       "name": "OpenCode (V2 plugin)",
       "kind": "Plugin",
-      "status": "NOT_TESTED",
-      "version": "2.2.5 exists",
-      "evidence": "Written from docs. Never run",
-      "proof": "",
+      "status": "PARTIAL",
+      "version": "2.2.5",
+      "evidence": "Scripted model: push held, then allowed after approval. Denial, file writes and hook failures not run",
+      "proof": "benchmarks/results/provider-opencode-v2.json",
       "install": "agentontrack install opencode --v2",
-      "capabilities": "Not shown",
-      "ifGateFails": "Not observed",
-      "limitations": "Not shown to work"
+      "capabilities": "Pre-action gate on shell, approvals",
+      "ifGateFails": "The plugin throws on any failure, by design. Not observed on V2",
+      "limitations": "Only part of the test set has run"
     },
     {
       "id": "cline",

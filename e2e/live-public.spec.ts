@@ -75,7 +75,7 @@ test('deployed site: pair, connect, goal, denied and approved actions, evidence,
     await expect(page.getByRole('alert')).toContainText('Wrong pairing code');
     await page.getByLabel('Pairing code').fill(await c.newPairingCode());
     await page.getByRole('button', { name: 'Pair', exact: true }).click();
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('repo');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Projects');
     await expect(page.getByTestId('demo-banner')).toHaveCount(0);
 
     await go(page, 'Agents');

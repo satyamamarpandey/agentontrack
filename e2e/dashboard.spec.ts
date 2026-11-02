@@ -18,9 +18,10 @@ test('pairing: refuses a wrong code, then pairs, and survives a reload', async (
   await expect(page.getByRole('alert')).toContainText('Wrong pairing code');
   await page.getByLabel('Pairing code').fill(env.c.newPairingCode());
   await page.getByRole('button', { name: 'Pair', exact: true }).click();
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('repo');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Projects');
+  await expect(page.getByTestId('project-card')).toContainText('repo');
   await page.reload();
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('repo');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Projects');
 });
 
 test('every screen renders from real data, with no console errors', async ({ page, env }) => {
@@ -39,6 +40,7 @@ test('every screen renders from real data, with no console errors', async ({ pag
 
 test('empty states explain what to do', async ({ page, env }) => {
   await env.pair(page);
+  await go(page, 'Overview');
   await expect(page.getByText('No approved goal.')).toBeVisible();
   await go(page, 'Usage');
   await expect(page.getByText('No usage recorded yet')).toBeVisible();
@@ -99,6 +101,7 @@ test('approval: a real blocked hook is approved in the browser, and then the rea
   seed(env);
   expect(env.hook('git push')).toContain('needs human approval');
   await env.pair(page);
+  await go(page, 'Overview');
   await expect(page.getByRole('button', { name: /1 approval waiting/ })).toBeVisible();
   await go(page, 'Approvals');
   const row = page.getByTestId('approval');

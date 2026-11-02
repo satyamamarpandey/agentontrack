@@ -1,0 +1,26 @@
+{
+  "which": "opencode-v2",
+  "label": "real host, scripted model",
+  "ranAt": "2026-11-02T02:09:42.017Z",
+  "runner": "Linux",
+  "results": [
+    {
+      "name": "Real program present",
+      "outcome": "PASS",
+      "label": "real host, scripted model",
+      "detail": "opencode v2.2.5"
+    },
+    {
+      "name": "Push held by the gate",
+      "outcome": "PREVENTED",
+      "label": "real host, scripted model",
+      "detail": "[{\"tool\":\"shell\",\"decision\":\"request_approval\",\"kinds\":[\"vcs.push\"],\"runtime\":\"opencode\"}]"
+    },
+    {
+      "name": "Allowed once after approval",
+      "outcome": "PASS",
+      "label": "real host, scripted model",
+      "detail": ""
+    }
+  ]
+}

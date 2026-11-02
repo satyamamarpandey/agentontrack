@@ -62,6 +62,38 @@ jobs:
       - run: pnpm exec playwright install --with-deps firefox webkit chromium
       - run: pnpm exec playwright test --project=firefox --project=webkit --project=mobile
 
+  accounts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # A demo- project id never reaches a real Firebase project. The values only identify it to the emulators.
+      NEXT_PUBLIC_FIREBASE_CONFIG: '{"apiKey":"demo-key","authDomain":"demo-agentontrack.firebaseapp.com","projectId":"demo-agentontrack","appId":"demo-app"}'
+      AOT_FIREBASE_EMULATORS: '1'
+      AOT_CONFIGURED_BUILD: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm build:pages
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Sign-in, saved data, feedback, delete and rules, against the Firebase emulators
+        run: pnpm dlx firebase-tools@15 emulators:exec --only auth,firestore --project demo-agentontrack "pnpm exec playwright test accounts.spec accounts-configured.spec --project=chromium --workers=1"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-accounts
+          path: test-results/
+          retention-days: 7
+
   security:
     runs-on: ubuntu-latest
     timeout-minutes: 10

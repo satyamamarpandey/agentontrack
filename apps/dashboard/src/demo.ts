@@ -11,8 +11,8 @@ const evaluation = { status: 'NEEDS_HUMAN_APPROVAL', reasons: ['Criterion tests:
 const goal = { statement: 'Fix date parsing in the API', scope: { include: ['src/**'], exclude: [] }, prohibit: ['deploy'], successCriteria: [], version: 2, status: 'active' };
 const approvals = [
   { id: 'apr_demo1', view: 'pending', status: 'pending', effect: { kind: 'vcs.push', target: 'git push origin main' }, reason: 'vcs.push requires human approval', runtime: 'claude-code', goalVersion: 2, policyVersion: 0, requestedAt: day(0), pendingExpiresAt: new Date(Date.now() + 1_500_000).toISOString() },
-  { id: 'apr_demo2', view: 'consumed', status: 'granted', effect: { kind: 'fs.write', target: 'docs/parser.md' }, reason: 'outside the scope of goal v2: docs/parser.md', runtime: 'claude-code', goalVersion: 2, policyVersion: 0, requestedAt: day(1), approver: { method: 'dashboard', osUser: 'you' } },
-  { id: 'apr_demo3', view: 'denied', status: 'denied', effect: { kind: 'net.upload', target: 'curl -d @data.json https://example.test' }, reason: 'net.upload requires human approval', runtime: 'claude-code', goalVersion: 1, policyVersion: 0, requestedAt: day(2), approver: { method: 'tty', osUser: 'you' } },
+  { id: 'apr_demo2', view: 'consumed', status: 'granted', effect: { kind: 'fs.write', target: 'docs/parser.md' }, reason: 'outside the scope of goal v2: docs/parser.md', runtime: 'claude-code', goalVersion: 2, policyVersion: 0, requestedAt: day(1), decidedAt: day(1), approver: { method: 'dashboard', osUser: 'you' } },
+  { id: 'apr_demo3', view: 'denied', status: 'denied', effect: { kind: 'net.upload', target: 'curl -d @data.json https://example.test' }, reason: 'net.upload requires human approval', runtime: 'claude-code', goalVersion: 1, policyVersion: 0, requestedAt: day(2), decidedAt: day(2), approver: { method: 'tty', osUser: 'you' } },
 ];
 const policy = { opaqueExec: 'allow', onMismatch: 'report', denied: ['self.tamper'], approvalRequired: ['vcs.push', 'deploy', 'publish', 'net.upload'], protectedPaths: ['.env', '.claude/**'] };
 const receipts = [{ seq: 41, ts: day(0), taskId: 'task_demo', criterionId: 'tests', passed: true, source: 'independent-run', observed: 'exit=0\n12 tests passed' }, { seq: 22, ts: day(1), taskId: 'task_demo', criterionId: 'tests', passed: false, source: 'independent-run', observed: 'exit=1\n2 tests failed' }];
@@ -22,12 +22,25 @@ const usage = [{ seq: 45, ts: day(0), runtime: 'claude-code', model: 'demo-model
 const byDay = [2, 1, 0].map((n, i) => ({ day: d(n), allow: 9 + i * 4, request_approval: 2, deny: i, input: 30 + i * 20, output: 1500 + i * 500, cacheRead: 40_000, cacheCreate: 12_000 }));
 const coverage = (evidence: string, hostFailMode: string, containment: string) => ({ evidence, hostFailMode, containment, enforced: ['Shell commands that classify statically', 'File tools'], observedOnly: ['File effects of opaque scripts in the project'], unsupported: ['Network effects of opaque scripts'], notes: ['Demo. See the integrations page for what has really been tested.'] });
 
+const EMPTY_ID = 'demo-new';
+const emptyProject = { id: EMPTY_ID, name: 'demo-new-project', root: 'example/demo-new-project' };
+/** A second invented project, with nothing recorded yet, so the empty states can be seen too. */
+function demoEmpty(p: string | undefined): unknown {
+  switch (p) {
+    case '/api/state': return { project: emptyProject, goal: null, goals: [], policy, policyVersion: 0, proposals: [], decisions: [], activeTask: null, tasks: [], approvals: [], receipts: [], claims: [], mismatches: [], rejectedEvents: [], integrity: { ...integrity, chain: { ok: true, events: 1 }, witnessEntries: 1, signedCheckpoints: 0 }, approverEnrolled: false, head: 1 };
+    case '/api/analytics': return { totals: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, costUsd: null, costBasis: null, sessions: 0, providerReported: 0, transcriptDerived: 0 }, usage: [], byDay: [], byModel: [], byRuntime: [], safety: { actions: 0, allow: 0, deny: 0, requestApproval: 0, unsupported: 0, byAssurance: {}, detectedAfter: 0, reverted: 0, unresolved: 0, blocksHumanApproved: 0, blocksHumanApprovedAndUsed: 0, loopDenied: 0, repeatWarned: 0, goalDrift: { outOfScope: 0, of: 0 } }, approvals: { views: {}, medianWaitMs: null }, time: { runWallClockMs: 0, runApiMs: 0, approvalWaitMs: 0, verificationMs: 0, runs: 0 }, tasks: [], taskTotals: {}, runs: [], goals: { current: null, versions: 0, status: null } };
+    case '/api/actions': return [];
+    default: return undefined;
+  }
+}
+
 export function demoGet(path: string): unknown {
   const p = path.split('?')[0];
+  if (new URLSearchParams(path.split('?')[1] ?? '').get('project') === EMPTY_ID) { const out = demoEmpty(p); if (out !== undefined) return out; }
   switch (p) {
     case '/api/health': return { ok: true, paired: true };
     case '/api/session': return { csrf: 'demo' };
-    case '/api/projects': return [{ id: 'demo', name: 'demo-project', root: 'example/demo-project', goal: goal.statement, goalVersion: 2, activeTask: { id: task.id, title: task.title, status: evaluation.status }, pendingApprovals: 1 }];
+    case '/api/projects': return [{ id: 'demo', name: 'demo-project', root: 'example/demo-project', goal: goal.statement, goalVersion: 2, activeTask: { id: task.id, title: task.title, status: evaluation.status }, pendingApprovals: 1 }, { ...emptyProject, goal: null, goalVersion: null, activeTask: null, pendingApprovals: 0 }];
     case '/api/state': return { project: { id: 'demo', name: 'demo-project', root: 'example/demo-project' }, goal, goals: [{ ...goal, ts: day(1) }, { ...goal, statement: 'Investigate date bugs', version: 1, ts: day(3) }], policy, policyVersion: 0, proposals: [{ id: 'prop_demo', kind: 'goal', status: 'open', ts: day(0), payload: { statement: 'Also update the docs', rationale: 'The parser docs are out of date' }, actor: { runtime: 'claude-code' } }], decisions: [], activeTask: { ...task, evaluation, findings: [] }, tasks: [{ ...task, evaluation }], approvals, receipts, claims: [{ seq: 40, text: 'All tests pass and the fix is done.' }], mismatches: [mismatch], rejectedEvents: [], integrity, approverEnrolled: false, head: 58 };
     case '/api/analytics': return {
       totals: { input: 130, output: 6300, cacheRead: 120_000, cacheCreate: 36_000, costUsd: null, costBasis: null, sessions: 3, providerReported: 3, transcriptDerived: 0 }, usage, byDay, byModel: [{ name: 'demo-model', input: 130, output: 6300, cacheRead: 120_000, cacheCreate: 36_000, costUsd: 0, sessions: 3 }], byRuntime: [{ name: 'claude-code', input: 130, output: 6300, cacheRead: 120_000, cacheCreate: 36_000, costUsd: 0, sessions: 3 }],

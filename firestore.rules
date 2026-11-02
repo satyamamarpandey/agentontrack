@@ -1,0 +1,64 @@
+rules_version = '2';
+// Optional accounts. Each person reaches only their own documents. Feedback can be created by anyone, read by no client,
+// and deleted only by the signed-in person who wrote it. Limits match apps/web/lib/feedback.ts.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isOwner(uid) { return request.auth != null && request.auth.uid == uid; }
+    function isString(v, max) { return v is string && v.size() <= max; }
+    function isCount(v) { return v is number && v >= 0; }
+    function isRate(v) { return v == null || (v is number && v >= 0 && v <= 1); }
+
+    function validFeedback(d) {
+      return d.keys().hasAll(['rating', 'message', 'uid', 'createdAt'])
+        && d.keys().hasOnly(['rating', 'message', 'contact', 'uid', 'createdAt'])
+        && (d.rating == null || d.rating in ['helpful', 'not-helpful'])
+        && d.message is string && d.message.size() > 0 && d.message.size() <= 2000
+        && (!('contact' in d) || isString(d.contact, 200))
+        && d.createdAt == request.time;
+    }
+
+    function validProfile(p) {
+      return p is map && p.keys().hasOnly(['name', 'email']) && p.keys().hasAll(['name', 'email'])
+        && isString(p.name, 200)
+        && p.email is string && (p.email == '' || p.email == request.auth.token.email);
+    }
+
+    function validUser(d) {
+      return d.keys().hasOnly(['profile', 'preferences', 'updatedAt'])
+        && d.updatedAt == request.time
+        && (!('profile' in d) || validProfile(d.profile))
+        && (!('preferences' in d) || (d.preferences is map && d.preferences.keys().hasOnly(['theme']) && d.preferences.theme in ['dark', 'light']));
+    }
+
+    // Counts only: there is no field here that could hold code, a prompt, a path or a command.
+    function validSummary(d) {
+      return d.keys().hasOnly(['label', 'totals', 'rates', 'savedAt']) && d.keys().hasAll(['label', 'totals', 'rates', 'savedAt'])
+        && d.label is string && d.label.size() > 0 && d.label.size() <= 80
+        && d.savedAt == request.time
+        && d.totals is map && d.totals.keys().hasOnly(['inputTokens', 'outputTokens', 'sessions', 'tasks', 'tasksVerified', 'actions']) && d.totals.keys().hasAll(['inputTokens', 'outputTokens', 'sessions', 'tasks', 'tasksVerified', 'actions'])
+        && isCount(d.totals.inputTokens) && isCount(d.totals.outputTokens) && isCount(d.totals.sessions) && isCount(d.totals.tasks) && isCount(d.totals.tasksVerified) && isCount(d.totals.actions)
+        && d.rates is map && d.rates.keys().hasOnly(['criteriaPassing', 'verificationRunsPassing']) && d.rates.keys().hasAll(['criteriaPassing', 'verificationRunsPassing'])
+        && isRate(d.rates.criteriaPassing) && isRate(d.rates.verificationRunsPassing);
+    }
+
+    match /users/{uid} {
+      allow read, delete: if isOwner(uid);
+      allow create, update: if isOwner(uid) && validUser(request.resource.data);
+
+      match /feedback/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid) && validFeedback(request.resource.data) && request.resource.data.uid == uid;
+      }
+      match /summaries/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && validSummary(request.resource.data);
+      }
+    }
+
+    match /feedback/{id} {
+      allow create: if validFeedback(request.resource.data)
+        && (request.resource.data.uid == null || isOwner(request.resource.data.uid));
+      allow delete: if request.auth != null && resource.data.uid == request.auth.uid;
+    }
+  }
+}

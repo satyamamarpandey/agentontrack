@@ -1,33 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { PROJECT_TABS, ProjectDetail, ProjectsHome, type ProjectRoute, type ProjectTab } from './projects';
+import { Badge, Empty, Loading, Page, useLoad } from './ui';
 import { currentPort, currentProject, downloadExport, enterDemo, forgetSession, get, isDemo, leaveDemo, localAddress, onPublicSite, pair, post, resumeSession, setPort, setProject, setTerminalPrompt, subscribe } from './api';
 import { ChartFrame, fmt, fmtMs, HBars, Provenance, StackedBars, Stat } from './charts';
 
-const SCREENS = ['Overview', 'Projects', 'Goals', 'Agents', 'Usage', 'Comparisons', 'Evidence', 'Safety', 'Approvals', 'Evaluations', 'Environment', 'Feedback', 'Settings'] as const;
+const SCREENS = ['Projects', 'Overview', 'Goals', 'Agents', 'Usage', 'Comparisons', 'Evidence', 'Safety', 'Approvals', 'Evaluations', 'Environment', 'Feedback', 'Settings'] as const;
 type Screen = (typeof SCREENS)[number];
 type Reload = () => void;
-
-const STATUS_CLASS: Record<string, string> = { VERIFIED: 'good', FAILED: 'bad', NEEDS_HUMAN_APPROVAL: 'warn', IMPLEMENTED_UNVERIFIED: 'warn', pending: 'warn', approved: 'good', denied: 'bad', revoked: 'bad', expired: 'muted', consumed: 'muted', allow: 'good', deny: 'bad', request_approval: 'warn', pass: 'good', fail: 'bad', stale: 'warn', missing: 'muted', open: 'warn', accepted: 'good', rejected: 'bad', enforced: 'good', partial: 'warn', 'observed-only': 'warn', none: 'bad' };
-const Badge = ({ value }: { value: string }) => <span className={`badge ${STATUS_CLASS[value] ?? ''}`}>{value.replace(/_/g, ' ')}</span>;
-
-function useLoad<T>(load: () => Promise<T>, deps: unknown[] = []) {
-  const [data, setData] = useState<T | null>(null);
-  const [error, setError] = useState('');
-  const reload = useCallback(() => { load().then((d) => { setData(d); setError(''); }).catch((e) => setError(e.message)); }, deps); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(reload, [reload]);
-  return { data, error, reload };
-}
-
-const Loading = ({ error }: { error?: string }) => (error ? <div className="alert bad" role="alert">{error}</div> : <p className="muted" role="status">Loading…</p>);
-const Empty = ({ children }: { children: ReactNode }) => <div className="empty">{children}</div>;
-const Page = ({ title, intro, actions, children }: { title: string; intro?: string; actions?: ReactNode; children: ReactNode }) => (
-  <>
-    <header className="page-head">
-      <div><h1>{title}</h1>{intro ? <p className="muted">{intro}</p> : null}</div>
-      {actions}
-    </header>
-    {children}
-  </>
-);
 
 /** Escape closes a dialog wherever focus is. WebKit does not always focus what was clicked, so a handler on the dialog can miss it. */
 function useEscape(onClose: () => void) {
@@ -193,36 +172,6 @@ function Overview({ tick, go }: { tick: number; go: (s: Screen) => void }) {
         {ag.data ? <div className="agents-mini">{ag.data.map((x: any) => <span key={x.id}><b>{x.name}</b> <span className={`badge ${x.hooksInstalled ? 'good' : x.installed ? '' : 'muted'}`}>{x.hooksInstalled ? 'hooks installed' : x.installed ? 'not connected' : 'not installed'}</span></span>)}</div> : <Loading error={ag.error} />}
       </section>
       <p className="muted small">Savings are not shown here. A savings figure needs a matched comparison; see Comparisons.</p>
-    </Page>
-  );
-}
-
-function Projects({ reloadShell, tick }: { reloadShell: Reload; tick: number }) {
-  const { data, error, reload } = useLoad(() => get('/api/projects'), [tick]);
-  const [path, setPath] = useState('');
-  const [create, setCreate] = useState(false);
-  const [msg, setMsg] = useState('');
-  if (!data) return <Loading error={error} />;
-  return (
-    <Page title="Projects" intro="Each project has its own local record. Attaching one writes nothing into the folder.">
-      <form className="card row wrap" onSubmit={async (e) => { e.preventDefault(); try { await post('/api/projects', { path, create }); setPath(''); setMsg(''); reload(); reloadShell(); } catch (err) { setMsg((err as Error).message); } }}>
-        <label className="grow">Absolute folder path<input value={path} onChange={(e) => setPath(e.target.value)} required name="path" spellCheck={false} /></label>
-        <label className="check"><input type="checkbox" checked={create} onChange={(e) => setCreate(e.target.checked)} /> Create if missing</label>
-        <button className="btn primary" type="submit">Attach</button>
-        {msg ? <div className="alert bad full" role="alert">{msg}</div> : null}
-      </form>
-      <div className="table-wrap card"><table>
-        <thead><tr><th>Project</th><th>Goal</th><th>Active task</th><th>Pending</th><th /></tr></thead>
-        <tbody>{data.map((p: any) => (
-          <tr key={p.id}>
-            <td><b>{p.name}</b><div className="muted small mono">{p.root}</div>{p.missing ? <span className="badge bad">folder missing</span> : null}</td>
-            <td>{p.goal ?? <span className="muted">none</span>}</td>
-            <td>{p.activeTask ? <>{p.activeTask.title} <Badge value={p.activeTask.status} /></> : <span className="muted">none</span>}</td>
-            <td>{p.pendingApprovals ?? 0}</td>
-            <td>{currentProject() === p.id ? <span className="muted small">current</span> : <button className="btn small" disabled={p.missing} onClick={() => { setProject(p.id); reloadShell(); }}>Open</button>}</td>
-          </tr>
-        ))}</tbody>
-      </table></div>
     </Page>
   );
 }
@@ -690,9 +639,18 @@ function SettingsPage({ theme, setTheme, onUnpair, reloadShell }: { theme: strin
   );
 }
 
+/** A project page's address: #project/<id>/<tab>. */
+function routeFromHash(): ProjectRoute | null {
+  const m = /^#project\/([^/]+)(?:\/(\w+))?$/.exec(location.hash);
+  if (!m) return null;
+  const tab = PROJECT_TABS.find((t) => t === m[2]) ?? ('overview' as ProjectTab);
+  return { id: decodeURIComponent(m[1]!), tab };
+}
+
 export function App() {
   const [paired, setPaired] = useState<boolean | null>(null);
-  const [screen, setScreen] = useState<Screen>(() => (SCREENS.find((s) => s.toLowerCase() === location.hash.slice(1)) ?? 'Overview'));
+  const [screen, setScreen] = useState<Screen>(() => (SCREENS.find((s) => s.toLowerCase() === location.hash.slice(1)) ?? 'Projects'));
+  const [route, setRoute] = useState<ProjectRoute | null>(() => routeFromHash());
   const [tick, setTick] = useState(0);
   const [projects, setProjects] = useState<any[] | null>(null);
   const [theme, setThemeState] = useState(() => localStorage.getItem('bl-theme') ?? 'dark');
@@ -702,8 +660,8 @@ export function App() {
   const bump = useCallback(() => setTick((t) => t + 1), []);
 
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem('bl-theme', theme); }, [theme]);
-  useEffect(() => { resumeSession().then(setPaired); }, []);
-  useEffect(() => { location.hash = screen.toLowerCase(); document.title = `${screen} · AgentOnTrack`; }, [screen]);
+  useEffect(() => { resumeSession().then((ok) => { const r = routeFromHash(); if (ok && r) setProject(r.id); setPaired(ok); }); }, []);
+  useEffect(() => { location.hash = route ? `project/${encodeURIComponent(route.id)}/${route.tab}` : screen.toLowerCase(); document.title = `${route ? 'Project' : screen} · AgentOnTrack`; }, [screen, route]);
   const loadProjects = useCallback(() => {
     get('/api/projects').then((list) => {
       setProjects(list);
@@ -730,15 +688,18 @@ export function App() {
 
   if (paired === null) return <p className="muted center" role="status">Connecting…</p>;
   if (!paired) return <Pairing notice={pairNotice} onPaired={() => { setPairNotice(''); setPaired(true); }} />;
-  const go = (s: Screen) => { setScreen(s); setMenu(false); };
+  const go = (s: Screen) => { setRoute(null); setScreen(s); setMenu(false); };
+  const openProject = (id: string) => { setProject(id); setRoute({ id, tab: 'overview' }); setMenu(false); bump(); };
 
   let body: ReactNode = <Loading />;
-  if (projects && projects.length === 0 && screen !== 'Projects') {
+  if (route && projects) {
+    body = <ProjectDetail key={route.id} route={route} projects={projects} tick={tick} onTab={(tab) => setRoute({ id: route.id, tab })} onBack={() => go('Projects')} open={setOpen} go={(s) => go(s as Screen)} />;
+  } else if (projects && projects.length === 0 && screen !== 'Projects') {
     body = <Empty>No project attached. <button className="link" onClick={() => go('Projects')}>Attach one</button></Empty>;
   } else if (projects) {
     body = {
       Overview: <Overview tick={tick} go={go} />,
-      Projects: <Projects tick={tick} reloadShell={loadProjects} />,
+      Projects: <ProjectsHome projects={projects} tick={tick} reloadShell={loadProjects} onOpen={openProject} />,
       Goals: <Goals tick={tick} />,
       Agents: <Agents tick={tick} />,
       Usage: <Usage tick={tick} open={setOpen} />,
@@ -760,7 +721,7 @@ export function App() {
           <button className="menu" aria-expanded={menu} aria-label="Menu" onClick={() => setMenu(!menu)}>☰</button>
         </div>
         <nav aria-label="Main">
-          {SCREENS.map((s) => <button key={s} className={screen === s ? 'on' : ''} aria-current={screen === s ? 'page' : undefined} onClick={() => go(s)}>{s}</button>)}
+          {SCREENS.map((s) => <button key={s} className={!route && screen === s || route && s === 'Projects' ? 'on' : ''} aria-current={!route && screen === s || route && s === 'Projects' ? 'page' : undefined} onClick={() => go(s)}>{s}</button>)}
         </nav>
         <p className="live small" role="status" data-testid="live-status"><i className={live ? 'on' : ''} />{isDemo() ? 'Demo: not connected' : live ? 'Live: local record' : 'Reconnecting…'}</p>
         {isDemo() ? <button className="btn small" onClick={() => { leaveDemo(); history.replaceState(null, '', location.pathname); setPaired(false); }}>Pair with my companion</button> : null}

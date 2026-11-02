@@ -1,3 +1,5 @@
+import { ACCOUNTS_ENABLED } from '../../lib/accounts-config';
+import Link from '../link';
 import { Article } from '../content';
 import { ADVISORY } from '../../lib/release';
 
@@ -57,8 +59,13 @@ export default function Security() {
       <p>It listens on loopback only. Knowing the port grants nothing: it checks Host and Origin, needs a pairing code that works once, a strict HttpOnly cookie and a CSRF token, and each human action needs a fresh confirmation code.</p>
 
       <h2 id="outside-origin">This website and your machine</h2>
-      <p>The site is static, with no account and no server. Its dashboard connects only to a companion you started with <code>--allow-public-site</code> and paired with a code. That setting trusts the origins <code>pandeysatyam.com</code> and <code>satyamamarpandey.github.io</code>, which everything else on those origins shares.</p>
+      <p>The site is static, with {ACCOUNTS_ENABLED ? 'optional accounts held in Firebase, and' : 'no account and'} no server. Its dashboard connects only to a companion you started with <code>--allow-public-site</code> and paired with a code. That setting trusts the origins <code>pandeysatyam.com</code> and <code>satyamamarpandey.github.io</code>, which everything else on those origins shares.</p>
       <p>So a session from an outside origin gets no confirmation codes. Every change it asks for shows a code in your terminal, tied to that exact request, and describes the request there. Check it before typing the code. A compromised page can read what a paired session can read, but it cannot change anything alone.</p>
+
+      {ACCOUNTS_ENABLED ? <>
+        <h2>Optional accounts</h2>
+        <p>Firebase rules limit each person to their own documents. Google's sign-in script loads only on the account page, which you open in a separate tab, so it does not run in a dashboard page that holds a companion session. Saving a project summary loads Firebase's code into the dashboard, but only when you press Save. Firebase's code comes from this site's own files, and is then as trusted as the site. See <Link href="/privacy">privacy</Link> for what is stored.</p>
+      </> : null}
 
       <h2>Reporting</h2>
       <p>Report vulnerabilities through <a href={ADVISORY}>a private GitHub security advisory</a>.</p>

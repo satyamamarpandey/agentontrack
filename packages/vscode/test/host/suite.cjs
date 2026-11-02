@@ -44,6 +44,10 @@ exports.run = async () => {
   assert.equal(s.pending[0].kind, 'vcs.push');
   log(`reads the project: goal "${s.goal.statement}", ${s.pending.length} waiting`);
 
+  // An installed extension has its own copy of the vscode API, so a stub made here cannot answer its input box. This mode checks what
+  // needs no person: a wrong code changes nothing. The approval with a real code is covered by the run from source, which is the same bundle.
+  if (MODE === 'vsix') return installedTail(api, s);
+
   // It cannot change anything by itself: the companion asks for a code from the terminal.
   const { NeedsCode } = (() => { try { return require('../../dist/extension.js'); } catch { return {}; } })();
   let asked = null;
@@ -110,4 +114,16 @@ async function untrusted(api) {
   const state = await api.client().get('/api/state');
   assert.equal(state.approvals[0].view, 'pending', 'the approval was not decided');
   log('untrusted workspace: reads, confirms nothing');
+}
+
+async function installedTail(api, s) {
+  const id = s.pending[0].id;
+  await vscode.commands.executeCommand('agentontrack.approve', { id, code: 'not-the-code' });
+  const state = await api.client().get('/api/state');
+  assert.equal(state.approvals[0].view, 'pending', 'a wrong code decided nothing');
+  const out = await vscode.commands.executeCommand('agentontrack.diagnostics');
+  void out;
+  await vscode.commands.executeCommand('agentontrack.disconnect');
+  assert.equal(api.client()?.connected ?? false, false);
+  log('installed package: reads, refuses a wrong code, disconnects');
 }

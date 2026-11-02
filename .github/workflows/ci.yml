@@ -109,10 +109,13 @@ jobs:
       - run: pnpm build
       - run: pnpm --dir packages/vscode run package
       - name: Extension host, loaded from source
+        timeout-minutes: 6
         run: xvfb-run -a node packages/vscode/test/host/run.mjs
       - name: Extension host, the packaged VSIX installed with VS Code's own CLI
+        timeout-minutes: 6
         run: AOT_HOST_MODE=vsix AOT_VSIX=dist-release/agentontrack-vscode.vsix xvfb-run -a node packages/vscode/test/host/run.mjs
       - name: Extension host, an untrusted workspace
+        timeout-minutes: 6
         run: AOT_HOST_MODE=untrusted xvfb-run -a node packages/vscode/test/host/run.mjs
 
   security:

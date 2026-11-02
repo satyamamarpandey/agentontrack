@@ -199,6 +199,44 @@ if (HOSTS[which]) {
   }
 }
 
+if (which === 'hermes-mcp') {
+  // Real Hermes, with MCP support added, with a scripted model.
+  const m = fresh();
+  const cfg = join(homedir(), '.hermes');
+  mkdirSync(cfg, { recursive: true });
+  writeFileSync(join(cfg, 'config.yaml'), ['model:', '  default: scripted', '  provider: custom', `  base_url: ${model.url}/v1`, '  api_key: scripted', '  context_length: 200000', 'mcp_servers:', '  agentontrack:', `    command: ${JSON.stringify(NODE)}`, `    args: ${JSON.stringify([CLI, 'mcp', 'hermes'])}`, '    env:', `      AGENTONTRACK_ROOT: ${JSON.stringify(m.root)}`, `      AGENTONTRACK_HOME: ${JSON.stringify(process.env.AGENTONTRACK_HOME)}`].join('\n'));
+  writeFileSync(join(OUT, 'hermes-mcp-list.log'), spawnSync('hermes', ['mcp', 'list'], { encoding: 'utf8', timeout: 60_000 }).stdout ?? '');
+  model.setPlan([
+    { tool: /^tool_search$/, args: () => ({ queries: ['agentontrack project status'] }) },
+    { tool: /^tool_call$/, args: () => ({ calls: [{ name: /[\w.-]*agentontrack[\w.-]*status/i.exec(model.seen.toolResults.join(' '))?.[0] ?? 'mcp__agentontrack__project_status', arguments: {} }] }) },
+  ]);
+  const r = await hostRun('hermes', ['--accept-hooks', 'chat', '-q', 'go'], { cwd: m.root, timeout: 180_000, env: { HERMES_ACCEPT_HOOKS: '1' } });
+  log('mcp', r);
+  for (const f of ['agent.log', 'errors.log']) { const p = join(cfg, 'logs', f); if (existsSync(p)) writeFileSync(join(OUT, `hermes-${f}`), readFileSync(p, 'utf8').slice(-20000)); }
+  const ok = model.seen.toolResults.some((x) => !x.startsWith('PLANNED') && !/matches": \[\]/.test(x) && /"goal"|goal\\"/.test(x));
+  record('MCP tool answered through the real host', ok ? 'PASS' : 'NOT OBSERVED', model.seen.toolResults.join(' | ').slice(0, 600));
+}
+
+if (which === 'opencode-v2') {
+  const v = spawnSync('opencode', ['--version'], { encoding: 'utf8' }).stdout?.trim();
+  record('Real program present', v ? 'PASS' : 'FAIL', v);
+  const s = fresh();
+  PROVIDERS.opencode.install(s.root, SELF(s.root), { v2: true });
+  const conf = { providers: { scripted: { package: 'aisdk:@ai-sdk/openai-compatible', settings: { baseURL: `${model.url}/v1` }, models: { scripted: { name: 'scripted', tool_call: true } } } } };
+  writeFileSync(join(s.root, 'opencode.json'), JSON.stringify(conf));
+  const run = () => hostRun('opencode', ['run', '--model', 'scripted/scripted', '--auto', '--format', 'json', 'go'], { cwd: s.root, env: { OPENCODE_CONFIG_CONTENT: JSON.stringify(conf) } });
+  model.setPlan([sh(PUSH)]);
+  const r1 = await run();
+  log('held', r1);
+  if (reached(s.root)) {
+    record('Push held by the gate', s.pushed() ? 'MISSED' : 'PREVENTED', JSON.stringify(acts(s.root)));
+    withP(s.root, (p) => p.human.approve(pending(s.root)));
+    model.setPlan([sh(PUSH)]);
+    log('approved', await run());
+    record('Allowed once after approval', s.pushed() ? 'PASS' : 'NOT OBSERVED');
+  } else record('Push reached the gate', s.pushed() ? 'FAIL-OPEN' : 'NOT OBSERVED', `pushed ${s.pushed()}; exit ${r1.status}; requests ${model.seen.requests}; ${`${r1.stdout}${r1.stderr}`.slice(-500)}`);
+}
+
 if (which === 'continue') {
   record('Real program present', spawnSync('cn', ['--version'], { encoding: 'utf8' }).status === 0 ? 'PASS' : 'FAIL', spawnSync('cn', ['--version'], { encoding: 'utf8' }).stdout?.trim());
   const m = fresh();

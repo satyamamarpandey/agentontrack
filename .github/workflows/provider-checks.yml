@@ -7,7 +7,7 @@ on:
     inputs:
       hosts:
         description: JSON list, so a repair reruns only what it affects
-        default: '["copilot","gemini","opencode","cline","continue","perplexity"]'
+        default: '["hermes-mcp","opencode-v2"]'
 permissions:
   contents: read
 jobs:
@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        which: ${{ fromJSON(inputs.hosts || '["copilot","gemini","opencode","cline","continue","perplexity"]') }}
+        which: ${{ fromJSON(inputs.hosts || '["hermes-mcp","opencode-v2"]') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -31,7 +31,17 @@ jobs:
         env:
           WHICH: ${{ matrix.which }}
         run: |
-          case "$WHICH" in
+          case "${WHICH%-mcp}" in
+            hermes)
+              curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash -s -- --skip-setup || true
+              echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+              # MCP support is an optional extra of Hermes.
+              (cd "$HOME/.hermes/hermes-agent" && (uv pip install --python venv/bin/python mcp || venv/bin/python -m pip install mcp)) || true
+              ;;
+            opencode-v2)
+              curl -fsSL https://opencode.ai/install | bash -s -- --version 2.2.5 || true
+              echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+              ;;
             copilot) npm install -g @github/copilot ;;
             gemini) npm install -g @google/gemini-cli ;;
             opencode) npm install -g opencode-ai ;;
@@ -47,6 +57,7 @@ jobs:
           retention-days: 30
 
   local-models:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.hosts == 'with-models' }}
     # Bounded: small real models on a CPU-only runner, each server with its own time limit. Results are kept even if one runs out of time.
     runs-on: ubuntu-latest
     timeout-minutes: 50
@@ -106,5 +117,46 @@ jobs:
         if: always()
         with:
           name: local-models
+          path: runtime-results/
+          retention-days: 30
+
+  vendor:
+    # Real agents on their own hosted models. Each needs a key the owner adds as a repository secret. With none, the result is BLOCKED.
+    strategy:
+      fail-fast: false
+      matrix:
+        which: [cursor, devin, kiro, perplexity]
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsc -b packages/cli
+      - name: Install the real host, only if its key exists
+        env:
+          WHICH: ${{ matrix.which }}
+          HAS: ${{ (matrix.which == 'cursor' && secrets.CURSOR_API_KEY != '') || (matrix.which == 'devin' && secrets.WINDSURF_API_KEY != '') || (matrix.which == 'kiro' && secrets.KIRO_API_KEY != '') }}
+        run: |
+          if [ "$HAS" != true ]; then exit 0; fi
+          case "$WHICH" in
+            cursor) curl https://cursor.com/install -fsS | bash; echo "$HOME/.local/bin" >> "$GITHUB_PATH" ;;
+            devin) curl -fsSL https://cli.devin.ai/install.sh | bash; echo "$HOME/.local/bin" >> "$GITHUB_PATH" ;;
+            kiro) curl -fsSL https://cli.kiro.dev/install | bash; echo "$HOME/.local/bin" >> "$GITHUB_PATH" ;;
+          esac
+      - run: node benchmarks/live/vendor-checks.mjs ${{ matrix.which }}
+        env:
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+          WINDSURF_API_KEY: ${{ secrets.WINDSURF_API_KEY }}
+          KIRO_API_KEY: ${{ secrets.KIRO_API_KEY }}
+          PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vendor-${{ matrix.which }}
           path: runtime-results/
           retention-days: 30

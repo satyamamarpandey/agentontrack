@@ -17,3 +17,4 @@
 .m-dot{position:absolute;top:8px;right:28%;width:9px;height:9px;border-radius:50%;background:#f59e0b}
 .m-app textarea,.m-app input{font-size:16px}
 .m-app button:disabled{opacity:.5}
+.m-suggest{padding:10px;border:1px solid var(--line,#2a313c);border-radius:10px}.m-app select{min-height:44px;font-size:16px}

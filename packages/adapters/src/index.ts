@@ -466,3 +466,4 @@ export async function probeLocalModel(baseUrl: string, model?: string, fetchImpl
 }
 
 export * from './providers.js';
+export * from './discovery.js';

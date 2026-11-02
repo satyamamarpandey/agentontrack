@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { accountPage, accountsEnabled, mobileBackend } from './accounts';
 import { Icon, Logo } from './icons';
-import { RemoteError, type Backend, type ComputerRow, type DeviceStatus, type Snapshot } from './mobile-backend';
+import { RemoteError } from './remote-error';
+import type { Backend, ComputerRow, DeviceStatus, Snapshot } from './mobile-backend';
 
 const STALE_AFTER_MS = 3 * 60_000;
 type Tab = 'progress' | 'activity' | 'evidence' | 'approvals' | 'more';
@@ -182,7 +183,7 @@ function ProjectScreen({ be, cid, project, tab, go }: { be: Backend; cid: string
     }>
       <Freshness online={online} last={last} snap={snap} />
       {act.msg ? <p role={act.ok ? 'status' : 'alert'} className={act.ok ? 'm-note' : 'alert bad'} data-testid="m-result">{act.msg}</p> : null}
-      {!s ? <p className="m-note" role="status">Waiting for the project…</p> : tab === 'progress' ? <Progress s={s} can={can} call={call} />
+      {!s ? <p className="m-note" role="status">Waiting for the project…</p> : tab === 'progress' ? <Progress s={s} can={can} call={call} be={be} cid={cid} project={project} />
         : tab === 'activity' ? <Activity s={s} can={can} call={call} />
         : tab === 'evidence' ? <Evidence s={s} be={be} cid={cid} project={project} online={online} />
         : tab === 'approvals' ? <Approvals s={s} can={can} call={call} />
@@ -193,14 +194,37 @@ function ProjectScreen({ be, cid, project, tab, go }: { be: Backend; cid: string
 
 type Call = <T>(action: string, params?: object, ok?: string) => Promise<T | undefined>;
 
-function Progress({ s, can, call }: { s: any; can: boolean; call: Call }) {
+interface AgentRow { id: string; name: string; status: string; canStart: boolean; reason: string | null; commands: string[]; commandsSource: string }
+interface ModelRow { id: string; agent: string; source: string; entitlement: string; note: string }
+const STATUS_WORDS: Record<string, string> = { ready: 'ready', 'needs-setup': 'needs setup', 'terminal-only': 'start it in its own terminal', missing: 'not installed' };
+
+/** What the computer really has: agents with a status, and models it found. Nothing is assumed, and a model is never called available just because it is listed. */
+function useChoices(be: Backend, cid: string, project: string, online: boolean) {
+  const [agents, setAgents] = useState<AgentRow[] | null>(null);
+  const [models, setModels] = useState<ModelRow[] | null>(null);
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    if (!online) return;
+    let live = true;
+    void be.call<{ agents: AgentRow[] }>(cid, 'agents.list', { project }).then((r) => live && setAgents(r.agents)).catch((e) => live && setErr(e.message));
+    void be.call<{ models: ModelRow[] }>(cid, 'models.list', {}).then((r) => live && setModels(r.models)).catch(() => undefined);
+    return () => { live = false; };
+  }, [be, cid, project, online]);
+  return { agents, models, err };
+}
+
+function Progress({ s, can, call, be, cid, project }: { s: any; can: boolean; call: Call; be: Backend; cid: string; project: string }) {
   const [extra, setExtra] = useState('');
   const [prompt, setPrompt] = useState('');
-  const [agent, setAgent] = useState('claude-code');
-  const [model, setModel] = useState('haiku');
+  const [agent, setAgent] = useState('');
+  const [model, setModel] = useState('');
+  const { agents, models, err } = useChoices(be, cid, project, true);
+  const startable = (agents ?? []).filter((a) => a.canStart);
+  const chosen = agent || startable[0]?.id || '';
+  const modelsFor = (models ?? []).filter((m) => m.agent === chosen);
+  const modelChoice = model || modelsFor.find((m) => m.entitlement === 'worked')?.id || modelsFor[0]?.id || '';
   const phases: any[] = s.plan?.phases ?? [];
   const next = phases.find((p) => p.status === 'ready');
-  const needsEvidence = phases.find((p) => ['needs-evidence', 'stale'].includes(p.status) && p.checks > 0);
   const done = phases.filter((p) => ['verified', 'done-unchecked', 'skipped'].includes(p.status)).length;
   return (
     <>
@@ -239,11 +263,31 @@ function Progress({ s, can, call }: { s: any; can: boolean; call: Call }) {
 
       <section className="m-card stack" data-testid="m-next">
         <h2>Next prompt</h2>
-        {next ? <p className="m-note"><b>Suggested:</b> start &ldquo;{next.title}&rdquo;. Add anything the agent should know, then Start above.</p> : needsEvidence ? <p className="m-note"><b>Suggested:</b> run the checks for &ldquo;{needsEvidence.title}&rdquo;, because the agent&apos;s word is not evidence.</p> : <p className="m-note">Nothing is suggested right now.</p>}
+        {(s.suggestions ?? []).length === 0 ? <p className="m-note">Nothing is suggested right now.</p> : (s.suggestions as any[]).map((g) => (
+          <div key={g.id} className="m-suggest stack" data-testid="m-suggestion">
+            <b>{g.title}</b>
+            <span className="m-note">{g.why}{g.agent ? ` Suggested agent: ${g.agent.name}${g.startable ? '' : ' (cannot be started from here)'}.` : ''} {g.scope}</span>
+            {g.prompt ? <button className="btn m-btn" onClick={() => { setPrompt(g.prompt); if (g.agent && g.startable) { setAgent(g.agent.id); setModel(''); } }} data-testid="m-use-suggestion">Edit this prompt</button> : null}
+          </div>))}
         <label>Add to the next phase<textarea rows={2} value={extra} onChange={(e) => setExtra(e.target.value)} name="m-extra" placeholder="Optional" /></label>
         <label>Or send your own prompt<textarea rows={3} value={prompt} onChange={(e) => setPrompt(e.target.value)} name="m-prompt" placeholder="What should the agent do?" data-testid="m-prompt" /></label>
-        <div className="row wrap"><label>Agent<input value={agent} onChange={(e) => setAgent(e.target.value)} name="m-agent" style={{ width: 130 }} /></label><label>Model<input value={model} onChange={(e) => setModel(e.target.value)} name="m-model" style={{ width: 110 }} /></label></div>
-        <button className="btn primary m-btn" disabled={!can || !prompt.trim()} onClick={() => void call('run.start', { prompt, agent, model }, 'Sent to your computer.').then((r) => { if (r) setPrompt(''); })} data-testid="m-send">Send</button>
+        <div className="row wrap">
+          <label>Agent
+            <select value={chosen} onChange={(e) => { setAgent(e.target.value); setModel(''); }} name="m-agent" data-testid="m-agent">
+              {(agents ?? []).map((a) => <option key={a.id} value={a.id} disabled={!a.canStart}>{a.name} ({a.canStart ? 'ready' : STATUS_WORDS[a.status] ?? a.status})</option>)}
+            </select>
+          </label>
+          <label>Model
+            <select value={modelChoice} onChange={(e) => setModel(e.target.value)} name="m-model" data-testid="m-model" disabled={modelsFor.length === 0}>
+              {modelsFor.length === 0 ? <option value="">None found yet</option> : modelsFor.map((m) => <option key={m.id} value={m.id}>{m.id}{m.entitlement === 'worked' ? ' (worked here)' : ' (found, not tried)'}</option>)}
+            </select>
+          </label>
+        </div>
+        {agents && startable.length === 0 ? <p className="m-note" data-testid="m-no-agent">No agent can be started from AgentOnTrack on this project yet. {agents.find((a) => a.reason)?.reason ?? ''}</p> : null}
+        {err ? <p className="m-note">Could not load the agent list: {err}</p> : null}
+        <p className="m-note">Models are those this computer reported or used. Whether your plan allows one is only known after a run uses it.</p>
+        <button className="btn primary m-btn" disabled={!can || !prompt.trim() || !chosen || !modelChoice} onClick={() => void call('run.start', { prompt, agent: chosen, model: modelChoice }, 'Sent to your computer.').then((r) => { if (r) setPrompt(''); })} data-testid="m-send">Send</button>
+        {!modelChoice && chosen ? <p className="m-note">No model has been found for this agent, so nothing can be sent from here. Run it once on your computer first.</p> : null}
       </section>
     </>
   );

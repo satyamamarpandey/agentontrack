@@ -172,14 +172,14 @@ test('email: create an account, sign out, sign in again, and a wrong password is
   await page.goto(`${SITE}/account/`);
   await page.getByRole('button', { name: 'Create an account' }).click();
   await page.getByLabel('Name').fill('Email Person');
-  await page.getByLabel('Email').fill('mailer@example.com');
+  await page.getByLabel('Email', { exact: true }).fill('mailer@example.com');
   await page.getByLabel('Password').fill('correct horse battery');
   await page.getByTestId('email-submit').click();
   await expect(page.getByTestId('signed-in')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByTestId('profile-name')).toHaveText('Email Person');
   await page.getByRole('button', { name: 'Sign out' }).click();
   await page.getByRole('button', { name: 'Sign in with email' }).click();
-  await page.getByLabel('Email').fill('mailer@example.com');
+  await page.getByLabel('Email', { exact: true }).fill('mailer@example.com');
   await page.getByLabel('Password').fill('wrong password');
   await page.getByTestId('email-submit').click();
   await expect(page.getByRole('alert')).toHaveText('The email or password is not right.');
@@ -194,7 +194,7 @@ test('email: create an account, sign out, sign in again, and a wrong password is
 test('email: a short password and a duplicate address are explained, and reset sends a link without revealing who has an account', async ({ page }) => {
   await page.goto(`${SITE}/account/`);
   await page.getByRole('button', { name: 'Create an account' }).click();
-  await page.getByLabel('Email').fill('short@example.com');
+  await page.getByLabel('Email', { exact: true }).fill('short@example.com');
   await page.getByLabel('Password').fill('12345');
   await page.getByTestId('email-submit').click();
   await expect(page.getByLabel('Password')).toBeFocused().catch(() => undefined);
@@ -203,14 +203,14 @@ test('email: a short password and a duplicate address are explained, and reset s
   await expect(page.getByTestId('signed-in')).toBeVisible({ timeout: 20_000 });
   await page.getByRole('button', { name: 'Sign out' }).click();
   await page.getByRole('button', { name: 'Create an account' }).click();
-  await page.getByLabel('Email').fill('short@example.com');
+  await page.getByLabel('Email', { exact: true }).fill('short@example.com');
   await page.getByLabel('Password').fill('long enough password');
   await page.getByTestId('email-submit').click();
   await expect(page.getByRole('alert')).toContainText('already has an account');
   // The same sentence for an address nobody has used.
   for (const address of ['short@example.com', 'nobody-here@example.com']) {
     await page.getByRole('button', { name: 'Reset password' }).click();
-    await page.getByLabel('Email').fill(address);
+    await page.getByLabel('Email', { exact: true }).fill(address);
     await page.getByTestId('email-submit').click();
     await expect(page.getByTestId('account-note')).toHaveText('If that address has an account, a reset link is on its way.');
   }
@@ -221,7 +221,7 @@ test('email: a short password and a duplicate address are explained, and reset s
 test('email: deleting the account needs the password, and removes the sign-in', async ({ page }) => {
   await page.goto(`${SITE}/account/`);
   await page.getByRole('button', { name: 'Create an account' }).click();
-  await page.getByLabel('Email').fill('gone@example.com');
+  await page.getByLabel('Email', { exact: true }).fill('gone@example.com');
   await page.getByLabel('Password').fill('a password to delete');
   await page.getByTestId('email-submit').click();
   await expect(page.getByTestId('signed-in')).toBeVisible({ timeout: 20_000 });
@@ -236,7 +236,7 @@ test('email: deleting the account needs the password, and removes the sign-in', 
 test('coming from the dashboard welcome page, signing in returns there, and it still asks to connect the computer', async ({ page }) => {
   await page.goto(`${SITE}/account/?next=dashboard`);
   await page.getByRole('button', { name: 'Create an account' }).click();
-  await page.getByLabel('Email').fill('back@example.com');
+  await page.getByLabel('Email', { exact: true }).fill('back@example.com');
   await page.getByLabel('Password').fill('back to the dashboard');
   await page.getByTestId('email-submit').click();
   await page.waitForURL(/\/dashboard\//, { timeout: 30_000 });

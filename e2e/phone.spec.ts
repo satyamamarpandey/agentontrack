@@ -100,7 +100,7 @@ test('the computer is linked once, from the desktop, to the signed-in account', 
   const dialog = dpage.locator('[role=dialog]:not([data-testid=terminal-code-dialog])');
   await dialog.getByRole('button', { name: 'Confirm' }).click();
   await expect(dpage.getByTestId('phone-state')).toContainText('Online', { timeout: 40_000 });
-  await expect(dpage.getByTestId('computer-fingerprint')).toHaveText(/^[0-9A-F ]{10,}$/i);
+  await expect(dpage.getByTestId('computer-fingerprint')).toHaveText(/^[0-9A-F-]{10,}$/i);
 });
 
 test('a phone signed in to the same account is NOT trusted until the person approves it at the computer', async () => {

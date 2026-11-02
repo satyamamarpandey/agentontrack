@@ -6,14 +6,14 @@ import type { AddressInfo } from 'node:net';
 import { homedir, hostname } from 'node:os';
 import { basename, dirname, extname, relative, sep, isAbsolute, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { failoverOptions, runtimeFacts, coverageFor, PROVIDERS, providerInstalled, hooksInstalled, installHooks, probeLocalModel, uninstallHooks } from '@agentontrack/adapters';
+import { failoverOptions, runtimeFacts, coverageFor, PROVIDERS, providerInstalled, hooksInstalled, installHooks, probeLocalModel, uninstallHooks, discoverModels, describeAgents, type InitReport, type Seen } from '@agentontrack/adapters';
 import { planFacts as planFactsOf, planView as planViewOf } from './plan-view.js';
 import { makeExecutor, snapshotOf } from './remote-actions.js';
 import { loadRemote, newRemoteFile, Refusal, saveRemote, type RemoteFile } from './remote-host.js';
 import { RemoteService } from './remote-service.js';
 import { fingerprint as fingerprintOf } from '@agentontrack/remote';
 import { FirestoreTransport, type Emulators, type FirebaseConfig } from './remote-transport.js';
-import { renderHandoffMarkdown, acceptHandoff2, buildHandoff, listHandoffs, loadHandoff, planWorkflow, checkSpec, decompose, phasePrompt, PhasePlanSchema, planSha, startBlock, saveHandoff, validateHandoff, hashText, listDir, WorkspaceError, updateRegistered, approvalView, agentontrackHome, computeAnalytics, isPendingLive, loadRegistry, Project, registerProject, saveRegistry, stateDirFor, type Registered } from '@agentontrack/core';
+import { renderHandoffMarkdown, checkSlashCommand, CommandRefused, orchestrate, acceptHandoff2, buildHandoff, listHandoffs, loadHandoff, planWorkflow, checkSpec, decompose, phasePrompt, PhasePlanSchema, planSha, startBlock, saveHandoff, validateHandoff, hashText, listDir, WorkspaceError, updateRegistered, approvalView, agentontrackHome, computeAnalytics, isPendingLive, loadRegistry, Project, registerProject, saveRegistry, stateDirFor, type Registered } from '@agentontrack/core';
 import * as z from 'zod/v4';
 
 const SESSION_TTL_MS = 8 * 3_600_000;
@@ -122,6 +122,31 @@ function detectVersion(cmd: string): string | null {
   return r.status === 0 ? r.stdout.trim().split('\n')[0]!.slice(0, 80) : null;
 }
 
+const seenCache = new Map<string, { at: number; v: string | null }>();
+/** A program's version, remembered for a minute: starting a process per agent on every request would be slow. */
+function cachedVersion(key: string, probe: () => string | null): string | null {
+  const hit = seenCache.get(key);
+  if (hit && Date.now() - hit.at < 60_000) return hit.v;
+  const v = probe();
+  seenCache.set(key, { at: Date.now(), v });
+  return v;
+}
+
+/** Every agent this computer knows about, and whether the product can really start it. With no project given, nothing is claimed startable. */
+function runtimeList(root: string | undefined, claudeOverride = false): { id: string; name: string; installed: boolean; authenticated: boolean | null; canStart: boolean; how: string | null; reason: string | null }[] {
+  const terminal = (name: string) => `Starting ${name} from AgentOnTrack is not built yet. Start it in its own terminal: its hooks still report to this project.`;
+  // A configured command (tests, or a person pointing at a wrapper) is what will actually be run, so it counts as installed.
+  const claudeInstalled = claudeOverride || !!cachedVersion('claude', () => detectVersion('claude'));
+  const claudeHooked = root ? hooksInstalled('claude-code', root) : false;
+  const claudeAuthed = claudeOverride ? null : claudeInstalled ? cachedVersion('claude-auth', () => (claudeAuth().authenticated ? 'yes' : null)) === 'yes' : null;
+  return [
+    { id: 'claude-code', name: 'Claude Code', installed: claudeInstalled, authenticated: claudeAuthed, canStart: claudeInstalled && claudeHooked, how: 'claude -p, started by AgentOnTrack in this project, with its hooks reporting here', reason: !claudeInstalled ? 'Claude Code is not installed on this computer.' : !root ? 'Open a project to see whether it can start there.' : !claudeHooked ? 'Connect Claude Code to this project first, so its hooks are in place.' : null },
+    { id: 'codex', name: 'Codex', installed: !!cachedVersion('codex', () => detectVersion('codex')), authenticated: null, canStart: false, how: null, reason: terminal('Codex') },
+    { id: 'hermes', name: 'Hermes', installed: !!cachedVersion('hermes', () => detectVersion('hermes')), authenticated: null, canStart: false, how: null, reason: terminal('Hermes') },
+    ...Object.values(PROVIDERS).map((a) => ({ id: a.id, name: a.name, installed: !!cachedVersion(a.bin, () => detectVersionArgs(a.bin, a.versionArgs)), authenticated: null, canStart: false, how: null, reason: terminal(a.name) })),
+  ];
+}
+
 /** Reports login state without ever reading credentials: only the official CLI's own status command. */
 function claudeAuth(): { authenticated: boolean; method: string | null; subscription: string | null } {
   const r = spawnSync('claude', ['auth', 'status'], { encoding: 'utf8', timeout: 10_000, shell: process.platform === 'win32' });
@@ -182,6 +207,10 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
 
   /** Bounded continuation of an approved plan, run here and not in a browser, so it goes on while a phone is the only thing watching. */
   const continuing = new Map<string, { cancel: boolean }>();
+  /** What this companion has seen runtimes report in this session. Nothing here is guessed or built in. */
+  const inits: InitReport[] = [];
+  const seenModels: Seen[] = [];
+  const reportedCommands = (agent: string): string[] | null => { const last = inits.filter((x) => x.agent === agent).at(-1); return last ? last.commands : null; };
   const continuePlan = (entry: Registered, p: Project, maxPhases: number, source: string) => {
     if (continuing.has(entry.id)) return { started: false, note: 'It is already continuing.' };
     const me = { cancel: false };
@@ -241,8 +270,8 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
       }),
       continuePlan: (entry, p, n, source) => asRefusal(() => continuePlan(entry, p, n, source)),
       cancelContinue: (pid) => { const c = continuing.get(pid); if (!c) return false; c.cancel = true; for (const r of runs.values()) if (r.project === pid && r.status === 'running') { r.status = 'stopped'; r.child.kill(); } return true; },
-      models: async () => ({ agents: [] }),
-      agents: async () => [],
+      models: async () => ({ models: await discoverModels({ seen: seenModels, inits }) }),
+      agents: async (root) => describeAgents(runtimeList(root, !!opts.claudeCommand), inits),
       maxUsdPerRun: () => remoteFileNow()?.maxUsdPerRun ?? 1,
       version: 'companion',
     });
@@ -250,7 +279,7 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
       file, save: (f2) => saveRemote(f2), executor: exec, version: 'companion',
       transport: new FirestoreTransport({ firebase: link.firebase as FirebaseConfig, uid: link.uid, cid: file.computerId, email: link.computer.email, password: link.computer.password, ...(opts.remote?.emulators ? { emulators: opts.remote.emulators } : {}) }),
       list: () => loadRegistry().filter((r) => existsSync(r.root)).map((r) => { try { const { p } = projectFor(r.id); const st = p.state(); const t = st.activeTaskId ? st.tasks.get(st.activeTaskId) : null; return { id: r.id, name: r.name, archived: !!r.archived, goal: st.goal?.statement ?? null, activeTask: t ? { title: t.title, status: p.evaluate(t.id).status } : null, pendingApprovals: [...st.approvals.values()].filter((x) => approvalView(x, new Date()) === 'pending').length }; } catch { return { id: r.id, name: r.name, archived: !!r.archived, missing: true }; } }),
-      projects: () => loadRegistry().filter((r) => existsSync(r.root) && !r.archived).map((r) => ({ id: r.id, snapshot: () => { const { entry, p } = projectFor(r.id); return snapshotOf(entry, p, { isRunning: (id) => runs.get(id)?.status === 'running', recentRuns: (pid) => [...runs.values()].filter((x) => x.project === pid).map((x) => ({ id: x.id, status: x.status, started: x.started, events: x.events })) }); } })),
+      projects: () => loadRegistry().filter((r) => existsSync(r.root) && !r.archived).map((r) => ({ id: r.id, snapshot: () => { const { entry, p } = projectFor(r.id); return snapshotOf(entry, p, { isRunning: (id) => runs.get(id)?.status === 'running', recentRuns: (pid) => [...runs.values()].filter((x) => x.project === pid).map((x) => ({ id: x.id, status: x.status, started: x.started, events: x.events })) }, runtimeList(entry.root, !!opts.claudeCommand).map((r) => ({ id: r.id, name: r.name, canStart: r.canStart }))); } })),
       ...(opts.remote?.snapshotEveryMs ? { snapshotEveryMs: opts.remote.snapshotEveryMs } : {}),
       ...(opts.remote?.heartbeatEveryMs ? { heartbeatEveryMs: opts.remote.heartbeatEveryMs } : {}),
     });
@@ -366,6 +395,7 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
     run.status = exitCode === 0 ? 'finished' : run.status === 'stopped' ? 'stopped' : 'failed';
     if (result?.modelUsage) {
       for (const [model, u] of Object.entries<any>(result.modelUsage)) {
+        if (exitCode === 0) seenModels.push({ agent: 'claude-code', model, worked: true });
         p.recordUsage({
           runtime: 'claude-code', model, source: 'provider-reported', sessionId: result.session_id, runId: run.id, inputTokens: u.inputTokens ?? 0, outputTokens: u.outputTokens ?? 0,
           cacheReadTokens: u.cacheReadInputTokens ?? 0, cacheCreationTokens: u.cacheCreationInputTokens ?? 0, costUsd: u.costUSD, costBasis: u.costBasis ?? 'unknown', durationMs: result.duration_ms,
@@ -378,6 +408,7 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
   const startRun = (entry: Registered, p: Project, input: z.infer<typeof RunInput>, meta?: { planId?: string; phaseId?: string; source?: string }): Run => {
     if (input.runtime !== 'claude-code') throw new HttpError(409, `Starting ${input.runtime} from the dashboard is not built yet. Run it yourself: its hooks still report here.`);
     if (!hooksInstalled('claude-code', entry.root)) throw new HttpError(409, 'Connect Claude Code to this project first, so its hooks are in place');
+    try { checkSlashCommand(input.prompt, reportedCommands('claude-code')); } catch (err) { if (err instanceof CommandRefused) throw new HttpError(409, err.message); throw err; }
     const [cmd, ...pre] = opts.claudeCommand ?? ['claude'];
     const args = [...pre, '-p', input.prompt, '--model', input.model, '--max-budget-usd', String(input.maxBudgetUsd), '--output-format', 'stream-json', '--verbose', '--allowedTools', 'Bash,Write,Edit,Read,Grep,Glob', '--permission-mode', 'acceptEdits', '--setting-sources', 'project,local'];
     const child = spawn(cmd!, args, { cwd: entry.root, stdio: ['ignore', 'pipe', 'pipe'], env: process.env });
@@ -395,6 +426,7 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
         try {
           const o = JSON.parse(line);
           if (o.type === 'result') result = o;
+          if (o.type === 'system' && o.subtype === 'init') { inits.push({ agent: 'claude-code', model: typeof o.model === 'string' ? o.model : null, commands: Array.isArray(o.slash_commands) ? o.slash_commands.filter((c: unknown): c is string => typeof c === 'string').slice(0, 300) : [], at: Date.now() }); if (inits.length > 20) inits.shift(); }
           const content = o.message?.content;
           const summary = o.type === 'assistant' && Array.isArray(content) ? content.map((c: any) => (c.type === 'text' ? c.text : c.type === 'tool_use' ? `[tool ${c.name}]` : '')).filter(Boolean).join(' ').slice(0, 400) : o.type === 'result' ? `result: ${o.subtype}` : '';
           if (summary) run.events.push(summary);
@@ -562,15 +594,18 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
     // Which agents this companion can really start, and why not for the rest. The interface shows a Run control only where canStart is true.
     if (path === '/api/runtimes' && method === 'GET') {
       const { entry } = projectFor(projectId);
-      const claudeInstalled = !!detectVersion('claude');
-      const claudeHooked = hooksInstalled('claude-code', entry.root);
-      const terminal = (name: string) => `Starting ${name} from AgentOnTrack is not built yet. Start it in its own terminal: its hooks still report to this project.`;
-      return json(res, 200, [
-        { id: 'claude-code', name: 'Claude Code', canStart: claudeInstalled && claudeHooked, how: 'claude -p, started by AgentOnTrack in this project, with its hooks reporting here', reason: !claudeInstalled ? 'Claude Code is not installed on this computer.' : !claudeHooked ? 'Connect Claude Code to this project first, so its hooks are in place.' : null },
-        { id: 'codex', name: 'Codex', canStart: false, how: null, reason: terminal('Codex') },
-        { id: 'hermes', name: 'Hermes', canStart: false, how: null, reason: terminal('Hermes') },
-        ...Object.values(PROVIDERS).map((a) => ({ id: a.id, name: a.name, canStart: false, how: null, reason: terminal(a.name) })),
-      ]);
+      return json(res, 200, runtimeList(entry.root, !!opts.claudeCommand));
+    }
+    if (path === '/api/orchestrate' && method === 'POST') {
+      const b = z.object({ text: z.string().max(4000), agent: z.string().max(40).default('claude-code') }).parse(await readBody(req));
+      const { entry } = projectFor(projectId);
+      const rt = runtimeList(entry.root, !!opts.claudeCommand).find((r) => r.id === b.agent);
+      return json(res, 200, orchestrate(b.text, { agentCanStart: !!rt?.canStart, reportedCommands: reportedCommands(b.agent) }));
+    }
+    if (path === '/api/discovery' && method === 'GET') {
+      const { entry, p } = projectFor(projectId);
+      const used: Seen[] = p.store.byType(['usage.recorded']).map((e: any) => ({ agent: String(e.payload.runtime ?? 'claude-code'), model: String(e.payload.model ?? ''), worked: true }));
+      return json(res, 200, { agents: describeAgents(runtimeList(entry.root, !!opts.claudeCommand), inits), models: await discoverModels({ seen: [...used, ...seenModels], inits }), note: 'A model listed here exists on this computer or was used by a run. Whether your plan allows it is not checked until a run uses it.' });
     }
     const agentAction = /^\/api\/agents\/(claude-code|codex)\/(connect|disconnect)$/.exec(path);
     if (agentAction && method === 'POST') {

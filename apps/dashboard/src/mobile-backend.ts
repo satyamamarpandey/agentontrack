@@ -15,7 +15,8 @@ const kv = (() => {
 })();
 
 interface StoredDevice { did: string; name: string; identity: Identity; fingerprint: string }
-export class RemoteError extends Error { constructor(readonly code: string, message: string) { super(message); } }
+import { RemoteError } from './remote-error';
+export { RemoteError };
 export interface ComputerRow { id: string; name: string; fingerprint: string; pub: PublicIdentity }
 export type DeviceStatus = 'none' | 'pending' | 'trusted' | 'revoked';
 export interface Snapshot<T = any> { body: T; generatedAt: string; stale: boolean }

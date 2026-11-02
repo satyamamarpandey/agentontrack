@@ -17,3 +17,5 @@ export * from './workspace.js';
 export * from './worktrees.js';
 export * from './handoff.js';
 export * from './team.js';
+export * from './commands.js';
+export * from './suggest.js';

@@ -3,6 +3,7 @@ import { ApiError, get, isDemo, post } from './api';
 import { useHuman } from './human';
 import { Icon } from './icons';
 import { Empty, Loading, useLoad } from './ui';
+import { ModelField, useDiscovery } from './model-field';
 
 type Mode = 'manual' | 'guided' | 'bounded';
 interface Phase { id: string; title: string; kind: string; role: string; instructions: string; dependsOn: string[]; agent?: string; model?: string; acceptance: { id: string; description: string; kind: 'command' | 'manual'; command?: string }[]; budget: { maxUsd?: number; maxMinutes?: number; maxRuns?: number }; risks: string[]; effort?: { minutes: number; basis: string }; state: 'draft' | 'paused' | 'skipped'; taskId?: string }
@@ -23,6 +24,7 @@ const SAFE_ONLY = (a: Plan, b: Plan) => JSON.stringify({ ...a, phases: a.phases.
 
 export function PlanPanel({ tick, agents, onRunStarted, reloadShell }: { tick: number; agents: { id: string; name: string; startable: boolean }[]; onRunStarted: () => void; reloadShell: () => void }) {
   const data = useLoad<PlanData>(() => get('/api/plan'), [tick]);
+  const disc = useDiscovery(tick);
   const [goal, setGoal] = useState('');
   const [draft, setDraft] = useState<Plan | null>(null);
   const [msg, setMsg] = useState('');
@@ -179,7 +181,7 @@ export function PlanPanel({ tick, agents, onRunStarted, reloadShell }: { tick: n
                         {agents.map((a) => <option key={a.id} value={a.id}>{a.name}{a.startable ? '' : ' (runs in its own terminal)'}</option>)}
                       </select>
                     </label>
-                    <label>Model<input value={ph.model ?? ''} placeholder="Auto" onChange={(e) => patchPhase(ph.id, (x) => { if (e.target.value) x.model = e.target.value; else delete x.model; })} name={`model-${ph.id}`} style={{ width: 150 }} list="model-hints" /></label>
+                    <ModelField agent={ph.agent ?? server?.defaults[ph.role]?.agent ?? 'claude-code'} value={ph.model ?? ''} onChange={(v) => patchPhase(ph.id, (x) => { if (v) x.model = v; else delete x.model; })} name={`model-${ph.id}`} models={disc.data?.models} />
                     <label>Most USD<input type="number" min={0.01} step={0.25} value={ph.budget.maxUsd ?? ''} onChange={(e) => patchPhase(ph.id, (x) => { if (e.target.value) x.budget.maxUsd = Number(e.target.value); else delete x.budget.maxUsd; })} name={`usd-${ph.id}`} style={{ width: 90 }} /></label>
                     <label>Most runs<input type="number" min={1} max={10} value={ph.budget.maxRuns ?? ''} onChange={(e) => patchPhase(ph.id, (x) => { if (e.target.value) x.budget.maxRuns = Number(e.target.value); else delete x.budget.maxRuns; })} name={`runs-${ph.id}`} style={{ width: 90 }} /></label>
                   </div>
@@ -216,7 +218,6 @@ export function PlanPanel({ tick, agents, onRunStarted, reloadShell }: { tick: n
           );
         })}
       </ol>
-      <datalist id="model-hints" />
 
       <div className="row wrap plan-bar" data-testid="plan-bar">
         {dirty ? <button className="btn primary" onClick={() => void save()} disabled={!!busy} data-testid="plan-save">Save changes</button> : null}

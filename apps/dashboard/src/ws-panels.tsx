@@ -3,6 +3,7 @@ import { get, post } from './api';
 import { Modal, useHuman } from './human';
 import { Icon } from './icons';
 import { Badge, Empty, useLoad } from './ui';
+import { ModelField, useDiscovery } from './model-field';
 
 const ROLES = ['implement', 'review', 'debug', 'test', 'research', 'analyze', 'classify', 'verify'] as const;
 const WORKFLOWS = ['implement-review-verify', 'parallel-then-compare', 'review-only', 'spec-review'] as const;
@@ -22,6 +23,7 @@ export function AgentTab({ tick }: { tick: number }) {
   useEffect(() => { const t = setInterval(runs.reload, 1500); return () => clearInterval(t); }, [runs.reload]);
   // What can really be started is decided by the companion, per runtime. A Run control exists only for one that can.
   const runtimes = useLoad<any[]>(() => get('/api/runtimes'), [tick]);
+  const disc = useDiscovery(tick);
   const options = runtimes.data ?? [];
   const startable = options.filter((r) => r.canStart);
   const chosen = options.find((r) => r.id === runtime);
@@ -61,7 +63,7 @@ export function AgentTab({ tick }: { tick: number }) {
               {options.filter((r) => !r.canStart).length ? <optgroup label="Not available here">{options.filter((r) => !r.canStart).map((r) => <option key={r.id} value={r.id} disabled>{r.name}</option>)}</optgroup> : null}
             </select>
           </label>
-          <label>Model<input value={model} onChange={(e) => setModel(e.target.value)} name="model" style={{ width: 110 }} /></label>
+          <ModelField agent={runtime} value={model} onChange={setModel} name="model" models={disc.data?.models} width={150} placeholder="haiku" />
           <label>Budget cap (USD)<input type="number" min={0.01} max={5} step={0.01} value={budget} onChange={(e) => setBudget(Number(e.target.value))} name="budget" style={{ width: 110 }} /></label>
           <button className="btn primary end-self" type="submit" disabled={!canStart || !prompt.trim()} data-testid="ws-run"><Icon name="play" size={12} />Run <kbd>Ctrl ↵</kbd></button>
         </div>

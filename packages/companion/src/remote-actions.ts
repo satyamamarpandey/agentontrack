@@ -1,7 +1,7 @@
 import { z } from 'zod/v4';
 import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { acceptHandoff2, approvalView, buildHandoff, computeAnalytics, listHandoffs, loadHandoff, PhasePlanSchema, saveHandoff, validateHandoff, type Project, type Registered } from '@agentontrack/core';
+import { acceptHandoff2, approvalView, buildHandoff, computeAnalytics, listHandoffs, loadHandoff, PhasePlanSchema, saveHandoff, suggestNext, type AgentFact, validateHandoff, type Project, type Registered } from '@agentontrack/core';
 import { planView } from './plan-view.js';
 import { Refusal, type Executor } from './remote-host.js';
 
@@ -21,7 +21,7 @@ export interface ExecDeps {
   continuePlan(entry: Registered, p: Project, maxPhases: number, source: string): { started: boolean; note: string };
   cancelContinue(projectId: string): boolean;
   models(): Promise<unknown>;
-  agents(): Promise<unknown>;
+  agents(root?: string): Promise<any[]>;
   maxUsdPerRun(): number;
   version: string;
 }
@@ -42,7 +42,7 @@ const Schemas = {
   'file.read': Project_.extend({ path: z.string().min(1).max(500) }).strict(),
   'diff.read': Project_.extend({ worktree: z.string().min(1).max(80), path: z.string().min(1).max(500) }).strict(),
   'models.list': z.object({}).strict(),
-  'agents.list': z.object({}).strict(),
+  'agents.list': z.object({ project: z.string().max(80).optional() }).strict(),
   'run.start': Project_.extend({ prompt: z.string().min(1).max(4000).regex(/^[^-]/, 'A prompt cannot start with a hyphen'), agent: z.string().regex(/^[a-z0-9][a-z0-9-]{1,29}$/).default('claude-code'), model: z.string().regex(/^[\w][\w.:/@+-]{0,99}$/).default('haiku'), phaseId: z.string().max(40).optional(), extra: z.string().max(2000).default('') }).strict(),
   'run.stop': Project_.extend({ runId: z.string().regex(/^run_\w+$/) }).strict(),
   'plan.state': Project_.extend({ phaseId: z.string().max(40), state: z.enum(['draft', 'paused', 'skipped']) }).strict(),
@@ -56,7 +56,7 @@ type ActionName = keyof typeof Schemas;
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}\n… (cut: ${s.length - n} more characters)` : s);
 
-export function snapshotOf(entry: Registered, p: Project, deps: Pick<ExecDeps, 'isRunning' | 'recentRuns'>) {
+export function snapshotOf(entry: Registered, p: Project, deps: Pick<ExecDeps, 'isRunning' | 'recentRuns'>, agents: AgentFact[] = []) {
   const s = p.state();
   const view: any = planView(entry, p, deps.isRunning);
   const a = computeAnalytics(p);
@@ -75,6 +75,7 @@ export function snapshotOf(entry: Registered, p: Project, deps: Pick<ExecDeps, '
     receipts: s.receipts.slice(-8).map((r) => ({ seq: r.seq, ts: r.ts, criterion: r.criterionId, passed: r.passed, source: r.source, observed: clip(String(r.observed ?? ''), 160) })),
     usage: { sessions: a.totals.sessions, input: a.totals.input, output: a.totals.output, costUsd: a.totals.costUsd, providerReported: a.totals.providerReported, tasks: a.tasks.length, verified: a.taskTotals.VERIFIED ?? 0, runWallClockMs: a.time.runWallClockMs },
     integrity: { ok: p.verifyIntegrity().ok },
+    suggestions: suggestNext({ goal: s.goal?.statement ?? null, plan: view.plan ?? null, approved: !!view.approved, views: view.views ?? [], pendingApprovals: pending.length, agents }).map(({ id, kind, title, prompt, why, agent, startable, needsApproval, scope, phaseId }) => ({ id, kind, title, prompt: clip(prompt, 1500), why, agent, startable, needsApproval, scope, phaseId })),
   };
 }
 
@@ -117,7 +118,7 @@ export function makeExecutor(deps: ExecDeps): Executor {
         try { const { p } = deps.projectFor(r.id); const s = p.state(); const t = s.activeTaskId ? s.tasks.get(s.activeTaskId) : null; return { id: r.id, name: r.name, archived: !!r.archived, goal: s.goal?.statement ?? null, activeTask: t ? { title: t.title, status: p.evaluate(t.id).status } : null, pendingApprovals: [...s.approvals.values()].filter((x) => approvalView(x, new Date()) === 'pending').length }; }
         catch { return { id: r.id, name: r.name, archived: !!r.archived, goal: null, activeTask: null, pendingApprovals: 0, missing: true }; }
       });
-      case 'project.snapshot': { const { entry, p } = where(); return snapshotOf(entry, p, deps); }
+      case 'project.snapshot': { const { entry, p } = where(); return snapshotOf(entry, p, deps, (await deps.agents(entry.root)).map((x: any) => ({ id: x.id, name: x.name, canStart: x.canStart }))); }
       case 'files.list': { const { entry, p } = where(); return { files: listReadable(entry.root, (r) => p.isProtectedPath(r)) }; }
       case 'handoffs.list': { const { p } = where(); return { handoffs: listHandoffs(p).slice(-20).reverse() }; }
       case 'file.read': {
@@ -133,7 +134,7 @@ export function makeExecutor(deps: ExecDeps): Executor {
         return { path: d.path, before: d.before === null ? null : clip(d.before, MAX_DIFF), after: d.after === null ? null : clip(d.after, MAX_DIFF) };
       }
       case 'models.list': return deps.models();
-      case 'agents.list': return deps.agents();
+      case 'agents.list': return { agents: await deps.agents(a.project ? where().entry.root : undefined) };
       case 'run.start': {
         const { entry, p } = where();
         if (a.phaseId) return deps.startPhase(entry, p, a.phaseId, a.extra, source);

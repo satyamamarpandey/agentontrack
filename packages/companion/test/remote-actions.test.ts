@@ -63,6 +63,9 @@ describe('reading', () => {
     expect(s.approvals[0]).toMatchObject({ kind: 'vcs.push', fromPhone: false });
     expect(s.integrity.ok).toBe(true);
     expect(Date.parse(s.generatedAt)).toBeGreaterThan(0);
+    // With a goal, a pending approval and no plan, the phone is told what to do next and why, from the record.
+    expect(s.suggestions.map((x: any) => x.kind)).toEqual(['decide-approval', 'draft-plan']);
+    expect(s.suggestions.every((x: any) => x.why.length > 10)).toBe(true);
     expect(JSON.stringify(s).length).toBeLessThan(100_000);
   });
 

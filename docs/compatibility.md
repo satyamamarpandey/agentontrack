@@ -16,7 +16,7 @@ Labels: **live model** means the real agent with a real model. **Scripted model*
 | Hook program missing | **Blocks** | **RUNS THE ACTION** | **Blocks**, with `fail_closed: true`. Its own default fails open |
 | Start refused if the hook is broken | `agentontrack run claude-code` | `agentontrack run codex`. Running `codex` directly skips this check | Not built |
 | OS containment of scripts | `install --sandbox`: **verified on macOS**. **Linux: could not start on the cloud runner, so not verified.** Native Windows: none | `agentontrack run codex`: verified on Linux. Windows and macOS not tested | None known |
-| MCP in the real host | Live model and scripted | Scripted | **Not observed:** the server did not load in the test, and the cause is unknown |
+| MCP in the real host | Live model and scripted | Scripted | Scripted, with Hermes' optional `mcp` package installed. Without it the server silently does not load |
 | Compaction seen by hooks, gate holds after resume | Scripted | Not tested | Not tested |
 | Dashboard can start it | Yes | No: run it yourself, and its hooks report | No: run it yourself, and its hooks report |
 | Usage reported | Provider-reported | In its own output, not yet recorded by AgentOnTrack | Field names unverified |

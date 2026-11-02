@@ -75,4 +75,5 @@ Uninstall removes hooks only from projects it knows about, and leaves files such
 | Copilot `-p` ignores the gate | Repo hooks load only in a trusted folder. Use `agentontrack run copilot`, or add `--trust-folder` |
 | Gemini hook not running | Project hooks are untrusted by default. Trust the folder, and check `hooksConfig` |
 | Cline ends the run on a held action | That is how Cline handles a refusal |
+| Hermes does not list the AgentOnTrack MCP tools | MCP is an optional Hermes extra. Install the `mcp` package into its environment |
 | `Approvals are suspended` | The log failed its integrity check. Run `agentontrack audit`, then `audit --recover` |

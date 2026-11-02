@@ -30,6 +30,7 @@ jobs:
       - name: Install the real host
         env:
           WHICH: ${{ matrix.which }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           case "${WHICH%-mcp}" in
             hermes)
@@ -39,8 +40,10 @@ jobs:
               (cd "$HOME/.hermes/hermes-agent" && (uv pip install --python venv/bin/python mcp || venv/bin/python -m pip install mcp)) || true
               ;;
             opencode-v2)
-              curl -fsSL https://opencode.ai/install | bash -s -- --version 2.2.5 || true
-              echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+              mkdir -p "$HOME/oc"
+              gh release download v2.2.5 -R anomalyco/opencode -p 'opencode-linux-x64.*' -D "$HOME/oc"
+              (cd "$HOME/oc" && for x in opencode-linux-x64.*; do case "$x" in *.zip) unzip -qo "$x" ;; *.tar.gz) tar -xzf "$x" ;; esac; done; ls -la)
+              echo "$HOME/oc" >> "$GITHUB_PATH"
               ;;
             copilot) npm install -g @github/copilot ;;
             gemini) npm install -g @google/gemini-cli ;;

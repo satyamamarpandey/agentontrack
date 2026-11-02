@@ -1,0 +1,13 @@
+{
+  "which": "devin",
+  "label": "real host, its own hosted model",
+  "ranAt": "2026-11-02T02:04:18.136Z",
+  "results": [
+    {
+      "name": "Real run",
+      "outcome": "BLOCKED",
+      "label": "real host, its own hosted model",
+      "detail": "No WINDSURF_API_KEY secret on this repository"
+    }
+  ]
+}

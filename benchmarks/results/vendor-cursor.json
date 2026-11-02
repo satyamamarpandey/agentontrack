@@ -1,0 +1,13 @@
+{
+  "which": "cursor",
+  "label": "real host, its own hosted model",
+  "ranAt": "2026-11-02T02:04:17.474Z",
+  "results": [
+    {
+      "name": "Real run",
+      "outcome": "BLOCKED",
+      "label": "real host, its own hosted model",
+      "detail": "No CURSOR_API_KEY secret on this repository"
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "which": "hermes-mcp",
+  "label": "real host, scripted model",
+  "ranAt": "2026-11-02T02:05:36.868Z",
+  "runner": "Linux",
+  "results": [
+    {
+      "name": "MCP tool answered through the real host",
+      "outcome": "PASS",
+      "label": "real host, scripted model",
+      "detail": "{\"queries\": [\"agentontrack project status\"], \"total_available\": 23, \"results\": [{\"query\": \"agentontrack project status\", \"matches\": [\"mcp__agentontrack__project_status\"]}], \"tools\": {\"mcp__agentontrack__project_status\": {\"source\": \"mcp\", \"source_name\": \"mcp-agentontrack\", \"description\": \"Current goal, task, verified status and pending approvals\", \"required\": []}}, \"connectors\": {\"status\": \"not_set_up\", \"hint\": \"Hosted connectors are not set up for this user yet. Call manage_connections to connect the app first; that sets them up. Hosted apps (Gmail, Calendar, Notion and more) are then searchab"
+    }
+  ]
+}

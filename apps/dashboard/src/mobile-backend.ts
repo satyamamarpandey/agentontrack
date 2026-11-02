@@ -33,7 +33,10 @@ export async function openBackend(config: string) {
   const uid = () => { if (!auth.currentUser) throw new RemoteError('signed-out', 'Sign in first.'); return auth.currentUser.uid; };
   const cdoc = (cid: string, ...p: string[]) => doc(db, 'users', uid(), 'computers', cid, ...p);
 
-  const device = async (): Promise<StoredDevice> => {
+  // One identity per phone. Several screens ask for it at once, and without sharing the promise each would create its own.
+  let deviceOnce: Promise<StoredDevice> | null = null;
+  const device = (): Promise<StoredDevice> => (deviceOnce ??= loadDevice());
+  const loadDevice = async (): Promise<StoredDevice> => {
     let d = await kv.get<StoredDevice>('device');
     if (!d) {
       const identity = await createIdentity(false);

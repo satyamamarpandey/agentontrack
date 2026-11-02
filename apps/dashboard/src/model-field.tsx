@@ -19,14 +19,16 @@ export function ModelField({ agent, value, onChange, name, models, width = 160, 
   const hit = mine.find((m) => m.id === value);
   const listId = `models-${agent}-${name}`;
   return (
-    <label>Model
+    <span className="stack">
+      <label>Model
       <input value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} name={name} style={{ width }} list={listId} autoComplete="off" aria-describedby={`${listId}-note`} />
       <datalist id={listId}>{mine.map((m) => <option key={m.id} value={m.id}>{m.entitlement === 'worked' ? 'worked in a run here' : 'found, not tried'}</option>)}</datalist>
+      </label>
       <span id={`${listId}-note`} className="muted small" data-testid="model-note">
         {!value ? (mine.length ? `${mine.length} found on this computer.` : 'None found yet, so the agent chooses.')
           : hit ? (hit.entitlement === 'worked' ? 'A run here used it successfully.' : 'Found on this computer. Whether your plan allows it is not known until a run uses it.')
             : 'Not found on this computer. It is used as typed, and the agent will refuse it if it is not available to you.'}
       </span>
-    </label>
+    </span>
   );
 }

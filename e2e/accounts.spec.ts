@@ -182,7 +182,7 @@ test('email: create an account, sign out, sign in again, and a wrong password is
   await page.getByLabel('Email', { exact: true }).fill('mailer@example.com');
   await page.getByLabel('Password').fill('wrong password');
   await page.getByTestId('email-submit').click();
-  await expect(page.getByRole('alert')).toHaveText('The email or password is not right.');
+  await expect(page.getByRole('alert').filter({ hasText: /./ })).toHaveText('The email or password is not right.');
   await page.getByLabel('Password').fill('correct horse battery');
   await page.getByTestId('email-submit').click();
   await expect(page.getByTestId('signed-in')).toBeVisible({ timeout: 20_000 });
@@ -206,7 +206,7 @@ test('email: a short password and a duplicate address are explained, and reset s
   await page.getByLabel('Email', { exact: true }).fill('short@example.com');
   await page.getByLabel('Password').fill('long enough password');
   await page.getByTestId('email-submit').click();
-  await expect(page.getByRole('alert')).toContainText('already has an account');
+  await expect(page.getByRole('alert').filter({ hasText: /./ })).toContainText('already has an account');
   // The same sentence for an address nobody has used.
   for (const address of ['short@example.com', 'nobody-here@example.com']) {
     await page.getByRole('button', { name: 'Reset password' }).click();

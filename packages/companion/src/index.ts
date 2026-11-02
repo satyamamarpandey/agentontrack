@@ -244,6 +244,43 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
     return { started: true, note: `Running up to ${maxPhases} phase${maxPhases === 1 ? '' : 's'}, and stopping at any failure, held approval or release.` };
   };
 
+  /**
+   * A managed loop: run one phase, run its own checks, and if they fail run it again with what failed, up to a number of rounds the person set.
+   * It stops at the first pass, at a held approval, at the phase's or plan's own limits (which startPhaseRun enforces), or when cancelled.
+   * It needs a command check, because that is the only way it can know when to stop.
+   */
+  const loopPhase = (entry: Registered, p: Project, phaseId: string, rounds: number, source: string) => {
+    if (continuing.has(entry.id)) return { started: false, note: 'A sequence is already running for this project. Stop it first.' };
+    const running = (id: string) => runs.get(id)?.status === 'running';
+    const v0 = planViewOf(entry, p, running);
+    const phase0 = v0.plan?.phases.find((x) => x.id === phaseId);
+    if (!phase0) throw new PhaseBlocked(404, 'No such phase');
+    if (!phase0.taskId || !phase0.acceptance.some((a) => a.kind === 'command')) throw new PhaseBlocked(409, 'A loop needs a command check on this phase, because the check is how it knows when to stop.');
+    const me = { cancel: false };
+    continuing.set(entry.id, me);
+    void (async () => {
+      try {
+        let extra = '';
+        for (let round = 1; round <= rounds && !me.cancel; round++) {
+          if ([...p.state().approvals.values()].some((a) => approvalView(a, new Date()) === 'pending')) break;
+          const run = startPhaseRun(entry, p, phaseId, extra, source);
+          const until = Date.now() + 30 * 60_000;
+          while (run.status === 'running' && Date.now() < until) {
+            await new Promise((ok) => setTimeout(ok, 300));
+            if (me.cancel && run.status === 'running') { run.status = 'stopped'; run.child.kill(); }
+          }
+          if (me.cancel) break;
+          p.verifyTask(phase0.taskId!);
+          const st = planViewOf(entry, p, running).views?.find((x) => x.id === phaseId)?.status;
+          if (st === 'verified') break;
+          const bad = p.state().receipts.filter((r) => r.taskId === phase0.taskId && !r.passed).at(-1);
+          extra = `Round ${round} did not pass the phase's checks.${bad ? ` The check printed: ${String(bad.observed ?? '').slice(0, 600)}` : ''} Find the cause and fix it in the code. Do not change or weaken the checks.`;
+        }
+      } catch { /* a round that cannot start (a limit, an approval) ends the loop; the plan view says why */ } finally { continuing.delete(entry.id); }
+    })();
+    return { started: true, note: `Running this phase up to ${rounds} time${rounds === 1 ? '' : 's'}, stopping as soon as its checks pass, at any held approval or limit, or when you stop it.` };
+  };
+
   /* ---------- The phone link ---------- */
   let remote: RemoteService | null = null;
   const remoteFileNow = (): RemoteFile | null => loadRemote();
@@ -269,6 +306,7 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
         return { id: r.id, status: r.status };
       }),
       continuePlan: (entry, p, n, source) => asRefusal(() => continuePlan(entry, p, n, source)),
+      loopPhase: (entry, p, phaseId, n, source) => asRefusal(() => loopPhase(entry, p, phaseId, n, source)),
       cancelContinue: (pid) => { const c = continuing.get(pid); if (!c) return false; c.cancel = true; for (const r of runs.values()) if (r.project === pid && r.status === 'running') { r.status = 'stopped'; r.child.kill(); } return true; },
       models: async () => ({ models: await discoverModels({ seen: seenModels, inits }) }),
       agents: async (root) => describeAgents(runtimeList(root, !!opts.claudeCommand), inits),
@@ -756,6 +794,12 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
     if (path === '/api/plan/phases/start' && method === 'POST') {
       const b = z.object({ phaseId: z.string(), extra: z.string().max(2000).default('') }).parse(await readBody(req));
       try { const run = startPhaseRun(entry, p, b.phaseId, b.extra); return json(res, 200, { id: run.id, status: run.status }); }
+      catch (err) { if (err instanceof PhaseBlocked) throw new HttpError(err.status, err.message); throw err; }
+    }
+    if (path === '/api/plan/loop' && method === 'POST') {
+      const b = z.object({ phaseId: z.string(), rounds: z.number().int().min(1).max(5).default(3), stop: z.boolean().default(false) }).parse(await readBody(req));
+      if (b.stop) return json(res, 200, { stopped: continuing.has(entry.id) && !!(continuing.get(entry.id)!.cancel = true) });
+      try { return json(res, 200, loopPhase(entry, p, b.phaseId, b.rounds, 'desktop')); }
       catch (err) { if (err instanceof PhaseBlocked) throw new HttpError(err.status, err.message); throw err; }
     }
     if (path === '/api/plan/phases/prompt' && method === 'GET') {

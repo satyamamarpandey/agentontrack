@@ -34,7 +34,7 @@ beforeEach(() => {
   exec = makeExecutor({
     registry: () => [entry], projectFor: () => ({ entry, p }), isRunning: () => false, stopRun: (_p, id) => { calls.push({ fn: 'stopRun', args: [id] }); return id === 'run_live'; },
     recentRuns: () => [], startPhase: rec('startPhase', { id: 'run_a', status: 'running' }), startPrompt: rec('startPrompt', { id: 'run_b', status: 'running' }),
-    continuePlan: rec('continuePlan', { started: true, note: 'x' }), cancelContinue: () => true, models: async () => [], agents: async () => [], maxUsdPerRun: () => maxUsd, version: 'test',
+    continuePlan: rec('continuePlan', { started: true, note: 'x' }), loopPhase: rec('loopPhase', { started: true, note: 'x' }), cancelContinue: () => true, models: async () => [], agents: async () => [], maxUsdPerRun: () => maxUsd, version: 'test',
   } satisfies ExecDeps);
   maxUsd = 1;
 });
@@ -104,7 +104,7 @@ describe('lists', () => {
 describe('what is refused', () => {
   it('an unregistered project, an unknown action, an extra parameter and a malformed one', async () => {
     p.close();
-    exec = makeExecutor({ registry: () => [entry], projectFor: () => ({ entry, p: new Project(root) }), isRunning: () => false, stopRun: () => false, recentRuns: () => [], startPhase: () => ({ id: '', status: '' }), startPrompt: () => ({ id: '', status: '' }), continuePlan: () => ({ started: false, note: '' }), cancelContinue: () => false, models: async () => [], agents: async () => [], maxUsdPerRun: () => 1, version: 't' });
+    exec = makeExecutor({ registry: () => [entry], projectFor: () => ({ entry, p: new Project(root) }), isRunning: () => false, stopRun: () => false, recentRuns: () => [], startPhase: () => ({ id: '', status: '' }), startPrompt: () => ({ id: '', status: '' }), continuePlan: () => ({ started: false, note: '' }), loopPhase: () => ({ started: false, note: '' }), cancelContinue: () => false, models: async () => [], agents: async () => [], maxUsdPerRun: () => 1, version: 't' });
     expect(await refused('project.snapshot', { project: 'someone-elses' })).toBe('no-project');
     expect(await refused('shell.exec', { project: 'proj1', cmd: 'ls' })).toBe('unknown-action');
     expect(await refused('project.snapshot', { project: 'proj1', also: 'this' })).toBe('bad-request');

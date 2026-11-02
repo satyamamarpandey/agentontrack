@@ -18,6 +18,7 @@ export interface ExecDeps {
   recentRuns(projectId: string): { id: string; status: string; started: number; events: string[] }[];
   startPhase(entry: Registered, p: Project, phaseId: string, extra: string, source: string): { id: string; status: string };
   startPrompt(entry: Registered, p: Project, o: { prompt: string; model: string; maxUsd: number; agent: string }, source: string): { id: string; status: string };
+  loopPhase(entry: Registered, p: Project, phaseId: string, rounds: number, source: string): { started: boolean; note: string };
   continuePlan(entry: Registered, p: Project, maxPhases: number, source: string): { started: boolean; note: string };
   cancelContinue(projectId: string): boolean;
   models(): Promise<unknown>;
@@ -47,6 +48,7 @@ const Schemas = {
   'run.stop': Project_.extend({ runId: z.string().regex(/^run_\w+$/) }).strict(),
   'plan.state': Project_.extend({ phaseId: z.string().max(40), state: z.enum(['draft', 'paused', 'skipped']) }).strict(),
   'plan.continue': Project_.extend({ maxPhases: z.number().int().min(1).max(3).default(1), stop: z.boolean().default(false) }).strict(),
+  'plan.loop': Project_.extend({ phaseId: z.string().max(40), rounds: z.number().int().min(1).max(5).default(3) }).strict(),
   'plan.verify': Project_.extend({ phaseId: z.string().max(40) }).strict(),
   'handoff.create': Project_.extend({ from: z.string().regex(/^[a-z0-9][a-z0-9-]{1,29}$/), to: z.string().regex(/^[a-z0-9][a-z0-9-]{1,29}$/).optional(), taskId: z.string().max(80).optional(), reason: z.enum(['planned', 'unavailable', 'limit', 'interrupted', 'review']).default('planned') }).strict(),
   'handoff.accept': Project_.extend({ id: z.string().min(1).max(80), to: z.string().regex(/^[a-z0-9][a-z0-9-]{1,29}$/) }).strict(),
@@ -158,6 +160,7 @@ export function makeExecutor(deps: ExecDeps): Executor {
         if (a.stop) return { stopped: deps.cancelContinue(entry.id) };
         return deps.continuePlan(entry, p, a.maxPhases, source);
       }
+      case 'plan.loop': { const { entry, p } = where(); return deps.loopPhase(entry, p, a.phaseId, a.rounds, source); }
       case 'plan.verify': {
         const { entry, p } = where();
         const v: any = planView(entry, p, deps.isRunning);

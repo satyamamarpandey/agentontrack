@@ -12,7 +12,7 @@ export type Level = 'view' | 'control';
 
 /** The only things a phone can ask for. Anything else is refused by name, before any code looks at its parameters. */
 export const READ_ACTIONS = ['ping', 'projects.list', 'project.snapshot', 'files.list', 'file.read', 'diff.read', 'handoffs.list', 'models.list', 'agents.list'] as const;
-export const CONTROL_ACTIONS = ['run.start', 'run.stop', 'plan.state', 'plan.continue', 'plan.verify', 'handoff.create', 'handoff.accept', 'approval.decide'] as const;
+export const CONTROL_ACTIONS = ['run.start', 'run.stop', 'plan.state', 'plan.continue', 'plan.loop', 'plan.verify', 'handoff.create', 'handoff.accept', 'approval.decide'] as const;
 
 export interface TrustedDevice {
   did: string; name: string; pub: PublicIdentity; fingerprint: string;

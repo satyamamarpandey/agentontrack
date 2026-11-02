@@ -79,6 +79,11 @@ export function PlanPanel({ tick, agents, onRunStarted, reloadShell }: { tick: n
     setBusy(`verify-${id}`); setMsg('');
     try { await post('/api/plan/phases/verify', { phaseId: id }); data.reload(); } catch (e) { fail(e); } finally { setBusy(''); }
   };
+  const loop = async (id: string, rounds: number) => {
+    setBusy(`loop-${id}`); setMsg('');
+    try { const r = await post<{ note: string }>('/api/plan/loop', { phaseId: id, rounds }); setMsg(r.note); data.reload(); } catch (e) { fail(e); } finally { setBusy(''); }
+  };
+  const stopLoop = async (id: string) => { try { await post('/api/plan/loop', { phaseId: id, stop: true }); setMsg('Stopped.'); data.reload(); } catch (e) { fail(e); } };
   const showPrompt = async (id: string) => {
     try { const r = await get<{ prompt: string }>(`/api/plan/phases/prompt?phaseId=${encodeURIComponent(id)}`); setPrompt({ phase: id, text: r.prompt }); } catch (e) { fail(e); }
   };
@@ -205,6 +210,8 @@ export function PlanPanel({ tick, agents, onRunStarted, reloadShell }: { tick: n
               <p className="small muted">{mine ? `Agent: ${agents.find((a) => a.id === mine)?.name ?? mine}` : 'No agent chosen yet'}{ph.model ? `, model ${ph.model}` : ''}. {ph.acceptance.length ? `${ph.acceptance.filter((a) => a.kind === 'command').length} command check(s), ${ph.acceptance.filter((a) => a.kind === 'manual').length} by hand.` : 'No checks.'}</p>
               <div className="row wrap">
                 {canStart && startable(mine) ? <button className="btn small primary" disabled={!!busy || draft.mode === 'bounded' && !!auto?.active} onClick={() => void start(ph.id)} data-testid={`start-${ph.id}`}><Icon name="play" size={12} />Start</button> : null}
+                {canStart && startable(mine) && approvedNow && ph.taskId && ph.acceptance.some((a) => a.kind === 'command') && ['ready', 'failed', 'needs-evidence', 'stale'].includes(status) ? <button className="btn small" disabled={!!busy} title="Runs the agent, then the checks. If they fail it runs again with what failed, up to 3 times, and stops at the first pass." onClick={() => void loop(ph.id, 3)} data-testid={`loop-${ph.id}`}>Repeat until the checks pass (up to 3)</button> : null}
+                {status === 'running' ? <button className="btn small" onClick={() => void stopLoop(ph.id)} data-testid={`stoploop-${ph.id}`}>Stop</button> : null}
                 {canStart && !startable(mine) ? <button className="btn small" onClick={() => void showPrompt(ph.id)} data-testid={`prompt-${ph.id}`}>Copy the prompt for {agents.find((a) => a.id === mine)?.name ?? 'an agent'}</button> : null}
                 {approvedNow && ph.taskId && ['needs-evidence', 'stale', 'failed', 'ready', 'blocked'].includes(status) && (v?.runs ?? 0) > 0 ? <button className="btn small" disabled={!!busy} onClick={() => void verify(ph.id)} data-testid={`verify-${ph.id}`}>Run the checks</button> : null}
                 {ph.state === 'draft' ? <button className="btn small" onClick={() => void setState(ph.id, 'paused')} disabled={dirty}>Pause</button> : null}

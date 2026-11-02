@@ -243,6 +243,7 @@ function Progress({ s, can, call, be, cid, project }: { s: any; can: boolean; ca
           <p className="m-note">{p.agent ?? 'No agent'}{p.model ? `, ${p.model}` : ''}</p>
           <div className="row wrap">
             {p.status === 'ready' ? <button className="btn primary m-btn" disabled={!can} onClick={() => void call('run.start', { prompt: p.title, phaseId: p.id, extra }, 'Started on your computer.')} data-testid={`m-start-${p.id}`}>Start</button> : null}
+            {['ready', 'failed', 'needs-evidence', 'stale'].includes(p.status) && p.checks > 0 ? <button className="btn m-btn" disabled={!can} onClick={() => void call('plan.loop', { phaseId: p.id, rounds: 3 }, 'Looping on your computer: up to 3 rounds, stopping at the first pass.')} data-testid={`m-loop-${p.id}`}>Repeat until checks pass</button> : null}
             {['needs-evidence', 'stale', 'failed'].includes(p.status) && p.checks > 0 ? <button className="btn m-btn" disabled={!can} onClick={() => void call('plan.verify', { phaseId: p.id }, 'Checks run.')}>Run the checks</button> : null}
             {p.state === 'draft' && !['verified', 'running'].includes(p.status) ? <button className="btn m-btn" disabled={!can} onClick={() => void call('plan.state', { phaseId: p.id, state: 'paused' }, 'Paused.')}>Pause</button> : null}
             {p.state === 'paused' ? <button className="btn m-btn" disabled={!can} onClick={() => void call('plan.state', { phaseId: p.id, state: 'draft' }, 'Resumed.')}>Resume</button> : null}

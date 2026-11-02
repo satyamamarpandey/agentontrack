@@ -15,7 +15,8 @@ test.describe.configure({ mode: 'serial' });
 async function signIn(page: Page, email: string, name: string) {
   await page.goto(`${SITE}/account/`);
   const [popup] = await Promise.all([page.waitForEvent('popup'), page.getByTestId('sign-in').click()]);
-  await popup.locator('#add-account-button').click();
+  // The emulator's page differs once an account exists, so this goes by what a person reads.
+  await popup.getByText('Add new account').click();
   await popup.locator('#email-input').fill(email);
   await popup.locator('#display-name-input').fill(name);
   await popup.locator('#sign-in').click();

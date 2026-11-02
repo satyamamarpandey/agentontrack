@@ -10,6 +10,8 @@ export interface ActionRequest {
   opaque: boolean;
   coverage: Coverage;
   cwd: string;
+  /** Folders of active worktrees. A path inside one is judged by the project's scope, as if the worktree were the project. */
+  roots?: string[];
   inputFingerprint: string;
   workspaceDigest: string;
 }
@@ -69,8 +71,16 @@ const allowKey = (target: string) => {
   return rest;
 };
 
-export function normalizeEffects(root: string, req: Pick<ActionRequest, 'effects' | 'cwd'>): Effect[] {
-  return req.effects.map((e) => (PATH_KINDS.has(e.kind) ? { kind: e.kind, target: resolveInRoot(root, req.cwd, e.target).path } : e));
+/** The root a request is judged against: an active worktree it is running in, otherwise the project. */
+export function effectiveRoot(root: string, req: Pick<ActionRequest, 'cwd' | 'roots'>): string {
+  const norm = (p: string) => p.replace(/\\/g, '/').toLowerCase();
+  const cwd = norm(req.cwd);
+  return (req.roots ?? []).find((r) => cwd === norm(r) || cwd.startsWith(`${norm(r)}/`)) ?? root;
+}
+
+export function normalizeEffects(root: string, req: Pick<ActionRequest, 'effects' | 'cwd' | 'roots'>): Effect[] {
+  const eff = effectiveRoot(root, req);
+  return req.effects.map((e) => (PATH_KINDS.has(e.kind) ? { kind: e.kind, target: resolveInRoot(eff, req.cwd, e.target).path } : e));
 }
 
 /** Pure decision function: same inputs, same output. It makes no model call and no I/O beyond path resolution. */
@@ -84,7 +94,7 @@ export function decide(state: ProjectState, task: Task | null, req: ActionReques
     let effect = raw;
     let scopeIssue: string | null = null;
     if (PATH_KINDS.has(raw.kind)) {
-      const r = resolveInRoot(root, req.cwd, raw.target);
+      const r = resolveInRoot(effectiveRoot(root, req), req.cwd, raw.target);
       effect = { kind: raw.kind, target: r.path };
       scopeIssue = checkPathScope(state, r.path, r.insideRoot, features.goalBinding);
       if (/(^|\/)\.agentontrack(\/|$)/.test(r.path)) effect = { kind: 'self.tamper', target: r.path };

@@ -64,6 +64,12 @@ export interface ActionRec {
   ts: string;
 }
 
+export interface WorktreeRec {
+  id: string; taskId: string; agent: string; branch: string; path: string; base: string; createdAt: string;
+  status: 'active' | 'merged' | 'discarded';
+  commit?: string; mergedCommit?: string; mergeError?: string;
+}
+
 export interface Mismatch { seq: number; taskId: string | null; path: string; reason: string; acknowledged: boolean; reverted?: string }
 
 export interface Proposal {
@@ -82,6 +88,8 @@ export interface ProjectState {
   instance: string | null;
   approverKey: string | null;
   anchor?: { remote: string; every: number };
+  worktrees: WorktreeRec[];
+  team: { version: number; members: { agent: string; role: string; budgetTokens?: number; budgetUsd?: number }[] };
   rejectedEvents: { seq: number; type: string; reason: string }[];
   goal: (GoalContract & { version: number; status: string }) | null;
   goals: (GoalContract & { version: number; ts: string; fromProposal?: string })[];
@@ -108,7 +116,7 @@ export function emptyState(): ProjectState {
   return {
     lastSeq: 0, instance: null, approverKey: null, rejectedEvents: [], goal: null, goals: [], proposals: [], decisions: [],
     policy: PolicySchema.parse({}), policyVersion: 0, tasks: new Map(), activeTaskId: null, sessions: new Map(), approvals: new Map(),
-    receipts: [], claims: [], actions: [], actionCounts: new Map(), lastDigest: '', mismatches: [], failures: [], seenNonces: new Set(), reads: new Map(),
+    worktrees: [], team: { version: 0, members: [] }, receipts: [], claims: [], actions: [], actionCounts: new Map(), lastDigest: '', mismatches: [], failures: [], seenNonces: new Set(), reads: new Map(),
   };
 }
 
@@ -188,6 +196,12 @@ export function applyEvent(s: ProjectState, e: StoredEvent): void {
       break;
     }
     case 'anchor.configured': s.anchor = { remote: p.remote, every: p.every }; break;
+    case 'team.set': s.team = { version: (s.team?.version ?? 0) + 1, members: p.members }; break;
+    case 'worktree.created': (s.worktrees ??= []).push({ ...p, status: 'active', createdAt: e.ts }); break;
+    case 'worktree.committed': { const w = (s.worktrees ??= []).find((x) => x.id === p.id); if (w) w.commit = p.commit; break; }
+    case 'worktree.merged': { const w = (s.worktrees ??= []).find((x) => x.id === p.id); if (w) { w.status = 'merged'; w.mergedCommit = p.commit; delete w.mergeError; } break; }
+    case 'worktree.merge_failed': { const w = (s.worktrees ??= []).find((x) => x.id === p.id); if (w) w.mergeError = p.error; break; }
+    case 'worktree.discarded': { const w = (s.worktrees ??= []).find((x) => x.id === p.id); if (w) w.status = 'discarded'; break; }
     case 'session.bound': s.sessions.set(p.sessionId, p.taskId); break;
     case 'approval.requested':
       s.approvals.set(p.id, {

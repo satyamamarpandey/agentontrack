@@ -1,4 +1,5 @@
 export * from './types.js';
+export * from './spec.js';
 export * from './store.js';
 export * from './paths.js';
 export * from './classify.js';
@@ -11,3 +12,7 @@ export * from './project.js';
 export * from './analytics.js';
 export * from './workflow.js';
 export * from './anchor.js';
+export * from './workspace.js';
+export * from './worktrees.js';
+export * from './handoff.js';
+export * from './team.js';

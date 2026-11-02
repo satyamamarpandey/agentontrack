@@ -1,111 +1,22 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { PROJECT_TABS, ProjectDetail, ProjectsHome, type ProjectRoute, type ProjectTab } from './projects';
+import { EventDrawer, TerminalPrompt, useHuman } from './human';
+import { Icon, type IconName } from './icons';
+import { Palette, type Command } from './palette';
 import { Badge, Empty, Loading, Page, useLoad } from './ui';
-import { currentPort, currentProject, downloadExport, enterDemo, forgetSession, get, isDemo, leaveDemo, localAddress, onPublicSite, pair, post, resumeSession, setPort, setProject, setTerminalPrompt, subscribe } from './api';
+import { Workspace } from './workspace';
+import { currentPort, currentProject, downloadExport, enterDemo, forgetSession, get, isDemo, leaveDemo, localAddress, onPublicSite, pair, post, resumeSession, setPort, setProject, subscribe } from './api';
 import { ChartFrame, fmt, fmtMs, HBars, Provenance, StackedBars, Stat } from './charts';
 
-const SCREENS = ['Projects', 'Overview', 'Goals', 'Agents', 'Usage', 'Comparisons', 'Evidence', 'Safety', 'Approvals', 'Evaluations', 'Environment', 'Feedback', 'Settings'] as const;
+const SCREENS = ['Projects', 'Workspace', 'Overview', 'Goals', 'Agents', 'Usage', 'Comparisons', 'Evidence', 'Safety', 'Approvals', 'Evaluations', 'Environment', 'Feedback', 'Settings'] as const;
+const NAV: { group: string; items: { s: (typeof SCREENS)[number]; icon: IconName }[] }[] = [
+  { group: 'Work', items: [{ s: 'Projects', icon: 'folder' }, { s: 'Workspace', icon: 'terminal' }, { s: 'Goals', icon: 'target' }, { s: 'Agents', icon: 'bot' }] },
+  { group: 'Insight', items: [{ s: 'Overview', icon: 'home' }, { s: 'Usage', icon: 'chart' }, { s: 'Comparisons', icon: 'scale' }, { s: 'Evidence', icon: 'receipt' }, { s: 'Evaluations', icon: 'flask' }, { s: 'Environment', icon: 'leaf' }] },
+  { group: 'Control', items: [{ s: 'Safety', icon: 'shield' }, { s: 'Approvals', icon: 'checkCircle' }] },
+  { group: 'Account', items: [{ s: 'Feedback', icon: 'message' }, { s: 'Settings', icon: 'settings' }] },
+];
 type Screen = (typeof SCREENS)[number];
 type Reload = () => void;
-
-/** Escape closes a dialog wherever focus is. WebKit does not always focus what was clicked, so a handler on the dialog can miss it. */
-function useEscape(onClose: () => void) {
-  useEffect(() => {
-    const on = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', on);
-    return () => window.removeEventListener('keydown', on);
-  }, [onClose]);
-}
-
-/** Every human action goes through this: a fresh code from the companion, typed back, plus the passphrase if enrolled. */
-function HumanDialog({ title, detail, submit, onClose, onDone }: { title: string; detail?: ReactNode; submit: (proof: Record<string, string>) => Promise<unknown>; onClose: () => void; onDone: () => void }) {
-  const [ch, setCh] = useState<{ challengeId: string; code: string | null; inTerminal?: boolean; needsPassphrase: boolean } | null>(null);
-  const [confirm, setConfirm] = useState('');
-  const [passphrase, setPassphrase] = useState('');
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  const ref = useRef<HTMLInputElement>(null);
-  useEscape(onClose);
-  const fresh = useCallback(() => { post('/api/challenge').then(setCh).catch((e) => setError(e.message)); }, []);
-  useEffect(fresh, [fresh]);
-  useEffect(() => { ref.current?.focus(); }, [ch]);
-  const go = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!ch) return;
-    setBusy(true); setError('');
-    try {
-      await submit({ challengeId: ch.challengeId, confirm, ...(ch.needsPassphrase ? { passphrase } : {}) });
-      onDone();
-      onClose();
-    } catch (err) {
-      setError((err as Error).message);
-      setConfirm('');
-      fresh();
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <div className="modal-back" role="dialog" aria-modal="true" aria-label={title}>
-      <form className="modal" onSubmit={go}>
-        <h2>{title}</h2>
-        {detail}
-        {error ? <div className="alert bad" role="alert">{error}</div> : null}
-        {ch?.inTerminal ? <p className="muted small">Next, your terminal will show a code for this exact request.</p> : <label>Type <code data-testid="challenge-code">{ch?.code ?? '…'}</code> to confirm
-          <input ref={ref} value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="off" name="confirm" required />
-        </label>}
-        {ch?.needsPassphrase ? <label>Approver passphrase<input type="password" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} autoComplete="off" name="passphrase" required /></label> : null}
-        <div className="row end">
-          <button type="button" className="btn" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn primary" disabled={busy || !ch}>Confirm</button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
-interface HumanRequest { title: string; detail?: ReactNode; path: string; body?: object }
-function useHuman(reload: Reload) {
-  const [req, setReq] = useState<HumanRequest | null>(null);
-  const dialog = req ? <HumanDialog title={req.title} {...(req.detail ? { detail: req.detail } : {})} submit={(proof) => post(req.path, { ...req.body, ...proof })} onClose={() => setReq(null)} onDone={reload} /> : null;
-  return { ask: setReq, dialog };
-}
-
-/** Mounted once. Anything the public site tries to change comes through here with a code from the user's own terminal. */
-function TerminalPrompt() {
-  const [ask, setAsk] = useState<{ action: string; resolve: (c: string) => void; reject: (e: Error) => void } | null>(null);
-  const [code, setCode] = useState('');
-  useEffect(() => setTerminalPrompt((action) => new Promise((resolve, reject) => { setCode(''); setAsk({ action, resolve, reject }); })), []);
-  if (!ask) return null;
-  return (
-    <div className="modal-back" role="dialog" aria-modal="true" aria-label="Code from your terminal" data-testid="terminal-code-dialog">
-      <form className="modal" onSubmit={(e) => { e.preventDefault(); ask.resolve(code.trim()); setAsk(null); }}>
-        <h2>Confirm in your terminal</h2>
-        <p className="muted small">Your terminal now shows a code. Check that it describes this request:</p>
-        <pre className="code small" tabIndex={0}>{ask.action}</pre>
-        <label>Code from your terminal<input value={code} onChange={(e) => setCode(e.target.value)} autoFocus autoComplete="off" name="terminal-code" required /></label>
-        <div className="row end">
-          <button type="button" className="btn" onClick={() => { ask.reject(new Error('Cancelled, so nothing changed.')); setAsk(null); }}>Cancel</button>
-          <button type="submit" className="btn primary">Confirm</button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
-function EventDrawer({ seq, onClose }: { seq: number; onClose: () => void }) {
-  const { data, error } = useLoad(() => get(`/api/event/${seq}`), [seq]);
-  useEscape(onClose);
-  return (
-    <div className="modal-back" role="dialog" aria-modal="true" aria-label={`Record ${seq}`}>
-      <div className="modal wide">
-        <h2>Source record #{seq}</h2>
-        {data ? <pre tabIndex={0} className="code">{JSON.stringify(data, null, 2)}</pre> : <Loading error={error} />}
-        <div className="row end"><button className="btn" autoFocus onClick={onClose}>Close</button></div>
-      </div>
-    </div>
-  );
-}
 
 function Pairing({ onPaired, notice }: { onPaired: () => void; notice?: string }) {
   const [code, setCode] = useState('');
@@ -113,9 +24,10 @@ function Pairing({ onPaired, notice }: { onPaired: () => void; notice?: string }
   const [error, setError] = useState('');
   return (
     <main className="pair">
-      <form className="card" onSubmit={async (e) => { e.preventDefault(); setError(''); try { if (onPublicSite()) setPort(port); await pair(code); onPaired(); } catch (err) { setError((err as Error).message); } }}>
+      <form className="card pair-card" onSubmit={async (e) => { e.preventDefault(); setError(''); try { if (onPublicSite()) setPort(port); await pair(code); onPaired(); } catch (err) { setError((err as Error).message); } }}>
         <div className="brand"><Logo /> AgentOnTrack</div>
         <h1>Pair this browser</h1>
+        <ol className="steps small"><li>In your project, run <code>agentontrack dashboard</code>.</li><li>Type the pairing code it prints below.</li><li>Pick or create a project, then open its workspace.</li></ol>
         <p className="muted">Enter the code shown in the terminal running <code>agentontrack dashboard{onPublicSite() ? ' --allow-public-site' : ''}</code>. It works once, and expires after 5 minutes.</p>
         {notice && !error ? <div className="alert warn" role="status" data-testid="pair-notice">{notice}</div> : null}
         {error ? <div className="alert bad" role="alert">{error}</div> : null}
@@ -288,6 +200,19 @@ function OtherPlatforms() {
   );
 }
 
+/** Every agent AgentOnTrack can govern, in one list: the ones it sets up itself, and every other adapter. */
+function RosterCard({ core }: { core: any[] }) {
+  const { data } = useLoad(() => get<any[]>('/api/providers'), []);
+  const all = [...core.map((a) => ({ id: a.id, name: a.name, installed: a.installed, connected: a.hooksInstalled })), ...(data ?? []).filter((p) => !core.some((a) => a.id === p.id)).map((p) => ({ id: p.id, name: p.name, installed: !!p.version, connected: p.hooksInstalled }))];
+  return (
+    <section className="card stack" data-testid="roster">
+      <h2>One system, every agent</h2>
+      <p className="muted small">{all.length} agents share one goal, one set of approvals and one evidence record. Each keeps its own login and model, and AgentOnTrack never asks for provider credentials. What each one enforces differs: see its card or the table below.</p>
+      <ul className="agents-mini plain">{all.map((a) => <li key={a.id}><b>{a.name}</b> <span className={`badge ${a.connected ? 'good' : a.installed ? '' : 'muted'}`}>{a.connected ? 'connected' : a.installed ? 'found' : 'not installed'}</span></li>)}</ul>
+    </section>
+  );
+}
+
 function Agents({ tick }: { tick: number }) {
   const { data, error, reload } = useLoad(() => get('/api/agents'), []);
   const runs = useLoad(() => get('/api/runs'), [tick]);
@@ -302,6 +227,7 @@ function Agents({ tick }: { tick: number }) {
   const claude = data.find((a: any) => a.id === 'claude-code');
   return (
     <Page title="Agents" intro="Status comes from checks run now on this machine. AgentOnTrack never asks for or stores provider logins.">
+      <RosterCard core={data} />
       <section className="grid three">{data.map((a: any) => (
         <article className="card stack" key={a.id} data-testid={`agent-${a.id}`}>
           <h2>{a.name}</h2>
@@ -658,7 +584,14 @@ export function App() {
   const [live, setLive] = useState(false);
   const [menu, setMenu] = useState(false);
   const bump = useCallback(() => setTick((t) => t + 1), []);
+  const [palette, setPalette] = useState(false);
+  const [extra, setExtra] = useState<Command[]>([]);
 
+  useEffect(() => {
+    const on = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette((p) => !p); } };
+    window.addEventListener('keydown', on);
+    return () => window.removeEventListener('keydown', on);
+  }, []);
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem('bl-theme', theme); }, [theme]);
   useEffect(() => { resumeSession().then((ok) => { const r = routeFromHash(); if (ok && r) setProject(r.id); setPaired(ok); }); }, []);
   useEffect(() => { location.hash = route ? `project/${encodeURIComponent(route.id)}/${route.tab}` : screen.toLowerCase(); document.title = `${route ? 'Project' : screen} · AgentOnTrack`; }, [screen, route]);
@@ -689,6 +622,12 @@ export function App() {
   if (paired === null) return <p className="muted center" role="status">Connecting…</p>;
   if (!paired) return <Pairing notice={pairNotice} onPaired={() => { setPairNotice(''); setPaired(true); }} />;
   const go = (s: Screen) => { setRoute(null); setScreen(s); setMenu(false); };
+  const current = projects?.find((p) => p.id === currentProject());
+  const baseCommands: Command[] = [
+    ...SCREENS.map((s) => ({ id: 'go-' + s, label: 'Go to ' + s, group: 'Navigate', run: () => go(s) })),
+    { id: 'theme', label: theme === 'dark' ? 'Switch to the light theme' : 'Switch to the dark theme', group: 'Appearance', run: () => setThemeState(theme === 'dark' ? 'light' : 'dark') },
+    ...(projects ?? []).filter((p) => !p.missing).map((p) => ({ id: 'open-' + p.id, label: 'Open project ' + p.name, group: 'Projects', run: () => openProject(p.id) })),
+  ];
   const openProject = (id: string) => { setProject(id); setRoute({ id, tab: 'overview' }); setMenu(false); bump(); };
 
   let body: ReactNode = <Loading />;
@@ -699,6 +638,7 @@ export function App() {
   } else if (projects) {
     body = {
       Overview: <Overview tick={tick} go={go} />,
+      Workspace: <Workspace key={currentProject()} tick={tick} projectName={current?.name ?? 'project'} open={setOpen} setCommands={setExtra} />,
       Projects: <ProjectsHome projects={projects} tick={tick} reloadShell={loadProjects} onOpen={openProject} />,
       Goals: <Goals tick={tick} />,
       Agents: <Agents tick={tick} />,
@@ -721,16 +661,23 @@ export function App() {
           <button className="menu" aria-expanded={menu} aria-label="Menu" onClick={() => setMenu(!menu)}>☰</button>
         </div>
         <nav aria-label="Main">
-          {SCREENS.map((s) => <button key={s} className={!route && screen === s || route && s === 'Projects' ? 'on' : ''} aria-current={!route && screen === s || route && s === 'Projects' ? 'page' : undefined} onClick={() => go(s)}>{s}</button>)}
+          {NAV.map((g) => <div key={g.group} role="group" aria-label={g.group} style={{ display: 'contents' }}><div className="nav-group" aria-hidden="true">{g.group}</div>
+            {g.items.map(({ s, icon }) => <button key={s} className={!route && screen === s || route && s === 'Projects' ? 'on' : ''} aria-current={!route && screen === s || route && s === 'Projects' ? 'page' : undefined} onClick={() => go(s)}><Icon name={icon} />{s}</button>)}</div>)}
         </nav>
         <p className="live small" role="status" data-testid="live-status"><i className={live ? 'on' : ''} />{isDemo() ? 'Demo: not connected' : live ? 'Live: local record' : 'Reconnecting…'}</p>
         {isDemo() ? <button className="btn small" onClick={() => { leaveDemo(); history.replaceState(null, '', location.pathname); setPaired(false); }}>Pair with my companion</button> : null}
       </aside>
-      <main id="main" tabIndex={-1}>
+      <header className="topbar">
+        <div className="crumbs"><span className="small">{isDemo() ? 'Demo' : 'Local'}</span><span aria-hidden="true">/</span><b>{current?.name ?? 'No project'}</b><span aria-hidden="true">/</span><span>{route ? 'Project' : screen}</span></div>
+        <button className="search-btn" onClick={() => setPalette(true)} aria-keyshortcuts="Control+K Meta+K" data-testid="open-palette"><span className="row" style={{ gap: 8 }}><Icon name="search" /><span className="label">Search or run a command</span></span><kbd>Ctrl K</kbd></button>
+        <button className="icon-btn" aria-label={theme === 'dark' ? 'Switch to the light theme' : 'Switch to the dark theme'} title="Theme" onClick={() => setThemeState(theme === 'dark' ? 'light' : 'dark')}><Icon name={theme === 'dark' ? 'sun' : 'moon'} /></button>
+      </header>
+      <main id="main" tabIndex={-1} className={!route && screen === 'Workspace' ? 'bleed' : ''}>
         {isDemo() ? <div className="alert warn" role="note" data-testid="demo-banner"><b>Demo data.</b> These values are invented to show the interface. Only Comparisons and Evaluations show real recorded benchmark results.</div> : null}
         {notice ? <div className="alert bad" role="alert">{notice} <button className="link" onClick={() => setNotice('')}>Dismiss</button></div> : null}
         {body}
       </main>
+      {palette ? <Palette commands={[...baseCommands, ...extra]} onClose={() => setPalette(false)} /> : null}
       {open !== null ? <EventDrawer seq={open} onClose={() => setOpen(null)} /> : null}
       <TerminalPrompt />
     </div>

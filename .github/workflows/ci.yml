@@ -94,6 +94,27 @@ jobs:
           path: test-results/
           retention-days: 7
 
+  vscode:
+    # A real VS Code, downloaded on this disposable runner, runs the extension against a real companion.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm --dir packages/vscode run package
+      - name: Extension host, loaded from source
+        run: xvfb-run -a node packages/vscode/test/host/run.mjs
+      - name: Extension host, the packaged VSIX installed with VS Code's own CLI
+        run: AOT_HOST_MODE=vsix AOT_VSIX=dist-release/agentontrack-vscode.vsix xvfb-run -a node packages/vscode/test/host/run.mjs
+      - name: Extension host, an untrusted workspace
+        run: AOT_HOST_MODE=untrusted xvfb-run -a node packages/vscode/test/host/run.mjs
+
   security:
     runs-on: ubuntu-latest
     timeout-minutes: 10

@@ -7,10 +7,13 @@ import { approvalFingerprint, checkPathScope, decide, normalizeEffects, type Act
 import { createApprover, keyFingerprint, signBody, unlockApprover, verifyIntegrity, Witness, type ApproverFile, type IntegrityReport } from './integrity.js';
 import { changedPaths, diffSnapshots, hashSentinels, snapshotDigest, takeSnapshot, type Snapshot } from './observe.js';
 import { matchesAny, resolveInRoot } from './paths.js';
-import { applyEvent, approvalView, deserializeState, emptyState, evaluateTask, isPendingLive, serializeState, type ProjectState, type Task, type TaskEvaluation } from './state.js';
+import { applyEvent, approvalView, type WorktreeRec, deserializeState, emptyState, evaluateTask, isPendingLive, serializeState, type ProjectState, type Task, type TaskEvaluation } from './state.js';
 import { EventStore, canonical, sha256, type NewEvent } from './store.js';
 import { ALL_FEATURES, CriterionSchema, GoalContractSchema, POLICY_PROFILES, PolicySchema, TaskLimitsSchema, type Actor, type Coverage, type Criterion, type Effect, type Features, type GoalContract, type StoredEvent } from './types.js';
 import { checkRemote } from './anchor.js';
+import { cleanRelative, MAX_FILE_BYTES, readTextFile, writeTextFile } from './workspace.js';
+import { TeamSchema } from './team.js';
+import { addWorktree, behindBy, changedSince, commitAll, git, mergeBranch, previewMerge, removeWorktree, safeName, type MergePreview } from './worktrees.js';
 import { assessCriteria, compareManifests, inspectVerificationFile, type VerificationManifest } from './verification.js';
 
 const newId = (prefix: string) => `${prefix}_${randomBytes(6).toString('hex')}`;
@@ -26,10 +29,20 @@ export function agentontrackHome(): string {
 
 const projectKey = (root: string) => sha256(realpathSync.native(resolve(root))).slice(0, 24);
 
-export interface Registered { id: string; root: string; name: string; attachedAt: string }
+export interface Registered { id: string; root: string; name: string; attachedAt: string; archived?: boolean }
 const registryPath = () => join(agentontrackHome(), 'registry.json');
 export const loadRegistry = (): Registered[] => { try { return JSON.parse(readFileSync(registryPath(), 'utf8')); } catch { return []; } };
 export const saveRegistry = (r: Registered[]) => { mkdirSync(dirname(registryPath()), { recursive: true }); writeFileSync(registryPath(), JSON.stringify(r, null, 2)); };
+export function updateRegistered(id: string, patch: { name?: string; archived?: boolean }): Registered {
+  const reg = loadRegistry();
+  const entry = reg.find((r) => r.id === id);
+  if (!entry) throw new Error('No such project');
+  if (patch.name !== undefined) entry.name = patch.name;
+  if (patch.archived !== undefined) entry.archived = patch.archived;
+  saveRegistry(reg);
+  return entry;
+}
+
 export function registerProject(root: string): Registered {
   const real = realpathSync.native(resolve(root));
   const id = basename(stateDirFor(real));
@@ -46,6 +59,12 @@ export function registerProject(root: string): Registered {
 /** State lives outside the workspace, so the observer, repo and ordinary agent edits do not touch it. */
 export function stateDirFor(root: string): string {
   return join(agentontrackHome(), 'projects', projectKey(root));
+}
+
+/** A file as it was at a revision, with its line endings and trailing newline exactly as stored. */
+function readBlob(cwd: string, rev: string, rel: string): string {
+  const r = spawnSync('git', ['show', `${rev}:${rel}`], { cwd, encoding: 'utf8', maxBuffer: 1 << 26 });
+  return r.status === 0 ? r.stdout : '';
 }
 
 function writeAtomic(path: string, data: string): void {
@@ -204,6 +223,12 @@ export class Project {
       const parsed: GoalContract = GoalContractSchema.parse(goal);
       return this.humanAppend({ type: 'goal.approved', payload: { goal: parsed, ...(fromProposal ? { fromProposal } : {}) } });
     },
+    setTeam: (members: unknown, expectVersion?: number) => {
+      const parsed = TeamSchema.parse(members);
+      const now = this.state().team?.version ?? 0;
+      if (expectVersion !== undefined && expectVersion !== now) throw new Error(`The team is at version ${now}, not ${expectVersion}. Reload and review it first.`);
+      return this.humanAppend({ type: 'team.set', payload: { members: parsed } });
+    },
     closeGoal: (outcome: 'completed' | 'abandoned') => this.humanAppend({ type: 'goal.closed', payload: { outcome } }),
     reopenGoal: () => this.humanAppend({ type: 'goal.reopened', payload: {} }),
     setPolicy: (policy: unknown) => this.humanAppend({ type: 'policy.set', payload: { policy: PolicySchema.parse(policy) } }),
@@ -341,7 +366,8 @@ export class Project {
   }
 
   private takeSnap(s: ProjectState, prev?: Snapshot): Snapshot {
-    const snap = takeSnapshot(this.root, s.policy.observerIgnore, s.policy.maxObservedFiles, prev);
+    // HANDOFF.md is a view generated from the record, and writing it must not make its own handoff stale. Its truth is checked by hash instead.
+    const snap = takeSnapshot(this.root, [...s.policy.observerIgnore, 'HANDOFF.md'], s.policy.maxObservedFiles, prev);
     snap.sentinels = hashSentinels(s.policy.sentinelPaths);
     if (s.policy.onMismatch === 'quarantine') this.saveBlobs(snap, prev);
     return snap;
@@ -441,7 +467,7 @@ export class Project {
       const task = this.taskForSession(s, input.sessionId);
       const req: ActionRequest = {
         runtime: input.runtime, tool: input.tool, effects: input.effects, opaque: input.opaque, coverage: input.coverage,
-        cwd: input.cwd ?? this.root, inputFingerprint: sha256(canonical({ tool: input.tool, input: input.rawInput ?? null })), workspaceDigest: digest,
+        cwd: input.cwd ?? this.root, roots: (s.worktrees ?? []).filter((w) => w.status === 'active').map((w) => w.path), inputFingerprint: sha256(canonical({ tool: input.tool, input: input.rawInput ?? null })), workspaceDigest: digest,
       };
       const now = new Date();
       const result = decide(s, task, req, this.root, this.features, now);
@@ -590,6 +616,132 @@ export class Project {
     });
     if (mismatches.length) this.store.append({ type: 'effect.mismatch', actor: { kind: 'system' }, ...this.stamp(s, taskId), payload: { tool: 'unobserved', mismatches } });
     writeAtomic(this.snapshotPath, JSON.stringify(snap));
+  }
+
+  // Parallel work --------------------------------------------------------------------------------
+
+  worktrees() { return this.state().worktrees ?? []; }
+
+  /** One agent, one task, one folder. A second agent on the same task gets its own, and the same agent cannot take two. */
+  createWorktree(taskId: string, agent: string): WorktreeRec {
+    const s = this.state();
+    if (!s.tasks.has(taskId)) throw new Error(`No task ${taskId}`);
+    const mine = this.worktrees().find((w) => w.status === 'active' && w.taskId === taskId && w.agent === agent);
+    if (mine) throw new Error(`${agent} already owns a worktree for ${taskId}: ${mine.branch}`);
+    const id = newId('wt');
+    const branch = `aot/${safeName(taskId)}-${safeName(agent)}-${id.slice(3, 9)}`;
+    const made = addWorktree(this.root, join(this.stateDir, 'worktrees', id), branch);
+    const rec = { id, taskId, agent, branch, path: made.path, base: made.base };
+    this.store.append({ type: 'worktree.created', actor: { kind: 'system' }, ...this.stamp(s, taskId), payload: rec });
+    return this.worktrees().find((w) => w.id === id)!;
+  }
+
+  private worktree(id: string): WorktreeRec {
+    const w = this.worktrees().find((x) => x.id === id);
+    if (!w) throw new Error(`No worktree ${id}`);
+    return w;
+  }
+
+  /** What one worktree has changed, which of it is outside the approved scope, and whether the project has moved on since. */
+  worktreeStatus(id: string) {
+    const w = this.worktree(id);
+    const s = this.state();
+    const changed = w.status === 'active' ? changedSince(w.path, w.base) : [];
+    const outOfScope = changed.filter((c) => checkPathScope(s, c.path, true, this.features.goalBinding) !== null).map((c) => ({ path: c.path, reason: checkPathScope(s, c.path, true, this.features.goalBinding)! }));
+    const behind = behindBy(this.root, w.base);
+    return { ...w, changed, outOfScope, behindBy: behind, stale: behind > 0 };
+  }
+
+  /** Before and after of one file in a worktree, for a diff view. `before` is the base revision, and null for a new file. */
+  worktreeFileDiff(id: string, raw: string): { path: string; before: string | null; after: string | null } {
+    const w = this.worktree(id);
+    const rel = cleanRelative(w.path, raw);
+    if (!rel) throw new Error('Name a file');
+    const old = git(w.path, 'show', `${w.base}:${rel}`);
+    const abs = join(w.path, rel);
+    const after = existsSync(abs) ? readFileSync(abs, 'utf8') : null;
+    const cap = (t: string | null) => (t !== null && Buffer.byteLength(t, 'utf8') > MAX_FILE_BYTES ? t.slice(0, MAX_FILE_BYTES) : t);
+    return { path: rel, before: old.ok ? cap(readBlob(w.path, w.base, rel)) : null, after: cap(after) };
+  }
+
+  commitWorktree(id: string, message: string) {
+    const w = this.worktree(id);
+    if (w.status !== 'active') throw new Error(`Worktree ${id} is ${w.status}`);
+    const r = commitAll(w.path, message);
+    this.store.append({ type: 'worktree.committed', actor: { kind: 'system' }, ...this.stamp(this.state(), w.taskId), payload: { id, commit: r.commit, empty: r.empty } });
+    return r;
+  }
+
+  /** Pairs of active worktrees that changed the same file, and whether git can combine them. Nothing is changed. */
+  detectConflicts(ids?: string[]) {
+    const active = this.worktrees().filter((w) => w.status === 'active' && (!ids || ids.includes(w.id)));
+    const changes = new Map(active.map((w) => [w.id, new Set(changedSince(w.path, w.base).map((c) => c.path))]));
+    const out: { a: string; b: string; agents: [string, string]; files: string[]; combine: MergePreview | null }[] = [];
+    for (let i = 0; i < active.length; i++) for (let j = i + 1; j < active.length; j++) {
+      const a = active[i]!; const b = active[j]!;
+      const files = [...changes.get(a.id)!].filter((f) => changes.get(b.id)!.has(f));
+      if (!files.length) continue;
+      out.push({ a: a.id, b: b.id, agents: [a.agent, b.agent], files, combine: a.commit && b.commit ? this.compareBranches(a.branch, b.branch) : null });
+    }
+    return out;
+  }
+
+  private compareBranches(x: string, y: string): MergePreview {
+    const r = git(this.root, 'merge-tree', '--write-tree', '--name-only', '--no-messages', x, y);
+    if (r.ok) return { clean: true, conflicts: [], detail: 'No conflicts' };
+    return r.code === 1 ? { clean: false, conflicts: [...new Set(r.out.split('\n').slice(1).map((l) => l.trim()).filter(Boolean))], detail: 'Conflicting changes' } : { clean: false, conflicts: [], detail: r.err.slice(0, 200) };
+  }
+
+  mergePreview(id: string) {
+    const w = this.worktree(id);
+    if (!w.commit) throw new Error('Record the work first: the worktree has no commit to merge');
+    return { ...previewMerge(this.root, w.branch), stale: behindBy(this.root, w.base) > 0 };
+  }
+
+  /** Called only after a human decision. A refused or failed merge leaves the project as it was, and says so. */
+  mergeWorktree(id: string) {
+    const w = this.worktree(id);
+    if (w.status !== 'active') throw new Error(`Worktree ${id} is ${w.status}`);
+    if (!w.commit) throw new Error('Record the work first: the worktree has no commit to merge');
+    const stat = this.worktreeStatus(id);
+    if (stat.outOfScope.length) throw new Error(`Changes outside the approved scope: ${stat.outOfScope.map((o) => o.path).join(', ')}. Review them first.`);
+    const r = mergeBranch(this.root, w.branch, `Merge ${w.agent}'s work on ${w.taskId}`);
+    if (!r.merged) {
+      this.store.append({ type: 'worktree.merge_failed', actor: { kind: 'system' }, ...this.stamp(this.state(), w.taskId), payload: { id, error: r.error } });
+      return r;
+    }
+    this.store.append({ type: 'worktree.merged', actor: { kind: 'system' }, ...this.stamp(this.state(), w.taskId), payload: { id, commit: r.commit } });
+    writeAtomic(this.snapshotPath, JSON.stringify(this.takeSnap(this.state(), this.loadSnapshot())));
+    removeWorktree(this.root, w.path, w.branch, true);
+    return r;
+  }
+
+  discardWorktree(id: string) {
+    const w = this.worktree(id);
+    removeWorktree(this.root, w.path, w.branch, true);
+    this.store.append({ type: 'worktree.discarded', actor: { kind: 'system' }, ...this.stamp(this.state(), w.taskId), payload: { id } });
+  }
+
+  /** Whether a path is one only a human may change, through the proof path: goals, safety, instruction and hook files. */
+  isProtectedPath(rel: string): boolean {
+    return matchesAny(rel, this.state().policy.protectedPaths);
+  }
+
+  /**
+   * A person's save from the workspace. It is recorded, and the snapshot is refreshed, so the edit is not later reported as an
+   * unauthorized change by an agent. Evidence goes stale, correctly, since the code changed.
+   */
+  saveWorkspaceFile(rel: string, content: string, baseHash: string | null, via: string): { path: string; hash: string; created: boolean; protected: boolean } {
+    const s = this.state();
+    const out = writeTextFile(this.root, rel, content, baseHash);
+    this.store.append({ type: 'file.saved', actor: { kind: 'system' }, ...this.stamp(s, s.activeTaskId), payload: { path: out.path, beforeHash: out.beforeHash, afterHash: out.hash, bytes: Buffer.byteLength(content, 'utf8'), via, protected: this.isProtectedPath(out.path) } });
+    writeAtomic(this.snapshotPath, JSON.stringify(this.takeSnap(this.state(), this.loadSnapshot())));
+    return { path: out.path, hash: out.hash, created: out.created, protected: this.isProtectedPath(out.path) };
+  }
+
+  readWorkspaceFile(rel: string) {
+    const f = readTextFile(this.root, rel);
+    return { ...f, protected: this.isProtectedPath(f.path) };
   }
 
   /** Runs a criterion itself. An agent's own statement goes to evidence.claimed and never satisfies anything. */

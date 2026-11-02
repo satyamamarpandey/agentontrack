@@ -451,3 +451,49 @@ export function providerSelfTest(a: ProviderAdapter, root: string): { ok: boolea
   const refused = a.id === 'cline' ? /"cancel":true/.test(r.stdout ?? '') : r.status === 2;
   return refused ? { ok: true, detail: 'The hook program ran and refused a test request' } : { ok: false, detail: `the hook program did not refuse a test request (exit ${r.status ?? 'none'}). Run: agentontrack install ${a.id}` };
 }
+
+export interface RuntimeFacts {
+  id: string; name: string; known: boolean;
+  /** Whether a gate runs before a shell command or a file edit, as documented. Tested status is in the certification record. */
+  enforcesShell: boolean; enforcesEdit: boolean; mcp: boolean;
+  /** What the host does if the hook program cannot run. */
+  hostFailMode: 'closed' | 'open' | 'unknown';
+  containment: string;
+}
+
+/** What AgentOnTrack knows about a runtime, from the same tables the installer uses. A runtime it does not know is not guessed at. */
+export function runtimeFacts(id: string): RuntimeFacts {
+  const p = PROVIDERS[id];
+  if (p) {
+    // Open if ANY way of failing lets the action run: a host that blocks a crash but allows a timeout is still not a hard gate.
+    const ifCrash = `${p.failure.crash} ${p.failure.timeout} ${p.failure.malformed} ${p.failure.missing}`.toLowerCase();
+    return { id, name: p.name, known: true, enforcesShell: p.capabilities.preActionShell === 'yes', enforcesEdit: p.capabilities.preActionEdit === 'yes', mcp: p.capabilities.preActionMcp !== 'no', hostFailMode: /runs the action|allow/.test(ifCrash) ? 'open' : /block|den|refus/.test(ifCrash) ? 'closed' : 'unknown', containment: 'See the integrations page' };
+  }
+  if (id === 'claude-code') return { id, name: 'Claude Code', known: true, enforcesShell: true, enforcesEdit: true, mcp: true, hostFailMode: 'closed', containment: 'OS sandbox on Linux and macOS, with --sandbox' };
+  if (id === 'codex') return { id, name: 'Codex', known: true, enforcesShell: true, enforcesEdit: true, mcp: true, hostFailMode: 'open', containment: 'Its own sandbox, through agentontrack run codex' };
+  if (id === 'hermes') return { id, name: 'Hermes', known: true, enforcesShell: true, enforcesEdit: true, mcp: true, hostFailMode: 'closed', containment: 'None' };
+  return { id, name: id, known: false, enforcesShell: false, enforcesEdit: false, mcp: false, hostFailMode: 'unknown', containment: 'Unknown' };
+}
+
+export interface FailoverOption { id: string; name: string; usable: boolean; why: string[]; warnings: string[] }
+
+/**
+ * When a runtime stops, which of the others can take the work, and what they would not do. It ranks by what the receiver can enforce
+ * and never by how capable its model is, which is not something AgentOnTrack measures. A person picks.
+ */
+export function failoverOptions(unavailable: string, installed: string[], opts: { needsEdit?: boolean } = {}): FailoverOption[] {
+  const from = runtimeFacts(unavailable);
+  return installed.filter((id) => id !== unavailable).map((id) => {
+    const f = runtimeFacts(id);
+    const why: string[] = [];
+    const warnings: string[] = [];
+    if (!f.known) why.push('AgentOnTrack has no adapter for this runtime, so nothing it does would be gated or observed by a hook.');
+    if (f.known && !f.enforcesShell) why.push('It does not gate shell commands before they run.');
+    if (f.known && (opts.needsEdit ?? true) && !f.enforcesEdit) why.push('It does not gate file edits before they run.');
+    if (f.hostFailMode === 'open') warnings.push('If its hook cannot run, the host runs the action anyway. Start it with agentontrack run.');
+    if (f.hostFailMode === 'unknown' && f.known) warnings.push('What it does when its hook fails has not been observed.');
+    if (from.hostFailMode === 'closed' && f.hostFailMode === 'open') warnings.push(`${from.name} blocks when its hook breaks, and ${f.name} does not, so this is a weaker gate.`);
+    warnings.push('Approvals given for the other runtime do not carry over. It asks for its own.');
+    return { id, name: f.name, usable: why.length === 0, why, warnings };
+  }).sort((x, y) => Number(y.usable) - Number(x.usable) || Number(runtimeFacts(x.id).hostFailMode === 'open') - Number(runtimeFacts(y.id).hostFailMode === 'open') || x.id.localeCompare(y.id));
+}

@@ -1,0 +1,5 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "rootDir": "src", "outDir": "out", "noEmit": true, "composite": false, "incremental": false, "declaration": false, "module": "esnext", "moduleResolution": "bundler", "lib": ["es2023", "dom"], "types": ["node", "vscode"] },
+  "include": ["src"]
+}

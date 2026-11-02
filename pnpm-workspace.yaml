@@ -7,6 +7,9 @@ allowBuilds:
   # Neither is needed in the browser, and no install script should run without a reason.
   '@firebase/util': false
   protobufjs: false
+  # vsce's secret-store and signature helpers are for publishing to the marketplace. Packaging a VSIX needs neither.
+  '@vscode/vsce-sign': false
+  keytar: false
 
 # Firestore pins @grpc/grpc-js ~1.9, which has a high advisory (GHSA-m9gg-hp2v-232j). Only its Node entry uses grpc: the browser bundles here never load it.
 overrides:

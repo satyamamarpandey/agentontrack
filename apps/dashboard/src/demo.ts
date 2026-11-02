@@ -54,6 +54,10 @@ export function demoGet(path: string): unknown {
       { id: 'hermes', name: 'Hermes', version: null, installed: false, authenticated: null, hooksInstalled: false, coverage: coverage('real-host-scripted-model', 'closed', 'none'), liveStatus: 'Demo: not connected' },
     ];
     case '/api/runs': return [];
+    case '/api/files': return { dir: '', truncated: false, entries: [{ name: 'src', path: 'src', type: 'dir', size: 0 }, { name: 'README.md', path: 'README.md', type: 'file', size: 120 }] };
+    case '/api/handoffs': return [];
+    case '/api/worktrees': return { worktrees: [], conflicts: [] };
+    case '/api/workflow': return { kind: 'implement-review-verify', stages: [], problems: ['Demo: no team is set.'], warnings: [] };
     case '/api/actions': return [{ seq: 44, ts: day(0), type: 'action.requested', payload: { tool: 'Bash', decision: 'request_approval', assurance: 'enforced', reasons: ['vcs.push requires human approval'], effects: [] } }, { seq: 43, ts: day(0), type: 'action.requested', payload: { tool: 'Bash', decision: 'allow', assurance: 'partial', reasons: [], effects: [{ kind: 'exec.opaque' }] } }];
     case '/api/evaluations': return { heldout: pick('heldout'), matched: pick('matched-v3') ?? pick('matched-v3.partial'), securityCampaign: pick('security-campaign'), performance: pick('performance') };
     case '/api/settings': return { telemetry: false, diagnostics: false, theme: 'dark', environment: { show: true }, sync: { enabled: false, endpoint: '', deviceToken: '', lastSync: null }, syncPreview: { schema: 'agentontrack.sync/v1', projectLabel: 'demo-project', totals: { input: 130, output: 6300 } }, sessions: [{ id: 'demo', current: true, expiresAt: Date.now() + 3_600_000 }] };

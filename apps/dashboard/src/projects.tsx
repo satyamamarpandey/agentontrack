@@ -3,6 +3,7 @@ import { accountPage, accountsEnabled, saveSummary, signedInHere } from './accou
 import { get, isDemo, post, setProject } from './api';
 import { ChartFrame, fmt, fmtMs, Provenance, StackedBars, Stat, type DataKind } from './charts';
 import { buildSummary, buildTimeline, energyKwh, fmtEstimate, loadBaseline, loadFactors, meanSecondsPerTask, meanTokensPerTask, parseBaseline, parseMeasure, pct, saveBaseline, saveFactors, savingText, secondsSaved, tokensSaved, totalTokens, verification, waterLiters, type Baseline, type EnvFactors, type Measured, type TimelineEntry, type TimelineItem } from './metrics';
+import { Modal } from './human';
 import { Badge, Empty, Loading, Page, useLoad } from './ui';
 
 export const PROJECT_TABS = ['overview', 'workflow', 'usage', 'verification', 'environment'] as const;
@@ -43,23 +44,31 @@ function ProjectCard({ p, tick, onOpen }: { p: any; tick: number; onOpen: (id: s
   );
 }
 
-export function ProjectsHome({ projects, tick, reloadShell, onOpen }: { projects: any[]; tick: number; reloadShell: () => void; onOpen: (id: string) => void }) {
+function AddProject({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const [path, setPath] = useState('');
-  const [create, setCreate] = useState(false);
+  const [mode, setMode] = useState<'import' | 'create'>('import');
   const [msg, setMsg] = useState('');
   return (
-    <Page title="Projects" intro="Each project has its own local record, read from the companion on this machine. Open one for its workflow, usage, verification and environment.">
-      {projects.length === 0 ? <Empty>No project attached yet. Attach a folder below.</Empty> : <section className="project-grid" aria-label="Your projects">{projects.map((p) => <ProjectCard key={p.id} p={p} tick={tick} onOpen={onOpen} />)}</section>}
-      <details className="card attach" open={projects.length === 0}>
-        <summary>Attach another project</summary>
-        <form className="row wrap" onSubmit={async (e) => { e.preventDefault(); try { await post('/api/projects', { path, create }); setPath(''); setMsg(''); reloadShell(); } catch (err) { setMsg((err as Error).message); } }}>
-          <p className="muted small full">Attaching writes nothing into the folder.</p>
-          <label className="grow">Absolute folder path<input value={path} onChange={(e) => setPath(e.target.value)} required name="path" spellCheck={false} /></label>
-          <label className="check"><input type="checkbox" checked={create} onChange={(e) => setCreate(e.target.checked)} /> Create if missing</label>
-          <button className="btn primary end-self" type="submit">Attach</button>
-          {msg ? <div className="alert bad full" role="alert">{msg}</div> : null}
-        </form>
-      </details>
+    <Modal label="Add a project" onClose={onClose} onSubmit={async (e) => { e.preventDefault(); try { await post('/api/projects', { path, create: mode === 'create' }); onDone(); onClose(); } catch (err) { setMsg((err as Error).message); } }}>
+      <h2>Add a project</h2>
+      <div className="row" role="group" aria-label="Import or create">
+        <button type="button" className={`chip ${mode === 'import' ? 'on' : ''}`} aria-pressed={mode === 'import'} onClick={() => setMode('import')}>Import an existing folder</button>
+        <button type="button" className={`chip ${mode === 'create' ? 'on' : ''}`} aria-pressed={mode === 'create'} onClick={() => setMode('create')}>Create a new folder</button>
+      </div>
+      <p className="muted small">{mode === 'import' ? 'Attaching writes nothing into the folder. Your goal, approvals and evidence are kept outside it, on this machine.' : 'The folder is created if it does not exist. Nothing is written into it yet.'}</p>
+      {msg ? <div className="alert bad" role="alert">{msg}</div> : null}
+      <label>Absolute folder path<input value={path} onChange={(e) => setPath(e.target.value)} required name="path" spellCheck={false} data-autofocus placeholder="Full path to the folder" /></label>
+      <div className="row end"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" type="submit">Attach</button></div>
+    </Modal>
+  );
+}
+
+export function ProjectsHome({ projects, tick, reloadShell, onOpen }: { projects: any[]; tick: number; reloadShell: () => void; onOpen: (id: string) => void }) {
+  const [adding, setAdding] = useState(false);
+  return (
+    <Page title="Projects" intro="Each project has its own local record, read from the companion on this machine. Open one for its workspace, workflow, usage, verification and environment." actions={<button className="btn primary" onClick={() => setAdding(true)} data-testid="add-project">Add project</button>}>
+      {adding ? <AddProject onClose={() => setAdding(false)} onDone={reloadShell} /> : null}
+      {projects.length === 0 ? <Empty>No project attached yet. Use Add project to import a folder or create one.</Empty> : <section className="project-grid" aria-label="Your projects">{projects.map((p) => <ProjectCard key={p.id} p={p} tick={tick} onOpen={onOpen} />)}</section>}
     </Page>
   );
 }
@@ -325,7 +334,7 @@ export function ProjectDetail({ route, projects, tick, onTab, onBack, open, go }
   return (
     <>
       {back}
-      <Page title={entry.name} intro={entry.root} actions={entry.activeTask ? <Badge value={entry.activeTask.status} /> : undefined as any}>
+      <Page title={entry.name} intro={entry.root} actions={<div className="row">{entry.activeTask ? <Badge value={entry.activeTask.status} /> : null}<button className="btn primary" data-testid="open-workspace" onClick={() => openScreen('Workspace')}>Open workspace</button></div>}>
         <Tabs tab={route.tab} onTab={onTab} />
         <div id="project-panel" role="tabpanel" aria-labelledby={`tab-${route.tab}`} className="panel" tabIndex={-1} data-testid={`project-panel-${route.tab}`}>
           {route.tab === 'overview' ? <OverviewTab a={an.data} s={st.data} projectId={id} onTab={onTab} go={openScreen} /> : null}

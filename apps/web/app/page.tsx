@@ -19,6 +19,14 @@ const PROJECT_VIEW = [
   ['Environment', 'Unavailable, unless you supply the factors. Then it is labelled an estimate'],
 ];
 
+// What each agent really is here. "Live-tested" is only ever Claude Code. The integrations page has the evidence for the rest.
+const AGENTS: [string, string, string][] = [
+  ['Claude Code', 'Anthropic', 'Live-tested. Start runs from the workspace.'],
+  ['Codex', 'OpenAI models', 'Hooks tested against the real program with a scripted model. Starts in its own terminal.'],
+  ['Hermes', 'Nous Research', 'Real program, scripted model. Starts in its own terminal.'],
+  ['Gemini CLI, Cursor, Copilot, Devin, OpenCode, Kiro, Cline', 'Several vendors', "Adapters written from each tool's documented hooks. Not yet run on the real programs."],
+];
+
 export default function Home() {
   const held = readResult('heldout.json');
   const full = held?.results?.['C agentontrack full'];
@@ -65,6 +73,16 @@ $ agentontrack verify
         </div>
       </section>
 
+      <section className="wrap band" data-testid="every-agent">
+        <h2>One workspace for every agent you use</h2>
+        <p className="section-lead">Give Claude the coding and Codex the review, or the other way round. Every agent works under the same goal, the same approvals and one evidence record, and a handoff carries verified context from one to the next. Each keeps its own login and its own model: AgentOnTrack never asks for provider credentials.</p>
+        <div className="table-wrap" tabIndex={0}><table>
+          <thead><tr><th scope="col">Agent</th><th scope="col">Models</th><th scope="col">What has really been run</th></tr></thead>
+          <tbody>{AGENTS.map(([a, m, d]) => <tr key={a}><th scope="row">{a}</th><td>{m}</td><td>{d}</td></tr>)}</tbody>
+        </table></div>
+        <p className="small muted">AgentOnTrack does not route one prompt across models, and it does not make an agent&apos;s model better. It governs the agents you already use. <Link href="/integrations">See the integrations page for what has really been run →</Link></p>
+      </section>
+
       <section className="wrap band">
         <h2>From goal to evidence</h2>
         <ol className="steps">{STEPS.map(([t, d], i) => <li key={t}><span className="num">{i + 1}</span><h3>{t}</h3><p>{d}</p></li>)}</ol>
@@ -108,14 +126,6 @@ $ agentontrack verify
           <h2>Your code stays on your machine</h2>
           <p>Code, prompts, transcripts and credentials stay local. Your agent keeps its own login. {ACCOUNTS_ENABLED ? 'Accounts on this site are optional, hold no code or records, and nothing needs one.' : 'There are no accounts, and AgentOnTrack has no server to send anything to.'}</p>
           <Link href="/privacy">Privacy details →</Link>
-        </div>
-        <div className="tile">
-          <h2>Supported agents</h2>
-          <ul>
-            <li><b>Claude Code:</b> live-tested</li>
-            <li><b>Codex, Hermes, local models:</b> see the integrations page for what has really been run</li>
-          </ul>
-          <Link href="/integrations">Compatibility details →</Link>
         </div>
       </section>
 

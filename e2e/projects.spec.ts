@@ -46,7 +46,7 @@ test('several projects: each card and page shows that project\'s own record', as
   seed(env);
   seedUsage(env);
   await env.pair(page);
-  await page.getByText('Attach another project').click();
+  await page.getByRole('button', { name: 'Add project' }).click();
   const second = join(env.dir, 'second');
   mkdirSync(second);
   await page.getByLabel('Absolute folder path').fill(second);

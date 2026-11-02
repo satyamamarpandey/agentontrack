@@ -57,7 +57,7 @@ export async function get<T = any>(path: string): Promise<T> {
   if (demo) return demoGet(path) as T;
   const r = await send(withProject(path), { headers: auth() });
   const body = await r.json().catch(() => ({}));
-  if (!r.ok) throw new ApiError(r.status, body.error ?? `Request failed (${r.status})`);
+  if (!r.ok) throw new ApiError(r.status, body.error ?? `Request failed (${r.status})`, body);
   return body;
 }
 
@@ -70,7 +70,7 @@ export async function post<T = any>(path: string, body: Record<string, unknown> 
   const r = await send(withProject(path), { method: 'POST', headers: { 'content-type': 'application/json', 'x-agentontrack-csrf': csrf, ...auth() }, body: JSON.stringify(body) });
   const out = await r.json().catch(() => ({}));
   if (r.status === 428) return post<T>(path, { ...body, challengeId: out.challengeId, confirm: await askTerminalCode(out.action ?? path) });
-  if (!r.ok) throw new ApiError(r.status, out.error ?? out.issues?.join('; ') ?? `Request failed (${r.status})`);
+  if (!r.ok) throw new ApiError(r.status, out.error ?? out.issues?.join('; ') ?? `Request failed (${r.status})`, out);
   return out;
 }
 

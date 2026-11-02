@@ -1,0 +1,277 @@
+{
+  "name": "agentontrack-vscode",
+  "displayName": "AgentOnTrack",
+  "description": "Goals, approvals, evidence and handoffs for your AI coding agents, from the editor. Local-first: it talks only to the AgentOnTrack companion on this machine.",
+  "version": "1.0.0-rc.3",
+  "private": true,
+  "publisher": "satyamamarpandey",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/satyamamarpandey/agentontrack"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "ai",
+    "agents",
+    "approvals",
+    "mcp",
+    "verification"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "In an untrusted workspace the extension only reads. It starts no run and confirms nothing."
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "It needs a real folder on this machine."
+    }
+  },
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "agentontrack",
+          "title": "AgentOnTrack",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "agentontrack": [
+        {
+          "id": "agentontrack.project",
+          "name": "Project"
+        },
+        {
+          "id": "agentontrack.approvals",
+          "name": "Approvals"
+        },
+        {
+          "id": "agentontrack.team",
+          "name": "Agent team"
+        },
+        {
+          "id": "agentontrack.handoffs",
+          "name": "Handoffs"
+        },
+        {
+          "id": "agentontrack.usage",
+          "name": "Usage"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "agentontrack.project",
+        "contents": "Not connected to the AgentOnTrack companion.\n\nIn a terminal, run `agentontrack dashboard`, then press the button and type the pairing code it shows.\n[Connect](command:agentontrack.connect)\n[Diagnose the connection](command:agentontrack.diagnostics)"
+      }
+    ],
+    "commands": [
+      {
+        "command": "agentontrack.connect",
+        "title": "Connect to the companion",
+        "category": "AgentOnTrack"
+      },
+      {
+        "command": "agentontrack.disconnect",
+        "title": "Disconnect",
+        "category": "AgentOnTrack"
+      },
+      {
+        "command": "agentontrack.selectProject",
+        "title": "Select project",
+        "category": "AgentOnTrack"
+      },
+      {
+        "command": "agentontrack.refresh",
+        "title": "Refresh",
+        "category": "AgentOnTrack",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "agentontrack.openDashboard",
+        "title": "Open in the dashboard",
+        "category": "AgentOnTrack"
+      },
+      {
+        "command": "agentontrack.diagnostics",
+        "title": "Connection diagnostics",
+        "category": "AgentOnTrack"
+      },
+      {
+        "command": "agentontrack.runPrompt",
+        "title": "Run a prompt with the selected agent",
+        "category": "AgentOnTrack"
+      },
+      {
+        "command": "agentontrack.reviewSelection",
+        "title": "Review with the selected agent",
+        "category": "AgentOnTrack"
+      },
+      {
+        "command": "agentontrack.explainSelection",
+        "title": "Explain selected code",
+        "category": "AgentOnTrack"
+      },
+      {
+        "command": "agentontrack.fixSelection",
+        "title": "Fix selected code",
+        "category": "AgentOnTrack"
+      },
+      {
+        "command": "agentontrack.generateTests",
+        "title": "Generate tests",
+        "category": "AgentOnTrack"
+      },
+      {
+        "command": "agentontrack.checkGoal",
+        "title": "Check current goal",
+        "category": "AgentOnTrack"
+      },
+      {
+        "command": "agentontrack.verifyChanges",
+        "title": "Verify current changes",
+        "category": "AgentOnTrack"
+      },
+      {
+        "command": "agentontrack.createHandoff",
+        "title": "Create handoff",
+        "category": "AgentOnTrack"
+      },
+      {
+        "command": "agentontrack.showHandoff",
+        "title": "Show handoff",
+        "category": "AgentOnTrack"
+      },
+      {
+        "command": "agentontrack.acceptHandoff",
+        "title": "Accept handoff",
+        "category": "AgentOnTrack"
+      },
+      {
+        "command": "agentontrack.approve",
+        "title": "Approve",
+        "category": "AgentOnTrack",
+        "icon": "$(check)"
+      },
+      {
+        "command": "agentontrack.deny",
+        "title": "Deny",
+        "category": "AgentOnTrack",
+        "icon": "$(x)"
+      },
+      {
+        "command": "agentontrack.openProjectFile",
+        "title": "Open a project file",
+        "category": "AgentOnTrack"
+      },
+      {
+        "command": "agentontrack.showWorktreeDiff",
+        "title": "Show a worktree change",
+        "category": "AgentOnTrack"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "agentontrack.refresh",
+          "when": "view =~ /^agentontrack\\./",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "agentontrack.approve",
+          "when": "view == agentontrack.approvals && viewItem == approval",
+          "group": "inline@1"
+        },
+        {
+          "command": "agentontrack.deny",
+          "when": "view == agentontrack.approvals && viewItem == approval",
+          "group": "inline@2"
+        },
+        {
+          "command": "agentontrack.showHandoff",
+          "when": "view == agentontrack.handoffs && viewItem == handoff"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "agentontrack.reviewSelection",
+          "when": "editorHasSelection && workspaceFolderCount > 0",
+          "group": "agentontrack@1"
+        },
+        {
+          "command": "agentontrack.explainSelection",
+          "when": "editorHasSelection && workspaceFolderCount > 0",
+          "group": "agentontrack@2"
+        },
+        {
+          "command": "agentontrack.fixSelection",
+          "when": "editorHasSelection && workspaceFolderCount > 0",
+          "group": "agentontrack@3"
+        },
+        {
+          "command": "agentontrack.generateTests",
+          "when": "editorHasSelection && workspaceFolderCount > 0",
+          "group": "agentontrack@4"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "AgentOnTrack",
+      "properties": {
+        "agentontrack.companionUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:47631",
+          "scope": "machine",
+          "markdownDescription": "Where the companion listens. Only this machine is accepted: `127.0.0.1` or `localhost`. Machine scope means a project's own settings cannot change it."
+        },
+        "agentontrack.agentId": {
+          "type": "string",
+          "default": "claude-code",
+          "scope": "machine",
+          "description": "The agent runs and handoffs are made for. A run can be started from here only for Claude Code today."
+        },
+        "agentontrack.model": {
+          "type": "string",
+          "default": "haiku",
+          "scope": "machine",
+          "description": "The model a Claude Code run uses."
+        },
+        "agentontrack.maxBudgetUsd": {
+          "type": "number",
+          "default": 0.5,
+          "minimum": 0.01,
+          "maximum": 5,
+          "scope": "machine",
+          "description": "The most one run may cost, at list prices."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc -p . --noEmit",
+    "package": "node build.mjs && vsce package --no-dependencies --allow-missing-repository --out ../../dist-release/agentontrack-vscode.vsix"
+  },
+  "devDependencies": {
+    "@types/vscode": "1.90.0",
+    "@agentontrack/companion": "workspace:*",
+    "@agentontrack/core": "workspace:*",
+    "@agentontrack/adapters": "workspace:*",
+    "@vscode/vsce": "^3.7.0",
+    "@vscode/test-electron": "^2.5.2"
+  }
+}

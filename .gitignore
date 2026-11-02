@@ -17,3 +17,8 @@ dist-release
 runtime-results
 dist-pages-*/
 .private-denylist
+packages/vscode/dist
+packages/vscode/out
+packages/vscode/.vscode-test
+packages/vscode/LICENSE
+*.vsix

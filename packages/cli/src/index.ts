@@ -8,6 +8,7 @@ import { dirname, join, resolve } from 'node:path';
 import { approvalView, checkAnchor, isPendingLive, Project, pushAnchor, registerProject, routeIntent, type ProjectState } from '@agentontrack/core';
 import { coverageFor, handleHookSafely, handleProviderHookSafely, installMcpClient, isProvider, MCP_CLIENTS, perplexityMcpConfig, PROVIDERS, providerInstalled, providerSelfTest, hermesHookConfig, hookSelfTest, hooksInstalled, installHooks, probeLocalModel, uninstallHooks, type RuntimeId } from '@agentontrack/adapters';
 import { runSelf, stableCommand, VERSION } from './self.js';
+import { resolveProject, workspaceCommand } from './workspace-cmds.js';
 import { planProjectFiles, applyProjectFiles } from './init.js';
 
 // github.io redirects to the account's custom domain, so that domain is the only origin a browser reports.
@@ -17,7 +18,11 @@ const opt = (name: string) => { const i = argv.indexOf(`--${name}`); return i >=
 const rootFlag = opt('root');
 // A hook command names its project first, so this comes out before the command is read.
 if (rootFlag) argv.splice(argv.indexOf('--root'), 2);
-const root = rootFlag ?? process.env.AGENTONTRACK_ROOT ?? process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
+// --project picks a registered project by name or id, so any folder can be left without cd.
+const projectFlag = opt('project');
+if (projectFlag) argv.splice(argv.indexOf('--project'), 2);
+const JSON_OUT = argv.includes('--json');
+const root = rootFlag ?? (projectFlag ? resolveProject(projectFlag).root : undefined) ?? process.env.AGENTONTRACK_ROOT ?? process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
 const has = (name: string) => argv.includes(`--${name}`);
 const print = (v: unknown) => console.log(typeof v === 'string' ? v : JSON.stringify(v, null, 2));
 
@@ -117,6 +122,8 @@ const nativeRuntime = (r: string | undefined) => {
   return r;
 };
 
+const ALL_COMMANDS = ['setup', 'doctor', 'providers', 'mcp-config', 'research', 'run', 'init', 'sync-docs', 'install', 'uninstall', 'status', 'dashboard', 'approver', 'goal', 'decision', 'policy', 'task', 'approvals', 'approve', 'deny', 'revoke', 'ack', 'verify', 'audit', 'anchor', 'probe', 'suggest', 'mcp', 'hook', 'self', 'version'];
+
 async function main(): Promise<void> {
   const [cmd, sub, arg] = argv;
   switch (cmd) {
@@ -147,7 +154,7 @@ async function main(): Promise<void> {
       const { startCompanion } = await import('@agentontrack/companion');
       const allowSite = has('allow-public-site');
       const packaged = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'benchmarks');
-      const c = await startCompanion({ root, port: Number(opt('port') ?? (allowSite ? 47631 : 0)), selfCommand: selfCommand(), ...(existsSync(packaged) ? { benchmarksDir: packaged } : {}), ...(allowSite ? { allowedOrigins: PUBLIC_SITE_ORIGINS, onTerminalChallenge: (code: string, action: string) => print(`\nThe public site asks to: ${action}\nIf that was you, type this code there: ${code}\n`) } : {}) });
+      const c = await startCompanion({ root, port: Number(opt('port') ?? (allowSite ? 47631 : 0)), selfCommand: selfCommand(), ...(existsSync(packaged) ? { benchmarksDir: packaged } : {}), onTerminalChallenge: (code: string, action: string) => print(`\nAn outside page or an editor asks to: ${action}\nIf that was you, type this code there: ${code}\n`), ...(allowSite ? { allowedOrigins: PUBLIC_SITE_ORIGINS } : {}) });
       if (allowSite) print('The public AgentOnTrack site may now connect, but only with the pairing code below. Anything it changes also needs a code shown here, so a compromised page cannot act on its own. Without --allow-public-site, the local address below works with no outside origin at all.');
       print(`AgentOnTrack dashboard: ${c.url}\nPairing code (one use, 5 minutes): ${c.newPairingCode()}\nPress Enter for a new code. Press Ctrl+C to stop.`);
       createInterface({ input: process.stdin }).on('line', () => print(`New pairing code: ${c.newPairingCode()}`));
@@ -457,7 +464,8 @@ async function main(): Promise<void> {
       });
       return;
     default:
-      print(`AgentOnTrack ${VERSION}\nStart with: agentontrack setup\nCommands: setup|doctor|providers|mcp-config|research|run|init|sync-docs|install|uninstall|status|dashboard|approver|goal|decision|policy|task|approvals|approve|deny|revoke|ack|verify|audit|anchor|probe|suggest|mcp|hook|self|version`);
+      if (await workspaceCommand(cmd, sub, arg, { root, argv, json: JSON_OUT, opt, has, human, withProject, print }, ALL_COMMANDS)) return;
+      print(`AgentOnTrack ${VERSION}\nStart with: agentontrack setup\nCommands: project|agents|team|worktree|handoff|failover|usage|completion|setup|doctor|providers|mcp-config|research|run|init|sync-docs|install|uninstall|status|dashboard|approver|goal|decision|policy|task|approvals|approve|deny|revoke|ack|verify|audit|anchor|probe|suggest|mcp|hook|self|version`);
       process.exitCode = cmd ? 1 : 0;
   }
 }

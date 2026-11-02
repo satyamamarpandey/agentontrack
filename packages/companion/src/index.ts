@@ -3,10 +3,11 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { dirname, extname, relative, isAbsolute, join, normalize, resolve } from 'node:path';
+import { homedir } from 'node:os';
+import { dirname, extname, relative, sep, isAbsolute, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { coverageFor, PROVIDERS, providerInstalled, hooksInstalled, installHooks, probeLocalModel, uninstallHooks } from '@agentontrack/adapters';
-import { approvalView, agentontrackHome, computeAnalytics, isPendingLive, loadRegistry, Project, registerProject, saveRegistry, stateDirFor, type Registered } from '@agentontrack/core';
+import { failoverOptions, runtimeFacts, coverageFor, PROVIDERS, providerInstalled, hooksInstalled, installHooks, probeLocalModel, uninstallHooks } from '@agentontrack/adapters';
+import { renderHandoffMarkdown, acceptHandoff2, buildHandoff, listHandoffs, loadHandoff, planWorkflow, checkSpec, saveHandoff, validateHandoff, hashText, listDir, WorkspaceError, updateRegistered, approvalView, agentontrackHome, computeAnalytics, isPendingLive, loadRegistry, Project, registerProject, saveRegistry, stateDirFor, type Registered } from '@agentontrack/core';
 import * as z from 'zod/v4';
 
 const SESSION_TTL_MS = 8 * 3_600_000;
@@ -49,7 +50,7 @@ export interface Companion {
   server: Server;
 }
 
-interface Session { tokenHash: string; csrf: string; createdAt: number; expiresAt: number; userAgent: string; origin?: string; terminalFailures?: number }
+interface Session { tokenHash: string; csrf: string; createdAt: number; expiresAt: number; userAgent: string; origin?: string; surface?: 'editor'; terminalFailures?: number }
 interface Run { id: string; project: string; child: ChildProcess; started: number; events: string[]; status: string }
 
 const hash = (s: string) => createHash('sha256').update(s).digest('hex');
@@ -164,6 +165,8 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
   /** An outside origin, even a compromised one, must not be able to act alone: the code goes to the terminal, tied to this exact request. */
   const requireTerminalProof = (req: IncomingMessage, path: string, key: string, body: any, projectId: string | null) => {
     const { challengeId, confirm, passphrase: _pw, ...rest } = body ?? {};
+    // A save is shown by path and content hash, so the code is bound to the exact text without needing to print all of it.
+    if (typeof rest.content === 'string') rest.content = `[${Buffer.byteLength(rest.content, 'utf8')} bytes, sha256 ${hashText(rest.content)}]`;
     // The page controls key order and can pad a request, so what is shown is sorted, complete and bounded.
     const sorted = JSON.stringify(Object.fromEntries(Object.entries(rest).sort(([a], [b]) => a.localeCompare(b))), null, 1);
     if (sorted.length > MAX_SHOWN_REQUEST) throw new HttpError(413, 'This request is too long to show in full in your terminal. Use the local address.');
@@ -200,7 +203,7 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
     }
     if (p.approverEnrolled()) {
       // The page could read whatever is typed into it, so the passphrase stays off outside origins.
-      if (sessions.get(key)?.origin) throw new HttpError(409, 'This project has an approver passphrase, which must not be typed into a website. Use the local address, or the command line.');
+      if (sessions.get(key)?.origin || sessions.get(key)?.surface) throw new HttpError(409, 'This project has an approver passphrase, which must not be typed into a website or an editor extension. Use the local dashboard address, or the command line.');
       try { p.unlock(String(body.passphrase ?? '')); } catch (err) { throw new HttpError(403, (err as Error).message); }
     }
     return { method: p.approverEnrolled() ? 'dashboard+passphrase' : 'dashboard' };
@@ -252,6 +255,14 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
     return run;
   };
 
+  /** Turns a workspace failure into an HTTP answer with its own status, and its data, such as the current hash after a conflict. */
+  const workspace = <T,>(fn: () => T): T => {
+    try { return fn(); } catch (err) {
+      if (err instanceof WorkspaceError) throw Object.assign(new HttpError(err.status, err.message), { extra: err.data ?? {} });
+      throw err;
+    }
+  };
+
   const eventView = (e: any) => {
     const { hash: _h, prevHash: _p, ...rest } = e;
     return rest;
@@ -276,8 +287,11 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
       const csrf = randomBytes(24).toString('base64url');
       const now = Date.now();
       const remote = req.headers.origin && allowed.has(req.headers.origin) ? req.headers.origin : undefined;
-      sessions.set(hash(token), { tokenHash: hash(token), csrf, createdAt: now, expiresAt: now + (remote ? REMOTE_SESSION_TTL_MS : SESSION_TTL_MS), userAgent: String(req.headers['user-agent'] ?? '').slice(0, 120), ...(remote ? { origin: remote } : {}) });
-      if (remote) return json(res, 200, { csrf, token });
+      // An editor extension runs code the user did not write. It says what it is, gets a bearer token and no cookie, and then, like an outside page,
+      // cannot confirm its own requests: the code goes to the terminal.
+      const editor = !remote && !req.headers.origin && req.headers['x-agentontrack-surface'] === 'editor';
+      sessions.set(hash(token), { tokenHash: hash(token), csrf, createdAt: now, expiresAt: now + (remote || editor ? REMOTE_SESSION_TTL_MS : SESSION_TTL_MS), userAgent: String(req.headers['user-agent'] ?? '').slice(0, 120), ...(remote ? { origin: remote } : {}), ...(editor ? { surface: 'editor' as const } : {}) });
+      if (remote || editor) return json(res, 200, { csrf, token });
       return json(res, 200, { csrf }, { 'set-cookie': `${COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_TTL_MS / 1000}` });
     }
     const sess = sessionOf(req);
@@ -286,7 +300,7 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
     if (path === '/api/session' && method === 'GET') return json(res, 200, { csrf: session.csrf, expiresAt: session.expiresAt });
     if (method !== 'GET' && !safeEq(String(req.headers['x-agentontrack-csrf'] ?? ''), session.csrf)) throw new HttpError(403, 'Missing CSRF token');
 
-    if (session.origin && method === 'POST' && !REMOTE_FREE.has(path)) requireTerminalProof(req, path, key, await readBody(req), url.searchParams.get('project'));
+    if ((session.origin || session.surface) && method === 'POST' && !REMOTE_FREE.has(path)) requireTerminalProof(req, path, key, await readBody(req), url.searchParams.get('project'));
     const projectId = url.searchParams.get('project');
 
     if (path === '/api/events/stream' && method === 'GET') {
@@ -317,7 +331,7 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
     if (path === '/api/challenge' && method === 'POST') {
       const { p } = projectFor(projectId);
       // An outside page never sees a code: the request itself is answered with a prompt, and the code goes to the terminal.
-      if (session.origin) return json(res, 200, { challengeId: '', code: null, inTerminal: true, needsPassphrase: p.approverEnrolled() });
+      if (session.origin || session.surface) return json(res, 200, { challengeId: '', code: null, inTerminal: true, needsPassphrase: p.approverEnrolled() });
       const id = randomBytes(8).toString('hex');
       const value = randomBytes(2).toString('hex');
       challenges.set(id, { code: value, expires: Date.now() + 120_000, session: key });
@@ -334,11 +348,23 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
       }));
     }
     if (path === '/api/projects' && method === 'POST') {
-      const body = z.object({ path: z.string().min(1).max(1000), create: z.boolean().default(false) }).parse(await readBody(req));
+      const body = z.object({ path: z.string().min(1).max(1000), create: z.boolean().default(false), gitInit: z.boolean().default(false) }).parse(await readBody(req));
       if (!isAbsolute(body.path)) throw new HttpError(400, 'Use an absolute path');
+      // A project is a folder of its own: never a drive root, a home folder, or anywhere inside AgentOnTrack's own data.
+      const target = resolve(body.path);
+      const home = resolve(agentontrackHome());
+      if (dirname(target) === target || target === resolve(homedir()) || target === home || target.startsWith(home + sep)) throw new HttpError(400, 'Choose a folder made for this project, not a drive root, your home folder or AgentOnTrack\'s own data folder');
       if (body.create) mkdirSync(body.path, { recursive: true });
       if (!existsSync(body.path) || !statSync(body.path).isDirectory()) throw new HttpError(400, 'That folder does not exist');
+      if (body.gitInit && existsSync(body.path) && !existsSync(join(body.path, '.git'))) {
+        const g = spawnSync('git', ['init', '-q', '-b', 'main'], { cwd: body.path, encoding: 'utf8', timeout: 30_000 });
+        if (g.status !== 0) throw new HttpError(409, `git init failed: ${(g.stderr || g.error?.message || '').slice(0, 200)}`);
+      }
       return json(res, 200, register(body.path));
+    }
+    if (path === '/api/projects/update' && method === 'POST') {
+      const body = z.object({ id: z.string().min(1), name: z.string().min(1).max(120).optional(), archived: z.boolean().optional() }).parse(await readBody(req));
+      try { return json(res, 200, updateRegistered(body.id, { ...(body.name !== undefined ? { name: body.name } : {}), ...(body.archived !== undefined ? { archived: body.archived } : {}) })); } catch (err) { throw new HttpError(404, (err as Error).message); }
     }
     if (path === '/api/agents' && method === 'GET') {
       const { entry } = projectFor(projectId);
@@ -386,9 +412,70 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
         tasks: [...st.tasks.values()].map((t) => ({ id: t.id, title: t.title, closed: t.closed ?? null, criteria: t.criteria, limits: t.limits, createdAt: t.createdAt, evaluation: p.evaluate(t.id) })),
         approvals: [...st.approvals.values()].filter((a) => !a.id.endsWith('_portable')).map((a) => ({ ...a, view: approvalView(a, now) })).reverse(),
         receipts: [...st.receipts].reverse().slice(0, 200), claims: st.claims.slice(-50).reverse(), mismatches: [...st.mismatches].reverse(), rejectedEvents: st.rejectedEvents,
-        integrity: p.verifyIntegrity(), approverEnrolled: p.approverEnrolled(), head: p.store.head()?.seq ?? 0,
+        team: st.team, integrity: p.verifyIntegrity(), approverEnrolled: p.approverEnrolled(), head: p.store.head()?.seq ?? 0,
       });
     }
+    if (path === '/api/revision' && method === 'GET') {
+      const st = s();
+      return json(res, 200, { head: p.store.head()?.seq ?? 0, hash: p.store.head()?.hash ?? null, goalVersion: st.goal?.version ?? null, policyVersion: st.policyVersion, activeTaskId: st.activeTaskId });
+    }
+    if (path === '/api/events' && method === 'GET') {
+      const since = Math.max(0, Number(url.searchParams.get('since') ?? 0) || 0);
+      const limit = Math.min(500, Math.max(1, Number(url.searchParams.get('limit') ?? 200) || 200));
+      const all = p.store.since(since);
+      return json(res, 200, { head: p.store.head()?.seq ?? 0, events: all.slice(0, limit).map(eventView), more: all.length > limit });
+    }
+    if (path === '/api/team' && method === 'GET') return json(res, 200, s().team);
+    if (path === '/api/workflow' && method === 'GET') {
+      const kind = z.enum(['implement-review-verify', 'parallel-then-compare', 'review-only', 'spec-review']).parse(url.searchParams.get('kind') ?? 'implement-review-verify');
+      return json(res, 200, planWorkflow(s().team.members as any, kind));
+    }
+    if (path === '/api/worktrees' && method === 'GET') return json(res, 200, { worktrees: p.worktrees().map((w) => (w.status === 'active' ? p.worktreeStatus(w.id) : w)), conflicts: p.detectConflicts() });
+    if (path === '/api/worktrees/preview' && method === 'GET') return json(res, 200, p.mergePreview(url.searchParams.get('id') ?? ''));
+    if (path === '/api/worktrees' && method === 'POST') {
+      const b = z.object({ taskId: z.string().min(1), agent: z.string().regex(/^[a-z0-9][a-z0-9-]{1,29}$/) }).parse(await readBody(req));
+      try { return json(res, 200, p.createWorktree(b.taskId, b.agent)); } catch (err) { throw new HttpError(409, (err as Error).message); }
+    }
+    if (path === '/api/worktrees/commit' && method === 'POST') {
+      const b = z.object({ id: z.string(), message: z.string().min(1).max(200).default('Work recorded by AgentOnTrack') }).parse(await readBody(req));
+      try { return json(res, 200, p.commitWorktree(b.id, b.message)); } catch (err) { throw new HttpError(409, (err as Error).message); }
+    }
+    if (path === '/api/handoffs' && method === 'GET') return json(res, 200, listHandoffs(p));
+    if (path === '/api/handoffs/markdown' && method === 'GET') {
+      try { return json(res, 200, { markdown: renderHandoffMarkdown(loadHandoff(p, url.searchParams.get('id') ?? '')) }); } catch (err) { throw new HttpError(404, (err as Error).message); }
+    }
+    if (path === '/api/worktrees/diff' && method === 'GET') return json(res, 200, workspace(() => { try { return p.worktreeFileDiff(url.searchParams.get('id') ?? '', url.searchParams.get('path') ?? ''); } catch (err) { if (err instanceof WorkspaceError) throw err; throw new HttpError(404, (err as Error).message); } }));
+    if (path === '/api/handoffs/get' && method === 'GET') {
+      try { const h = loadHandoff(p, url.searchParams.get('id') ?? ''); return json(res, 200, { handoff: h, problems: validateHandoff(p, h) }); } catch (err) { throw new HttpError(404, (err as Error).message); }
+    }
+    if (path === '/api/handoffs' && method === 'POST') {
+      const b = z.object({ from: z.string().regex(/^[a-z0-9][a-z0-9-]{1,29}$/), to: z.string().regex(/^[a-z0-9][a-z0-9-]{1,29}$/).optional(), taskId: z.string().optional(), reason: z.enum(['planned', 'unavailable', 'limit', 'interrupted', 'review']).default('planned'), detail: z.string().max(300).optional(), writeMarkdown: z.boolean().default(false) }).parse(await readBody(req));
+      const limits = b.to ? (() => { const f = runtimeFacts(b.to); return [!f.known ? 'AgentOnTrack has no adapter for this runtime.' : '', f.hostFailMode === 'open' ? 'If its hook cannot run, the host runs the action anyway.' : '', f.known && !f.enforcesEdit ? 'It does not gate file edits.' : ''].filter(Boolean); })() : [];
+      try {
+        const h = buildHandoff(p, { from: b.from, ...(b.to ? { to: b.to } : {}), ...(b.taskId ? { taskId: b.taskId } : {}), reason: { kind: b.reason, ...(b.detail ? { detail: b.detail } : {}) }, limits });
+        const out = saveHandoff(p, h, { writeMarkdown: b.writeMarkdown });
+        return json(res, 200, { id: h.id, contentSha256: h.contentSha256, wroteMarkdown: !!out.markdown, problems: validateHandoff(p, h) });
+      } catch (err) { throw new HttpError(409, (err as Error).message); }
+    }
+    if (path === '/api/handoffs/accept' && method === 'POST') {
+      const b = z.object({ id: z.string(), to: z.string().regex(/^[a-z0-9][a-z0-9-]{1,29}$/) }).parse(await readBody(req));
+      try { return json(res, 200, acceptHandoff2(p, loadHandoff(p, b.id), b.to)); } catch (err) { throw new HttpError(404, (err as Error).message); }
+    }
+    if (path === '/api/failover' && method === 'GET') {
+      const from = url.searchParams.get('from') ?? '';
+      const installed = (url.searchParams.get('installed') ?? ['claude-code', 'codex', 'hermes', ...Object.keys(PROVIDERS)].filter((id) => { const a = (PROVIDERS as any)[id]; return !!detectVersionArgs(id === 'claude-code' ? 'claude' : a?.bin ?? id, a?.versionArgs ?? ['--version']); }).join(',')).split(',').filter(Boolean);
+      return json(res, 200, { from: runtimeFacts(from), options: failoverOptions(from, installed) });
+    }
+    if (path === '/api/files' && method === 'GET') return json(res, 200, workspace(() => listDir(entry.root, url.searchParams.get('dir') ?? '')));
+    if (path === '/api/file' && method === 'GET') return json(res, 200, workspace(() => p.readWorkspaceFile(url.searchParams.get('path') ?? '')));
+    if (path === '/api/file' && method === 'POST') {
+      const b = z.object({ path: z.string().min(1).max(1000), content: z.string(), baseHash: z.string().nullable() }).parse(await readBody(req));
+      return json(res, 200, workspace(() => {
+        if (p.isProtectedPath(b.path.replace(/\\/g, '/'))) throw new WorkspaceError(403, 'This is a protected file: goals, safety and instruction files, and agent hooks change only through the confirmation path. Use Save protected file.');
+        return p.saveWorkspaceFile(b.path, b.content, b.baseHash, 'workspace');
+      }));
+    }
+    if (path === '/api/spec/check' && method === 'GET') return json(res, 200, workspace(() => checkSpec(p.readWorkspaceFile(url.searchParams.get('path') ?? '').content, entry.root)));
     if (path === '/api/analytics' && method === 'GET') return json(res, 200, computeAnalytics(p));
     if (path === '/api/actions' && method === 'GET') {
       return json(res, 200, p.store.byType(['action.requested', 'action.observed', 'effect.mismatch', 'effect.reverted', 'workspace.drift'], 200).reverse().map(eventView));
@@ -427,7 +514,16 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
       '/api/approvals/approve': { schema: z.object({ id: z.string(), ttlMinutes: z.number().positive().max(1440).default(60), uses: z.number().int().positive().max(20).default(1), portable: z.boolean().default(false), challengeId: z.string(), ...HumanFields }), action: (b) => `approve ${b.id}`, run: (b, ctx) => p.human.approve(b.id, { uses: b.uses, ttlMs: b.ttlMinutes * 60_000, portable: b.portable, ctx }) },
       '/api/approvals/deny': { schema: z.object({ id: z.string(), note: z.string().max(500).default(''), challengeId: z.string(), ...HumanFields }), action: (b) => `deny ${b.id}`, run: (b, ctx) => p.human.deny(b.id, b.note, ctx) },
       '/api/approvals/revoke': { schema: z.object({ id: z.string(), challengeId: z.string(), ...HumanFields }), action: (b) => `revoke ${b.id}`, run: (b) => p.human.revoke(b.id) },
-      '/api/goal': { schema: z.object({ goal: z.unknown(), challengeId: z.string(), ...HumanFields }), action: () => 'change the goal', run: (b) => p.human.setGoal(b.goal) },
+      '/api/goal': { schema: z.object({ goal: z.unknown(), expectGoalVersion: z.number().int().nullable().optional(), challengeId: z.string(), ...HumanFields }), action: () => 'change the goal', run: (b) => {
+        // A window that was showing an older goal must not replace a newer one.
+        if (b.expectGoalVersion !== undefined && (s().goal?.version ?? null) !== b.expectGoalVersion) throw new Error(`The goal is at version ${s().goal?.version ?? 'none'}, not ${b.expectGoalVersion}. Reload and review it first.`);
+        return p.human.setGoal(b.goal);
+      } },
+      '/api/team': { schema: z.object({ members: z.array(z.unknown()), expectVersion: z.number().int().optional(), challengeId: z.string(), ...HumanFields }), action: () => 'set the agent team', run: (b) => { p.human.setTeam(b.members, b.expectVersion); return s().team; } },
+      '/api/worktrees/merge': { schema: z.object({ id: z.string(), challengeId: z.string(), ...HumanFields }), action: (b) => `merge worktree ${b.id} into the project`, run: (b) => p.mergeWorktree(b.id) },
+      '/api/worktrees/discard': { schema: z.object({ id: z.string(), challengeId: z.string(), ...HumanFields }), action: (b) => `discard worktree ${b.id}`, run: (b) => { p.discardWorktree(b.id); return { discarded: true }; } },
+      '/api/handoffs/accept-stale': { schema: z.object({ id: z.string(), to: z.string().regex(/^[a-z0-9][a-z0-9-]{1,29}$/), challengeId: z.string(), ...HumanFields }), action: (b) => `accept handoff ${b.id} for ${b.to}, knowing it is stale`, run: (b) => acceptHandoff2(p, loadHandoff(p, b.id), b.to, { acknowledge: true }) },
+      '/api/file/protected': { schema: z.object({ path: z.string().min(1).max(1000), content: z.string(), baseHash: z.string().nullable(), challengeId: z.string(), ...HumanFields }), action: (b) => `save protected file ${b.path}`, run: (b) => workspace(() => p.saveWorkspaceFile(b.path, b.content, b.baseHash, 'workspace-protected')) },
       '/api/goal/close': { schema: z.object({ outcome: z.enum(['completed', 'abandoned']), challengeId: z.string(), ...HumanFields }), action: () => 'close the goal', run: (b) => p.human.closeGoal(b.outcome) },
       '/api/goal/reopen': { schema: z.object({ challengeId: z.string(), ...HumanFields }), action: () => 'reopen the goal', run: () => p.human.reopenGoal() },
       '/api/proposals/accept': { schema: z.object({ id: z.string(), challengeId: z.string(), ...HumanFields }), action: (b) => `accept ${b.id}`, run: (b) => p.human.acceptProposal(b.id) },

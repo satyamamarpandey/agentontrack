@@ -4,7 +4,7 @@
 
 A free, open-source, local-first control layer for AI coding agents. It uses your agent's own hooks and your own login, with no account and no upload.
 
-> **Status: 1.0.0-rc.1, not yet published.** Website: https://pandeysatyam.com/agentontrack/. Best tested on Claude Code. Codex and Hermes have been run only with small local or scripted models. See [compatibility](docs/compatibility.md). All testing is by the project itself.
+> **Status: 1.0.0-rc.3, a release candidate, published.** Website: https://pandeysatyam.com/agentontrack/. Best tested on Claude Code, the only agent the product can start. Codex and Hermes have been run only with small local or scripted models, and Cursor, Devin, Kiro and Antigravity have not run on the real programs. See [compatibility](docs/compatibility.md). All testing is by the project itself, and nobody independent has evaluated it.
 
 ## What it does
 
@@ -22,7 +22,7 @@ curl -fsSL https://pandeysatyam.com/agentontrack/install.sh | sh      # Linux, m
 irm https://pandeysatyam.com/agentontrack/install.ps1 | iex           # Windows PowerShell
 ```
 
-Nothing else is needed, and it does not need administrator rights. These work once a release is published. [Install guide and troubleshooting](docs/install.md).
+Nothing else is needed, and it does not need administrator rights. VS Code: `code --install-extension agentontrack-vscode.vsix`, from the release files. [Install guide and troubleshooting](docs/install.md).
 
 ## Quick start
 

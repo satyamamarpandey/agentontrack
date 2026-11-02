@@ -24,7 +24,7 @@ Explorer, editor with preview and diff, prompt composer, live output, team panel
 | axe on the Workspace: editor, preview, every right and bottom panel, tasks, composer, palette and the confirmation dialog, in both themes | PASS (found and fixed three real defects: tablist structure, feed focus, gutter contrast) |
 | Real Claude Code through the new composer: project created in the UI, agent connected, task, file written, push held, denied, approved, real push, cancel, stale file, second window, unauthorized caller, reconnect, Verify, receipt, VERIFIED, dashboard | PASS (local, 4 runs, about $0.011 list price), kept in the private evidence record |
 | Code diff of a change made by the composer's agent | PARTIAL: diffs are shown for worktree changes. Composer runs edit the project folder, not a worktree, so no diff is shown for them |
-| Same chain against the published HTTPS site | NOT_TESTED until the site is deployed from this commit |
+| Same chain against the published HTTPS site (https://pandeysatyam.com/agentontrack), paired to a companion on this machine, through the new composer | PASS (3 real Claude Code runs, about $0.011 list price; push held, denied, approved, VERIFIED, reconnect) |
 
 ## Phase 3: multi-agent execution
 
@@ -36,7 +36,7 @@ Isolated worktrees per task or agent, ownership, overlap detection, merge previe
 
 ## Phase 5: editors
 
-VS Code extension (VSIX, installed into a real VS Code extension host), then Cursor, then Antigravity and others, by what each documents. PARTIAL: VSIX builds and its client passes 9 tests; a real Claude Code run through the extension client PASSED locally (write, push held, approved with a terminal code, pushed, verified). The real VS Code extension-host test is written but NOT_TESTED until the CI job runs. Cursor and Antigravity are NOT_TESTED. VS Code and Cursor need an editor on a runner, which is feasible on GitHub Actions. Antigravity may be BLOCKED by its login.
+VS Code extension (VSIX, installed into a real VS Code extension host), then Cursor, then Antigravity and others, by what each documents. PARTIAL: VSIX builds and its client passes 9 tests. The real VS Code extension host (official test runner, on a GitHub runner) PASSED from source, from the installed VSIX, and in an untrusted workspace, where it confirms nothing; a real Claude Code run through the extension client PASSED locally (write, push held, approved with a terminal code, pushed, verified). The real VS Code extension-host test is written but NOT_TESTED until the CI job runs. Cursor and Antigravity are NOT_TESTED. VS Code and Cursor need an editor on a runner, which is feasible on GitHub Actions. Antigravity may be BLOCKED by its login.
 
 ## Phases 6 to 9
 

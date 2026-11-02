@@ -48,7 +48,7 @@ Clean install, upgrade, rollback and uninstall: Windows x64, Linux x64 and arm64
 
 | Editor | Status |
 |---|---|
-| VS Code | Extension client: PASS (unit). Real Claude Code run through the extension client: PASS (local). Real VS Code extension host, from source, from the installed VSIX, and in an untrusted workspace: see the CI record for the release. |
+| VS Code | Extension client: PASS (unit). Real Claude Code run through the extension client: PASS (local). Real VS Code extension host on a GitHub runner: PASS from source (activates, 20 commands, 5 views, reads the project, approves with a terminal code, makes a handoff), PASS from the installed VSIX (the installed copy cannot be driven by a test input box, so only reading, a refused wrong code and disconnect are checked there), and PASS in an untrusted workspace (it reads, asks for no code and decides nothing). Windows and macOS hosts: NOT TESTED. |
 | Cursor | NOT TESTED. It installs VS Code extensions, so the VSIX may work. No run on the real editor. |
 | Antigravity | NOT TESTED. Documented plugin interfaces were not exercised. |
 | JetBrains, Zed, others | Not supported. |

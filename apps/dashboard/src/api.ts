@@ -148,3 +148,22 @@ export async function downloadExport(): Promise<void> {
   a.click();
   URL.revokeObjectURL(url);
 }
+
+export interface Probe { state: 'found' | 'none' | 'blocked'; paired?: boolean }
+
+/**
+ * Looks for a companion on this computer, from a page on the public site. The browser may ask the person for permission first, and
+ * that is deliberate: this never bypasses it. It reads only the health answer, which holds no project data.
+ */
+export async function probeCompanion(port: string): Promise<Probe> {
+  if (await localNetworkPermission() === 'denied') return { state: 'blocked' };
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 4000);
+  try {
+    const r = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: ctl.signal, headers: auth() });
+    const h = await r.json() as { ok?: boolean; paired?: boolean };
+    return h.ok ? { state: 'found', paired: !!h.paired } : { state: 'none' };
+  } catch {
+    return { state: 'none' };
+  } finally { clearTimeout(timer); }
+}

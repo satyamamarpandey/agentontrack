@@ -205,6 +205,12 @@ describe('from a website the user allowed', () => {
     const pr = await (await fetch(`${base}/api/pair`, { method: 'POST', headers: { origin: SITE, 'content-type': 'application/json' }, body: JSON.stringify({ code: d.newPairingCode() }) })).json();
     const call = (path: string, body: object) => fetch(`${base}${path}`, { method: 'POST', headers: { origin: SITE, authorization: `Bearer ${pr.token}`, 'x-agentontrack-csrf': pr.csrf, 'content-type': 'application/json' }, body: JSON.stringify(body) });
     const get = (path: string) => fetch(`${base}${path}`, { headers: { origin: SITE, authorization: `Bearer ${pr.token}` } });
+    // Reading source from an outside page is allowed only after the person allows it in the terminal.
+    expect((await get('/api/file?path=src/a.ts')).status).toBe(403);
+    const g1 = await call('/api/files/grant', { minutes: 5 });
+    expect(g1.status).toBe(428);
+    const { challengeId: gid } = await g1.json();
+    expect((await call('/api/files/grant', { minutes: 5, challengeId: gid, confirm: codes.at(-1)!.code })).status).toBe(200);
     const f = await (await get('/api/file?path=src/a.ts')).json();
     const long = `// ${'x'.repeat(20_000)}\n`;
     const first = await call('/api/file', { path: 'src/a.ts', content: long, baseHash: f.hash });
@@ -218,6 +224,55 @@ describe('from a website the user allowed', () => {
     const again = await (await call('/api/file', { path: 'src/a.ts', content: long, baseHash: f.hash })).json();
     expect((await call('/api/file', { path: 'src/a.ts', content: long, baseHash: f.hash, challengeId: again.challengeId, confirm: codes.at(-1)!.code })).status).toBe(200);
     expect(readFileSync(join(root, 'src', 'a.ts'), 'utf8')).toBe(long);
+    await d.close();
+  });
+
+  it('file reads from an outside page need a short, per-project terminal grant, which can be withdrawn and which a new session does not inherit', async () => {
+    const codes: { code: string; action: string }[] = [];
+    const d = await startCompanion({ root, uiDir: join(dir, 'ui'), allowedOrigins: [SITE], onTerminalChallenge: (code, action) => codes.push({ code, action }) });
+    const base = d.url.slice(0, -1);
+    const pair = async () => (await fetch(`${base}/api/pair`, { method: 'POST', headers: { origin: SITE, 'content-type': 'application/json' }, body: JSON.stringify({ code: d.newPairingCode() }) })).json();
+    const a = await pair();
+    const post = (s: any, path: string, body: object) => fetch(`${base}${path}`, { method: 'POST', headers: { origin: SITE, authorization: `Bearer ${s.token}`, 'x-agentontrack-csrf': s.csrf, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const get = (s: any, path: string) => fetch(`${base}${path}`, { headers: { origin: SITE, authorization: `Bearer ${s.token}` } });
+    // Every route that returns source is refused, and the answer says what to do.
+    for (const path of ['/api/files', '/api/file?path=src/a.ts', '/api/spec/check?path=src/a.ts']) {
+      const r = await get(a, path);
+      expect(r.status, path).toBe(403);
+      expect((await r.json()).needsGrant, path).toBe(true);
+    }
+    // State is still readable: only source is held back.
+    expect((await get(a, '/api/state')).status).toBe(200);
+    expect(await (await get(a, '/api/files/status')).json()).toMatchObject({ needed: true, granted: false });
+    // The grant shows what it is for in the terminal, and works once the real code is typed.
+    const first = await post(a, '/api/files/grant', { minutes: 10 });
+    expect(first.status).toBe(428);
+    expect(codes.at(-1)!.action).toMatch(/files\/grant/);
+    const { challengeId } = await first.json();
+    expect((await post(a, '/api/files/grant', { minutes: 10, challengeId, confirm: 'guess' })).status).toBe(403);
+    const again = await (await post(a, '/api/files/grant', { minutes: 10 })).json();
+    expect((await post(a, '/api/files/grant', { minutes: 10, challengeId: again.challengeId, confirm: codes.at(-1)!.code })).status).toBe(200);
+    expect((await get(a, '/api/files')).status).toBe(200);
+    expect(await (await get(a, '/api/files/status')).json()).toMatchObject({ granted: true });
+    // Another session does not inherit it.
+    const b = await pair();
+    expect((await get(b, '/api/files')).status).toBe(403);
+    // Withdrawing needs no code, and takes effect at once.
+    expect((await post(a, '/api/files/revoke', {})).status).toBe(200);
+    expect((await get(a, '/api/files')).status).toBe(403);
+    // A grant is capped, so it cannot be made permanent.
+    const big = await (await post(a, '/api/files/grant', { minutes: 100000 })).json();
+    expect((await post(a, '/api/files/grant', { minutes: 100000, challengeId: big.challengeId, confirm: codes.at(-1)!.code })).status).toBe(400);
+    expect((await get(a, '/api/files')).status).toBe(403);
+    await d.close();
+  });
+
+  it('the local address and an editor are not held back by the grant', async () => {
+    const d = await startCompanion({ root, uiDir: join(dir, 'ui') });
+    const base = d.url.slice(0, -1);
+    const r = await fetch(`${base}/api/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: d.newPairingCode() }) });
+    const cookie = r.headers.get('set-cookie')!.split(';')[0]!;
+    expect((await fetch(`${base}/api/files`, { headers: { cookie } })).status).toBe(200);
     await d.close();
   });
 });

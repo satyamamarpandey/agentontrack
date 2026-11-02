@@ -67,15 +67,30 @@ test('deployed site, workspace composer: pair, connect, goal, task, denied and a
     await page.context().grantPermissions(['local-network-access'], { origin: new URL(SITE).origin });
     await page.goto(`${SITE}/dashboard/`);
     if (!process.env.SITE_URL) expect(new URL(page.url()).protocol).toBe('https:');
-    await page.getByLabel('Companion port').fill(String(PORT));
+    // A new visitor: a welcome, with no port and no code in sight. They continue on this computer, and the page finds the helper by itself.
+    await expect(page.getByRole('heading', { name: 'Keep your AI coding agents on track' })).toBeVisible();
+    await expect(page.getByLabel('Pairing code')).toHaveCount(0);
+    await page.getByTestId('continue-local').click();
+    await expect(page.getByTestId('probe-status')).toContainText('Found AgentOnTrack on this computer', { timeout: 30_000 });
     await page.getByLabel('Pairing code').fill('WRONGCOD');
     await c.newPairingCode();
     await page.getByRole('button', { name: 'Pair', exact: true }).click();
     await expect(page.getByRole('alert')).toContainText('Wrong pairing code');
     await page.getByLabel('Pairing code').fill(await c.newPairingCode());
     await page.getByRole('button', { name: 'Pair', exact: true }).click();
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Projects');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('My projects');
     await expect(page.getByTestId('demo-banner')).toHaveCount(0);
+    // The project already registered on this computer is there with no further step.
+    await expect(page.getByTestId('project-card')).toHaveCount(1);
+    await expect(page.getByTestId('project-card').first()).toContainText('On this computer');
+    // The agent catalog lists every platform, and says what is installed here without a click.
+    await go(page, 'Agents');
+    await expect(page.getByTestId('agent-claude-code').getByTestId('agent-state')).toBeVisible();
+    await expect(page.getByTestId('agent-antigravity')).toContainText('Not supported');
+    await expect(page.getByTestId('agent-cursor').getByTestId('agent-support')).toHaveText('Not tested');
+    await go(page, 'Projects');
+    await page.getByTestId('project-card').first().getByRole('button').first().click();
+    await page.getByTestId('open-workspace').click();
 
     await go(page, 'Workspace');
     await expect(page.getByTestId('workspace')).toBeVisible();
@@ -137,7 +152,7 @@ test('deployed site, workspace composer: pair, connect, goal, task, denied and a
     await expect(page.getByTestId('demo-banner')).toHaveCount(0);
     await go(page, 'Settings');
     await page.getByRole('button', { name: 'Disconnect this browser' }).click();
-    await expect(page.getByRole('heading', { name: 'Pair this browser' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Keep your AI coding agents on track' })).toBeVisible();
 
     const p = new Project(root);
     const events = p.store.all();

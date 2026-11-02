@@ -152,9 +152,11 @@ async function main(): Promise<void> {
     case 'dashboard': {
       requireTty('agentontrack dashboard');
       const { startCompanion } = await import('@agentontrack/companion');
-      const allowSite = has('allow-public-site');
+      const extraOrigin = opt('allow-origin');
+      if (extraOrigin && !/^https:\/\/[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:\d+)?$/i.test(extraOrigin)) { print('--allow-origin takes one https origin such as https://agentontrack.example.com, with no path and no wildcard.'); process.exitCode = 2; return; }
+      const allowSite = has('allow-public-site') || !!extraOrigin;
       const packaged = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'benchmarks');
-      const c = await startCompanion({ root, port: Number(opt('port') ?? (allowSite ? 47631 : 0)), selfCommand: selfCommand(), ...(existsSync(packaged) ? { benchmarksDir: packaged } : {}), onTerminalChallenge: (code: string, action: string) => print(`\nAn outside page or an editor asks to: ${action}\nIf that was you, type this code there: ${code}\n`), ...(allowSite ? { allowedOrigins: PUBLIC_SITE_ORIGINS } : {}) });
+      const c = await startCompanion({ root, port: Number(opt('port') ?? (allowSite ? 47631 : 0)), selfCommand: selfCommand(), ...(existsSync(packaged) ? { benchmarksDir: packaged } : {}), onTerminalChallenge: (code: string, action: string) => print(`\nAn outside page or an editor asks to: ${action}\nIf that was you, type this code there: ${code}\n`), ...(allowSite ? { allowedOrigins: [...(has('allow-public-site') ? PUBLIC_SITE_ORIGINS : []), ...(extraOrigin ? [extraOrigin] : [])] } : {}) });
       if (allowSite) print('The public AgentOnTrack site may now connect, but only with the pairing code below. Anything it changes also needs a code shown here, so a compromised page cannot act on its own. Without --allow-public-site, the local address below works with no outside origin at all.');
       print(`AgentOnTrack dashboard: ${c.url}\nPairing code (one use, 5 minutes): ${c.newPairingCode()}\nPress Enter for a new code. Press Ctrl+C to stop.`);
       createInterface({ input: process.stdin }).on('line', () => print(`New pairing code: ${c.newPairingCode()}`));

@@ -6,7 +6,7 @@ import { basename, dirname, join } from 'node:path';
 import { uninstallHooks } from '@agentontrack/adapters';
 import { agentontrackHome, loadRegistry } from '@agentontrack/core';
 
-export const VERSION = '1.0.0-rc.3';
+export const VERSION = '1.0.0-rc.4';
 const REPO = 'satyamamarpandey/agentontrack';
 const win = process.platform === 'win32';
 const appDir = () => join(agentontrackHome(), 'app');

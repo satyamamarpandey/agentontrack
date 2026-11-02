@@ -145,6 +145,7 @@ export function Workspace({ tick, projectName, open, setCommands }: { tick: numb
 
   return (
     <div className={cls} style={style} data-view={view} data-testid="workspace">
+      <h1 className="sr-only">Workspace for {projectName}</h1>
       <aside className="ws-left" aria-label="Files and tasks">
         <div className="pane-head"><PaneTabs label="Sidebar" tabs={['Files', 'Tasks'] as const} tab={layout.leftTab} onTab={(t) => setLayout({ leftTab: t })} /></div>
         <div className="pane-body" tabIndex={0} role="region" aria-label="Sidebar content">{layout.leftTab === 'Files' ? <FileTree onOpen={(p) => void openFile(p)} current={tab.kind === 'file' ? tab.path : null} onLoaded={setFiles} /> : <TasksPane state={state} reload={st.reload} />}</div>
@@ -174,7 +175,7 @@ export function Workspace({ tick, projectName, open, setCommands }: { tick: numb
         </div>
         {err ? <div className="alert bad" role="alert">{err} <button className="link" onClick={() => setErr('')}>Dismiss</button></div> : null}
         <div role="tabpanel" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-          {tab.kind === 'agent' ? <AgentTab agents={ag.data} tick={tick} /> : null}
+          {tab.kind === 'agent' ? <AgentTab tick={tick} /> : null}
           {tab.kind === 'diff' ? <DiffView wt={tab.wt} path={tab.path} /> : null}
           {tab.kind === 'file' ? (bufs[tab.path] ? <Editor key={tab.path} buf={bufs[tab.path]!}
             onChange={(content) => setBufs((b) => ({ ...b, [tab.path]: { ...b[tab.path]!, content } }))}

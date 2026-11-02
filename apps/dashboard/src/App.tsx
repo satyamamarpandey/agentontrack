@@ -1,49 +1,31 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { PROJECT_TABS, ProjectDetail, ProjectsHome, type ProjectRoute, type ProjectTab } from './projects';
 import { EventDrawer, TerminalPrompt, useHuman } from './human';
-import { Icon, type IconName } from './icons';
+import { AgentCatalog } from './agents';
+import { Entry, Offline } from './entry';
+import { Icon, Logo, type IconName } from './icons';
 import { Palette, type Command } from './palette';
+import { Results } from './results';
+import { TelemetryCard } from './telemetry';
 import { Badge, Empty, Loading, Page, useLoad } from './ui';
 import { Workspace } from './workspace';
-import { currentPort, currentProject, downloadExport, enterDemo, forgetSession, get, isDemo, leaveDemo, localAddress, onPublicSite, pair, post, resumeSession, setPort, setProject, subscribe } from './api';
+import { currentProject, downloadExport, forgetSession, get, isDemo, leaveDemo, post, resumeSession, setProject, subscribe } from './api';
 import { ChartFrame, fmt, fmtMs, HBars, Provenance, StackedBars, Stat } from './charts';
 
-const SCREENS = ['Projects', 'Workspace', 'Overview', 'Goals', 'Agents', 'Usage', 'Comparisons', 'Evidence', 'Safety', 'Approvals', 'Evaluations', 'Environment', 'Feedback', 'Settings'] as const;
-const NAV: { group: string; items: { s: (typeof SCREENS)[number]; icon: IconName }[] }[] = [
-  { group: 'Work', items: [{ s: 'Projects', icon: 'folder' }, { s: 'Workspace', icon: 'terminal' }, { s: 'Goals', icon: 'target' }, { s: 'Agents', icon: 'bot' }] },
-  { group: 'Insight', items: [{ s: 'Overview', icon: 'home' }, { s: 'Usage', icon: 'chart' }, { s: 'Comparisons', icon: 'scale' }, { s: 'Evidence', icon: 'receipt' }, { s: 'Evaluations', icon: 'flask' }, { s: 'Environment', icon: 'leaf' }] },
-  { group: 'Control', items: [{ s: 'Safety', icon: 'shield' }, { s: 'Approvals', icon: 'checkCircle' }] },
-  { group: 'Account', items: [{ s: 'Feedback', icon: 'message' }, { s: 'Settings', icon: 'settings' }] },
+const SCREENS = ['Projects', 'Goals', 'Workspace', 'Agents', 'Approvals', 'Safety', 'Evidence', 'Overview', 'Usage', 'Results', 'Comparisons', 'Evaluations', 'Environment', 'Settings', 'Feedback'] as const;
+/** Six places to go. The detail that most people never need sits one tab inside, not in the main list. */
+const SECTIONS: { name: string; icon: IconName; leaves: (typeof SCREENS)[number][] }[] = [
+  { name: 'Projects', icon: 'folder', leaves: ['Projects', 'Goals'] },
+  { name: 'Workspace', icon: 'terminal', leaves: ['Workspace'] },
+  { name: 'Agents', icon: 'bot', leaves: ['Agents'] },
+  { name: 'Activity', icon: 'checkCircle', leaves: ['Approvals', 'Safety', 'Evidence'] },
+  { name: 'Analytics', icon: 'chart', leaves: ['Overview', 'Usage', 'Results', 'Comparisons', 'Evaluations', 'Environment'] },
+  { name: 'Settings', icon: 'settings', leaves: ['Settings', 'Feedback'] },
 ];
+const LABEL: Record<(typeof SCREENS)[number], string> = { Projects: 'My projects', Goals: 'Goals and tasks', Workspace: 'Workspace', Agents: 'Agents', Approvals: 'Approvals', Safety: 'Safety', Evidence: 'Records', Overview: 'Overview', Usage: 'Usage', Results: 'Results and evidence', Comparisons: 'Comparisons', Evaluations: 'Evaluations', Environment: 'Environment', Settings: 'Settings', Feedback: 'Feedback' };
+const sectionOf = (screen: (typeof SCREENS)[number]) => SECTIONS.find((x) => x.leaves.includes(screen))!;
 type Screen = (typeof SCREENS)[number];
 type Reload = () => void;
-
-function Pairing({ onPaired, notice }: { onPaired: () => void; notice?: string }) {
-  const [code, setCode] = useState('');
-  const [port, setPortValue] = useState(currentPort());
-  const [error, setError] = useState('');
-  return (
-    <main className="pair">
-      <form className="card pair-card" onSubmit={async (e) => { e.preventDefault(); setError(''); try { if (onPublicSite()) setPort(port); await pair(code); onPaired(); } catch (err) { setError((err as Error).message); } }}>
-        <div className="brand"><Logo /> AgentOnTrack</div>
-        <h1>Pair this browser</h1>
-        <ol className="steps small"><li>In your project, run <code>agentontrack dashboard</code>.</li><li>Type the pairing code it prints below.</li><li>Pick or create a project, then open its workspace.</li></ol>
-        <p className="muted">Enter the code shown in the terminal running <code>agentontrack dashboard{onPublicSite() ? ' --allow-public-site' : ''}</code>. It works once, and expires after 5 minutes.</p>
-        {notice && !error ? <div className="alert warn" role="status" data-testid="pair-notice">{notice}</div> : null}
-        {error ? <div className="alert bad" role="alert">{error}</div> : null}
-        <label>Pairing code<input value={code} onChange={(e) => setCode(e.target.value)} autoFocus autoComplete="off" spellCheck={false} name="code" /></label>
-        {onPublicSite() ? <label>Companion port<input value={port} onChange={(e) => setPortValue(e.target.value)} name="port" inputMode="numeric" /></label> : null}
-        <button className="btn primary" type="submit">Pair</button>
-        {onPublicSite() ? <>
-          <button className="btn" type="button" onClick={() => { enterDemo(); onPaired(); }}>View the demo instead</button>
-          <p className="muted small">This page talks only to the companion on your own machine. Your data does not go to this website. No account is needed. Your browser may ask to allow local network access, or block this connection outright, as Safari does. The local address the companion prints, such as <code>{localAddress()}</code>, always works.</p>
-        </> : <p className="muted small">Everything here stays on this machine. No account is needed.</p>}
-      </form>
-    </main>
-  );
-}
-
-const Logo = () => <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M4 12h16M4 18h7" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" /><circle cx="19" cy="6" r="2" fill="var(--accent)" /><circle cx="15" cy="18" r="2" fill="var(--accent)" /></svg>;
 
 function Overview({ tick, go }: { tick: number; go: (s: Screen) => void }) {
   const st = useLoad(() => get('/api/state'), [tick]);
@@ -170,116 +152,6 @@ function Goals({ tick }: { tick: number }) {
         <h2>Goal history</h2>
         {data.goals.length === 0 ? <Empty>None.</Empty> : <ol className="list">{[...data.goals].reverse().map((g: any) => <li key={g.version}><b>v{g.version}</b> {g.statement} <span className="muted small">{new Date(g.ts).toLocaleString()}{g.fromProposal ? ' · from a proposal' : ''}</span></li>)}</ol>}
       </section>
-    </Page>
-  );
-}
-
-const HOST_FAIL_MODE: Record<string, string> = {
-  closed: 'The action is blocked. Observed on the real host.',
-  open: 'The action runs anyway. Observed on the real host. Start it with agentontrack run, which tests the hook first.',
-};
-const CONTAINMENT: Record<string, string> = {
-  none: 'Nothing. A script\'s network activity is not stopped. The strict profile holds scripts for approval instead.',
-  'claude-sandbox-available': 'Claude Code\'s OS sandbox, if you connect with agentontrack install claude-code --sandbox. Verified on macOS. On Linux it could not start on the test runner, so it is not verified there.',
-  'codex-sandbox': 'Codex\'s own sandbox, when started with agentontrack run codex. Network stays off unless you allow it.',
-};
-
-/** Other platforms, from the same adapter list as the command line. Connecting one is a terminal step, so its files can be reviewed. */
-function OtherPlatforms() {
-  const { data, error } = useLoad(() => get<any[]>('/api/providers'), []);
-  if (!data) return error ? <p className="muted small">Other platforms: Unavailable</p> : null;
-  return (
-    <section className="card stack" data-testid="other-platforms">
-      <h2>Other platforms</h2>
-      <div className="table-wrap" tabIndex={0}><table>
-        <thead><tr><th scope="col">Platform</th><th scope="col">On this machine</th><th scope="col">Hooks in this project</th><th scope="col">If its hook crashes</th><th scope="col">To connect</th></tr></thead>
-        <tbody>{data.map((p) => <tr key={p.id} data-testid={`platform-${p.id}`}><th scope="row">{p.name}</th><td>{p.version ?? 'Not found'}</td><td>{p.hooksInstalled ? 'Yes' : 'No'}</td><td>{p.failure.crash}</td><td><code>{p.connect}</code></td></tr>)}</tbody>
-      </table></div>
-      <p className="muted small">See the integrations page for what has really been tested on each.</p>
-    </section>
-  );
-}
-
-/** Every agent AgentOnTrack can govern, in one list: the ones it sets up itself, and every other adapter. */
-function RosterCard({ core }: { core: any[] }) {
-  const { data } = useLoad(() => get<any[]>('/api/providers'), []);
-  const all = [...core.map((a) => ({ id: a.id, name: a.name, installed: a.installed, connected: a.hooksInstalled })), ...(data ?? []).filter((p) => !core.some((a) => a.id === p.id)).map((p) => ({ id: p.id, name: p.name, installed: !!p.version, connected: p.hooksInstalled }))];
-  return (
-    <section className="card stack" data-testid="roster">
-      <h2>One system, every agent</h2>
-      <p className="muted small">{all.length} agents share one goal, one set of approvals and one evidence record. Each keeps its own login and model, and AgentOnTrack never asks for provider credentials. What each one enforces differs: see its card or the table below.</p>
-      <ul className="agents-mini plain">{all.map((a) => <li key={a.id}><b>{a.name}</b> <span className={`badge ${a.connected ? 'good' : a.installed ? '' : 'muted'}`}>{a.connected ? 'connected' : a.installed ? 'found' : 'not installed'}</span></li>)}</ul>
-    </section>
-  );
-}
-
-function Agents({ tick }: { tick: number }) {
-  const { data, error, reload } = useLoad(() => get('/api/agents'), []);
-  const runs = useLoad(() => get('/api/runs'), [tick]);
-  const [prompt, setPrompt] = useState('');
-  const [model, setModel] = useState('haiku');
-  const [budget, setBudget] = useState(0.25);
-  const [msg, setMsg] = useState('');
-  const [baseUrl, setBaseUrl] = useState('http://127.0.0.1:11434');
-  const [probe, setProbe] = useState<any>(null);
-  useEffect(() => { const t = setInterval(runs.reload, 1500); return () => clearInterval(t); }, [runs.reload]);
-  if (!data) return <Loading error={error} />;
-  const claude = data.find((a: any) => a.id === 'claude-code');
-  return (
-    <Page title="Agents" intro="Status comes from checks run now on this machine. AgentOnTrack never asks for or stores provider logins.">
-      <RosterCard core={data} />
-      <section className="grid three">{data.map((a: any) => (
-        <article className="card stack" key={a.id} data-testid={`agent-${a.id}`}>
-          <h2>{a.name}</h2>
-          <dl className="kv">
-            <dt>Installed</dt><dd>{a.installed ? a.version : 'No'}</dd>
-            <dt>Logged in</dt><dd>{a.authenticated === null ? 'Not checked' : a.authenticated ? `Yes (${a.method})` : 'No'}</dd>
-            <dt>Hooks</dt><dd>{a.hooksInstalled ? 'Installed' : 'Not installed'}</dd>
-            <dt>If its hook cannot run</dt><dd data-testid="host-fail-mode">{HOST_FAIL_MODE[a.coverage.hostFailMode] ?? 'Unavailable'}</dd>
-            <dt>What contains its scripts</dt><dd data-testid="containment">{CONTAINMENT[a.coverage.containment] ?? 'Unavailable'}</dd>
-            <dt>Evidence</dt><dd>{{ 'live-tested': 'Live-tested with its normal login', 'real-host-scripted-model': 'The real program with a scripted model, not a live model', 'live-local-model': 'Live-tested with a small local model only', 'hook-fired-live': 'Hook fired live; gate not yet exercised', 'documentation-only': 'Documentation only: not run' }[a.coverage.evidence as string]}</dd>
-          </dl>
-          {a.id !== 'hermes' ? <div className="row">
-            {a.hooksInstalled ? <button className="btn" onClick={async () => { await post(`/api/agents/${a.id}/disconnect`); reload(); }}>Disconnect</button>
-              : <button className="btn primary" disabled={!a.installed} onClick={async () => { await post(`/api/agents/${a.id}/connect`); reload(); }}>Connect</button>}
-          </div> : <p className="muted small">Hermes hooks live in your own config. Run <code>agentontrack install hermes</code> for the snippet.</p>}
-          {!a.installed ? <p className="badge muted">{a.liveStatus}</p> : null}
-          <details><summary>Enforcement coverage</summary>
-            <h4>Enforced before running</h4><ul className="small">{a.coverage.enforced.map((x: string) => <li key={x}>{x}</li>)}</ul>
-            <h4>Only observed afterwards</h4><ul className="small">{a.coverage.observedOnly.map((x: string) => <li key={x}>{x}</li>)}</ul>
-            <h4>Not covered</h4><ul className="small">{a.coverage.unsupported.map((x: string) => <li key={x}>{x}</li>)}</ul>
-            {a.coverage.notes.map((n: string) => <p className="muted small" key={n}>{n}</p>)}
-          </details>
-        </article>
-      ))}</section>
-      <form className="card stack" onSubmit={async (e) => { e.preventDefault(); setMsg(''); try { await post('/api/runs', { runtime: 'claude-code', prompt, model, maxBudgetUsd: budget }); setPrompt(''); runs.reload(); } catch (err) { setMsg((err as Error).message); } }}>
-        <h2>Start a run on Claude Code</h2>
-        <p className="muted small">This starts your real, locally logged-in Claude Code and uses your usage. Spending is capped per run.</p>
-        {msg ? <div className="alert bad" role="alert">{msg}</div> : null}
-        <label>Prompt<textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={3} required name="prompt" /></label>
-        <div className="row wrap">
-          <label>Model<input value={model} onChange={(e) => setModel(e.target.value)} name="model" /></label>
-          <label>Budget cap (USD)<input type="number" min={0.01} max={5} step={0.01} value={budget} onChange={(e) => setBudget(Number(e.target.value))} name="budget" /></label>
-          <button className="btn primary end-self" type="submit" disabled={!claude?.hooksInstalled}>Start run</button>
-        </div>
-        {!claude?.hooksInstalled ? <p className="muted small">Connect Claude Code first.</p> : null}
-      </form>
-      <section className="card">
-        <h2>Runs</h2>
-        {runs.data?.length ? <ul className="list">{[...runs.data].reverse().map((r: any) => (
-          <li key={r.id} data-testid="run" data-status={r.status}>
-            <div className="row"><b className="mono grow">{r.id}</b> <span className="badge">{r.status}</span>{r.status === 'running' ? <button className="btn small" onClick={async () => { await post(`/api/runs/${r.id}/stop`); runs.reload(); }}>Stop</button> : null}</div>
-            <pre tabIndex={0} className="code small">{r.events.join('\n') || 'Waiting for output…'}</pre>
-          </li>
-        ))}</ul> : <Empty>No runs since the companion started.</Empty>}
-      </section>
-      <form className="card stack" onSubmit={async (e) => { e.preventDefault(); setProbe(await post('/api/probe', { baseUrl }).catch((err) => ({ notes: [err.message] }))); }}>
-        <h2>Local model endpoint</h2>
-        <p className="muted small">Tests what an OpenAI-compatible endpoint actually does. A model server is not an agent: it has no tools, approvals or session state on its own.</p>
-        <div className="row wrap"><label className="grow">Base URL<input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} name="baseUrl" /></label><button className="btn end-self" type="submit">Probe</button></div>
-        {probe ? <pre tabIndex={0} className="code small" data-testid="probe">{JSON.stringify(probe, null, 2)}</pre> : null}
-      </form>
-      <OtherPlatforms />
     </Page>
   );
 }
@@ -542,11 +414,11 @@ function SettingsPage({ theme, setTheme, onUnpair, reloadShell }: { theme: strin
         <h2>Appearance</h2>
         <div className="row" role="group" aria-label="Theme">{['dark', 'light'].map((t) => <button key={t} className={`chip ${theme === t ? 'on' : ''}`} aria-pressed={theme === t} onClick={() => setTheme(t)}>{t}</button>)}</div>
       </section>
+      <TelemetryCard consent={!!data.telemetry} setConsent={(on) => void save({ telemetry: on })} />
       <section className="card stack">
-        <h2>Optional sharing</h2>
-        <label className="check"><input type="checkbox" checked={data.telemetry} onChange={(e) => save({ telemetry: e.target.checked })} /> Product analytics (off by default)</label>
+        <h2>Diagnostics</h2>
         <label className="check"><input type="checkbox" checked={data.diagnostics} onChange={(e) => save({ diagnostics: e.target.checked })} /> Diagnostics (off by default)</label>
-        <p className="muted small">These only record your preference. This build sends no analytics or diagnostics, whatever they are set to.</p>
+        <p className="muted small">This only records your preference. This build sends no diagnostics, whatever it is set to.</p>
       </section>
       <section className="card stack">
         <h2>This browser and others</h2>
@@ -582,8 +454,15 @@ export function App() {
   const [theme, setThemeState] = useState(() => localStorage.getItem('bl-theme') ?? 'dark');
   const [open, setOpen] = useState<number | null>(null);
   const [live, setLive] = useState(false);
+  const [offline, setOffline] = useState(false);
   const [menu, setMenu] = useState(false);
   const bump = useCallback(() => setTick((t) => t + 1), []);
+  // Connected once, then silent for a while: say so with a way forward, instead of a workspace that looks empty.
+  useEffect(() => {
+    if (live || isDemo() || !paired) { setOffline(false); return undefined; }
+    const t = setTimeout(() => setOffline(true), 6000);
+    return () => clearTimeout(t);
+  }, [live, paired]);
   const [palette, setPalette] = useState(false);
   const [extra, setExtra] = useState<Command[]>([]);
 
@@ -620,11 +499,11 @@ export function App() {
   }, [paired, projects?.length, currentProject(), bump, sessionGone]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (paired === null) return <p className="muted center" role="status">Connecting…</p>;
-  if (!paired) return <Pairing notice={pairNotice} onPaired={() => { setPairNotice(''); setPaired(true); }} />;
+  if (!paired) return <Entry notice={pairNotice} onPaired={() => { setPairNotice(''); setPaired(true); }} />;
   const go = (s: Screen) => { setRoute(null); setScreen(s); setMenu(false); };
   const current = projects?.find((p) => p.id === currentProject());
   const baseCommands: Command[] = [
-    ...SCREENS.map((s) => ({ id: 'go-' + s, label: 'Go to ' + s, group: 'Navigate', run: () => go(s) })),
+    ...SCREENS.map((s) => ({ id: 'go-' + s, label: 'Go to ' + LABEL[s], group: 'Navigate', run: () => go(s) })),
     { id: 'theme', label: theme === 'dark' ? 'Switch to the light theme' : 'Switch to the dark theme', group: 'Appearance', run: () => setThemeState(theme === 'dark' ? 'light' : 'dark') },
     ...(projects ?? []).filter((p) => !p.missing).map((p) => ({ id: 'open-' + p.id, label: 'Open project ' + p.name, group: 'Projects', run: () => openProject(p.id) })),
   ];
@@ -641,8 +520,9 @@ export function App() {
       Workspace: <Workspace key={currentProject()} tick={tick} projectName={current?.name ?? 'project'} open={setOpen} setCommands={setExtra} />,
       Projects: <ProjectsHome projects={projects} tick={tick} reloadShell={loadProjects} onOpen={openProject} />,
       Goals: <Goals tick={tick} />,
-      Agents: <Agents tick={tick} />,
+      Agents: <AgentCatalog tick={tick} />,
       Usage: <Usage tick={tick} open={setOpen} />,
+      Results: <Results tick={tick} />,
       Comparisons: <Comparisons />,
       Evidence: <Evidence tick={tick} open={setOpen} />,
       Safety: <Safety tick={tick} open={setOpen} />,
@@ -661,8 +541,9 @@ export function App() {
           <button className="menu" aria-expanded={menu} aria-label="Menu" onClick={() => setMenu(!menu)}>☰</button>
         </div>
         <nav aria-label="Main">
-          {NAV.map((g) => <div key={g.group} role="group" aria-label={g.group} style={{ display: 'contents' }}><div className="nav-group" aria-hidden="true">{g.group}</div>
-            {g.items.map(({ s, icon }) => <button key={s} className={!route && screen === s || route && s === 'Projects' ? 'on' : ''} aria-current={!route && screen === s || route && s === 'Projects' ? 'page' : undefined} onClick={() => go(s)}><Icon name={icon} />{s}</button>)}</div>)}
+          {SECTIONS.map((x) => { const on = route ? x.name === 'Projects' : sectionOf(screen).name === x.name; return (
+            <button key={x.name} className={on ? 'on' : ''} aria-current={on ? 'page' : undefined} onClick={() => go(x.leaves[0]!)}><Icon name={x.icon} />{x.name}</button>
+          ); })}
         </nav>
         <p className="live small" role="status" data-testid="live-status"><i className={live ? 'on' : ''} />{isDemo() ? 'Demo: not connected' : live ? 'Live: local record' : 'Reconnecting…'}</p>
         {isDemo() ? <button className="btn small" onClick={() => { leaveDemo(); history.replaceState(null, '', location.pathname); setPaired(false); }}>Pair with my companion</button> : null}
@@ -675,7 +556,12 @@ export function App() {
       <main id="main" tabIndex={-1} className={!route && screen === 'Workspace' ? 'bleed' : ''}>
         {isDemo() ? <div className="alert warn" role="note" data-testid="demo-banner"><b>Demo data.</b> These values are invented to show the interface. Only Comparisons and Evaluations show real recorded benchmark results.</div> : null}
         {notice ? <div className="alert bad" role="alert">{notice} <button className="link" onClick={() => setNotice('')}>Dismiss</button></div> : null}
-        {body}
+        {!route && sectionOf(screen).leaves.length > 1 ? (
+          <div className="tabs" role="tablist" aria-label="Section" data-testid="section-tabs">
+            {sectionOf(screen).leaves.map((l) => <button key={l} role="tab" aria-selected={screen === l} tabIndex={screen === l ? 0 : -1} className={screen === l ? 'on' : ''} onClick={() => go(l)}>{LABEL[l]}</button>)}
+          </div>
+        ) : null}
+        {offline && !isDemo() ? <Offline onRetry={() => { resumeSession().then((ok) => { if (ok) { setOffline(false); bump(); } else setPaired(false); }); }} onConnect={() => setPaired(false)} /> : body}
       </main>
       {palette ? <Palette commands={[...baseCommands, ...extra]} onClose={() => setPalette(false)} /> : null}
       {open !== null ? <EventDrawer seq={open} onClose={() => setOpen(null)} /> : null}

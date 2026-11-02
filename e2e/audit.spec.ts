@@ -7,8 +7,9 @@ import { expect, go, test } from './fixtures';
 
 const OUT = process.env.AGENTONTRACK_SHOTS;
 test.skip(!OUT, 'Set AGENTONTRACK_SHOTS to an output folder.');
+test.setTimeout(300_000);
 
-const SCREENS = ['Projects', 'Overview', 'Goals', 'Agents', 'Usage', 'Comparisons', 'Evidence', 'Safety', 'Approvals', 'Evaluations', 'Environment', 'Feedback', 'Settings'];
+const SCREENS = ['Projects', 'Workspace', 'Results', 'Overview', 'Goals', 'Agents', 'Usage', 'Comparisons', 'Evidence', 'Safety', 'Approvals', 'Evaluations', 'Environment', 'Feedback', 'Settings'];
 const PAGES = ['', 'features', 'how-it-works', 'install', 'integrations', 'docs', 'security', 'pricing', 'benchmarks', 'roadmap', 'changelog', 'community', 'feedback', 'privacy', 'terms', 'account'];
 const SIZES = { desktop: { width: 1440, height: 900 }, tablet: { width: 820, height: 1100 }, mobile: { width: 390, height: 844 } } as const;
 
@@ -83,4 +84,37 @@ test('workspace in both themes and on mobile', async ({ page, env }) => {
   await page.screenshot({ path: join(OUT!, 'workspace-mobile-editor.png') });
   await page.getByRole('button', { name: /Agents/ }).last().click();
   await page.screenshot({ path: join(OUT!, 'workspace-mobile-agents.png') });
+});
+
+test('onboarding screens', async ({ page, env }) => {
+  mkdirSync(OUT!, { recursive: true });
+  for (const [name, size] of Object.entries(SIZES)) {
+    await page.setViewportSize(size);
+    await page.goto('http://127.0.0.1:4199/agentontrack/dashboard/');
+    await expect(page.getByTestId('welcome-options')).toBeVisible();
+    await page.screenshot({ path: join(OUT!, `welcome-${name}.png`), fullPage: true });
+    await page.getByTestId('continue-local').click();
+    await page.getByText('This computer uses a different port').click();
+    await page.getByLabel('Companion port').fill('47999');
+    await page.getByTestId('retry').click();
+    await expect(page.getByTestId('probe-status')).toContainText('not found', { timeout: 20_000 });
+    await page.screenshot({ path: join(OUT!, `connect-not-found-${name}.png`), fullPage: true });
+    await page.goto(env.c.url);
+    await expect(page.getByLabel('Pairing code')).toBeVisible();
+    await page.screenshot({ path: join(OUT!, `connect-local-${name}.png`), fullPage: true });
+  }
+  await page.setViewportSize(SIZES.desktop);
+  env.project((p) => { p.human.setGoal({ statement: 'Fix the parser', scope: { include: ['src/**'] } }); });
+  await env.pair(page);
+  await page.screenshot({ path: join(OUT!, 'projects-after-pairing-desktop.png'), fullPage: true });
+  await go(page, 'Agents');
+  await page.screenshot({ path: join(OUT!, 'agents-catalog-desktop.png'), fullPage: true });
+  await page.setViewportSize(SIZES.mobile);
+  await page.screenshot({ path: join(OUT!, 'agents-catalog-mobile.png'), fullPage: true });
+  await page.setViewportSize(SIZES.desktop);
+  await go(page, 'Results');
+  await page.screenshot({ path: join(OUT!, 'results-desktop.png'), fullPage: true });
+  await env.c.close();
+  await expect(page.getByTestId('offline')).toBeVisible({ timeout: 30_000 });
+  await page.screenshot({ path: join(OUT!, 'offline-desktop.png'), fullPage: true });
 });

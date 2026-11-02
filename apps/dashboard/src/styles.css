@@ -340,3 +340,28 @@ textarea.editor:focus-visible { outline: none; box-shadow: inset 2px 0 0 var(--a
 /* A flex column squeezes scrollable children to nothing unless told otherwise. */
 main > *, .panel > * { flex-shrink: 0; }
 main.bleed > * { flex-shrink: 1; }
+
+/* Welcome and connection. */
+.pair-card.wide { width: min(560px, 100%); }
+.pair-card h1 { font-size: 24px; }
+.btn.big { min-height: 44px; font-size: 15px; justify-content: center; width: 100%; }
+.divider { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; margin: 4px 0; }
+.divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+.copybox { display: flex; align-items: center; gap: 8px; margin-top: 6px; background: var(--sunken); border: 1px solid var(--border); border-radius: 6px; padding: 6px 6px 6px 10px; }
+.copybox code { flex: 1; background: none; overflow-x: auto; white-space: nowrap; }
+.probe { border-radius: 6px; padding: 9px 12px; border-left: 3px solid var(--muted); background: var(--raised-2); }
+.probe.found { border-color: var(--good); background: var(--good-bg); color: var(--good); }
+.probe.none, .probe.blocked { border-color: var(--warn); background: var(--warn-bg); color: var(--warn); }
+.steps.big { color: var(--text); padding-left: 20px; }
+.steps.big li { margin: 6px 0; }
+.offline { border: 1px solid var(--warn); background: var(--warn-bg); border-radius: 8px; padding: 18px; }
+.offline h2 { margin: 0 0 6px; }
+.agent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); gap: 12px; }
+.agent-card { display: flex; flex-direction: column; gap: 8px; }
+.agent-card h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 15.5px; }
+.agent-card dl { margin: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.toolbar input[type='search'] { max-width: 320px; }
+.toolbar select { width: auto; }
+.card-action { position: relative; z-index: 1; }

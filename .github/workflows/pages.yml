@@ -12,9 +12,10 @@ concurrency:
 env:
   PLAYWRIGHT_BROWSERS_PATH: .pw-browsers
   NEXT_PUBLIC_RELEASE_PUBLISHED: '1'
-  NEXT_PUBLIC_RELEASE_VERSION: 1.0.0-rc.3
+  NEXT_PUBLIC_RELEASE_VERSION: 1.0.0-rc.4
   # Optional accounts: unset builds a site with none. See docs/accounts-setup.md.
   NEXT_PUBLIC_FIREBASE_CONFIG: ${{ vars.FIREBASE_WEB_CONFIG }}
+  NEXT_PUBLIC_APPCHECK_SITE_KEY: ${{ vars.APPCHECK_SITE_KEY }}
 jobs:
   build:
     runs-on: ubuntu-latest

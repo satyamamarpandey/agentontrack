@@ -65,7 +65,9 @@ test('the home page has a clear way into projects, and the demo one is labelled'
   await expect(page.getByTestId('card-demo-label').first()).toHaveText('Demo data');
   await page.goto(`${SITE}/`);
   await page.getByTestId('open-projects').click();
-  await expect(page.getByRole('heading', { name: 'Pair this browser' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Keep your AI coding agents on track' })).toBeVisible();
+  await page.getByTestId('continue-local').click();
+  await expect(page.getByRole('heading', { name: 'Connect this computer' })).toBeVisible();
 });
 
 test('the main menu opens on a small screen, and every link in it is reachable', async ({ page }) => {
@@ -242,7 +244,8 @@ test('the demo shows weak checks and each runtime\'s failure mode, and changes n
   await expect(page.getByTestId('agent-codex').getByTestId('host-fail-mode')).toContainText('The action runs anyway');
   await expect(page.getByTestId('agent-hermes').getByTestId('host-fail-mode')).toContainText('The action is blocked');
   await expect(page.getByTestId('agent-hermes').getByTestId('containment')).toContainText('Nothing');
-  await go('Goals');
+  await go('Projects');
+  await page.getByRole('tab', { name: 'Goals and tasks' }).click();
   await page.getByRole('button', { name: 'Accept weak checks' }).click();
   await expect(page.getByRole('dialog').getByRole('alert')).toContainText('This is the demo');
 });

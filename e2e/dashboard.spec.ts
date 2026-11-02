@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { confirmDialog, expect, go, test } from './fixtures';
 
-const SCREENS = ['Overview', 'Projects', 'Goals', 'Agents', 'Usage', 'Comparisons', 'Evidence', 'Safety', 'Approvals', 'Evaluations', 'Environment', 'Feedback', 'Settings'];
+const SCREENS = ['Overview', 'Results', 'Workspace', 'Projects', 'Goals', 'Agents', 'Usage', 'Comparisons', 'Evidence', 'Safety', 'Approvals', 'Evaluations', 'Environment', 'Feedback', 'Settings'];
 const seed = (env: any) => env.project((p: any) => {
   p.human.setGoal({ statement: 'Fix the parser', scope: { include: ['src/**'] }, prohibit: ['deploy'] });
   p.human.createTask({ id: 't1', title: 'Parser fix', criteria: [{ id: 'c', description: 'fixed file exists', kind: 'artifact', path: 'src/a.txt' }] });
@@ -11,17 +11,17 @@ const seed = (env: any) => env.project((p: any) => {
 
 test('pairing: refuses a wrong code, then pairs, and survives a reload', async ({ page, env }) => {
   await page.goto(env.c.url);
-  await expect(page.getByRole('heading', { name: 'Pair this browser' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Connect this computer' })).toBeVisible();
   env.c.newPairingCode();
   await page.getByLabel('Pairing code').fill('WRONGCOD');
   await page.getByRole('button', { name: 'Pair', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('Wrong pairing code');
   await page.getByLabel('Pairing code').fill(env.c.newPairingCode());
   await page.getByRole('button', { name: 'Pair', exact: true }).click();
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Projects');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('My projects');
   await expect(page.getByTestId('project-card')).toContainText('repo');
   await page.reload();
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Projects');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('My projects');
 });
 
 test('every screen renders from real data, with no console errors', async ({ page, env }) => {
@@ -202,7 +202,9 @@ test('runtimes say what is installed here and how they were tested, with no fake
   await go(page, 'Agents');
   for (const id of ['codex', 'hermes']) {
     const card = page.getByTestId(`agent-${id}`);
-    await expect(card).toContainText('Not installed on this machine');
+    await expect(card).toContainText('Not installed');
+    await expect(card).toContainText('was not found on this computer');
+    await expect(card.getByTestId('agent-install')).toHaveAttribute('href', /^https:\/\//);
   }
   await expect(page.getByTestId('agent-codex')).toContainText('small local model');
   await expect(page.getByTestId('agent-hermes')).toContainText('scripted model');
@@ -257,9 +259,9 @@ test('disconnect ends the session, and reconnecting needs a new code', async ({ 
   await env.pair(page);
   await go(page, 'Settings');
   await page.getByRole('button', { name: 'Disconnect this browser' }).click();
-  await expect(page.getByRole('heading', { name: 'Pair this browser' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Connect this computer' })).toBeVisible();
   await page.reload();
-  await expect(page.getByRole('heading', { name: 'Pair this browser' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Connect this computer' })).toBeVisible();
 });
 
 test('keyboard: skip link, navigation and a dialog work with no mouse', async ({ page, env, browserName, isMobile }) => {
@@ -269,7 +271,7 @@ test('keyboard: skip link, navigation and a dialog work with no mouse', async ({
   await env.pair(page);
   await page.keyboard.press('Tab');
   await expect(page.getByRole('link', { name: 'Skip to content' })).toBeFocused();
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Approvals' }).focus();
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Activity' }).focus();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('heading', { name: 'Approvals', level: 1 })).toBeVisible();
   await page.getByTestId('approval').getByRole('button', { name: 'Deny' }).focus();
@@ -339,4 +341,49 @@ test('the Agents screen says in plain words what each runtime does if its hook c
   await expect(page.getByTestId('agent-hermes').getByTestId('host-fail-mode')).toContainText('The action is blocked');
   await expect(page.getByTestId('agent-hermes').getByTestId('containment')).toContainText('Nothing');
   await expect(page.getByTestId('agent-codex').getByTestId('containment')).toContainText('sandbox');
+});
+
+test('when the computer stops answering, a clear screen offers a way forward instead of an empty workspace', async ({ page, env }) => {
+  await env.pair(page);
+  await expect(page.getByTestId('live-status')).toContainText('Live');
+  await env.c.close();
+  const offline = page.getByTestId('offline');
+  await expect(offline).toBeVisible({ timeout: 30_000 });
+  await expect(offline).toContainText('Your computer is not connected');
+  await expect(offline).toContainText('agentontrack dashboard --allow-public-site');
+  await expect(offline.getByRole('button', { name: 'Retry' })).toBeVisible();
+  await expect(offline.getByRole('button', { name: 'Connect again' })).toBeVisible();
+  await expect(offline.getByRole('link', { name: 'Download' })).toBeVisible();
+  await expect(offline.getByRole('link', { name: 'Open the local dashboard' })).toBeVisible();
+  await offline.getByTestId('offline-connect').click();
+  await expect(page.getByRole('heading', { name: 'Connect this computer' })).toBeVisible();
+});
+
+test('the demo does not pretend to know what is installed or connected', async ({ page }) => {
+  await page.goto('http://127.0.0.1:4199/agentontrack/dashboard/?demo=1#agents');
+  await expect(page.getByTestId('agents-demo')).toBeVisible();
+  for (const id of ['claude-code', 'codex', 'cursor']) {
+    await expect(page.getByTestId(`agent-${id}`).getByTestId('agent-state')).toHaveText('Not checked in the demo');
+    await expect(page.getByTestId(`agent-${id}`).getByRole('button', { name: 'Disconnect' })).toHaveCount(0);
+  }
+  await expect(page.getByTestId('live-status')).toContainText('Demo: not connected');
+});
+
+test('usage counts: off by default, a plain preview of exactly what would be sent, and nothing is sent when sending is not switched on', async ({ page, env }) => {
+  seed(env);
+  const outgoing: string[] = [];
+  page.on('request', (r) => { if (!r.url().startsWith(env.c.url)) outgoing.push(r.url()); });
+  await env.pair(page);
+  await go(page, 'Settings');
+  const card = page.getByTestId('telemetry');
+  await expect(card.getByTestId('telemetry-consent')).not.toBeChecked();
+  await expect(card.getByTestId('telemetry-send')).toHaveCount(0);
+  await card.getByTestId('telemetry-consent').check();
+  await expect(card.getByTestId('telemetry-off')).toContainText('nothing leaves your browser');
+  const preview = JSON.parse((await card.getByTestId('telemetry-preview').textContent())!);
+  expect(Object.keys(preview).sort()).toEqual(['activeDays', 'runtimesConnected', 'tasksTotal', 'tasksVerified', 'version', 'week']);
+  expect(JSON.stringify(preview)).not.toMatch(/repo|src|parser|[A-Z]:\|\/Users|\/home/);
+  expect(outgoing).toEqual([]);
+  await card.getByTestId('telemetry-consent').uncheck();
+  expect(await page.evaluate(() => localStorage.getItem('aot-install-id'))).toBeNull();
 });

@@ -59,7 +59,7 @@ test('several projects: each card and page shows that project\'s own record', as
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('second');
   await expect(page.getByText('No approved goal.')).toBeVisible();
   await page.getByRole('button', { name: /All projects/ }).click();
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Projects');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('My projects');
 });
 
 test('click-through: every section opens, survives a reload, and uses only endpoints released in 1.0.0-rc.2, naming the project', async ({ page, env }) => {
@@ -350,4 +350,40 @@ baseTest('demo: the project page makes no third-party request', async ({ page })
   await baseExpect(page.getByTestId('project-panel-overview')).toBeVisible();
   for (const t of ['workflow', 'usage', 'verification', 'environment']) await page.getByTestId(`project-tab-${t}`).click();
   baseExpect(foreign).toEqual([]);
+});
+
+test('find projects: names one folder, lists only repositories, adds what is chosen; then search and archive', async ({ page, env }) => {
+  seed(env);
+  const parent = join(env.dir, 'code');
+  for (const name of ['alpha', 'beta']) { mkdirSync(join(parent, name, '.git'), { recursive: true }); }
+  mkdirSync(join(parent, 'notes'), { recursive: true });
+  await env.pair(page);
+  await page.getByTestId('find-projects').click();
+  await page.getByLabel(/Folder to look in/).fill(parent);
+  await page.getByRole('button', { name: 'Look', exact: true }).click();
+  const results = page.getByTestId('discover-results');
+  await expect(results).toContainText('alpha');
+  await expect(results).toContainText('beta');
+  await expect(results).not.toContainText('notes');
+  await page.getByRole('checkbox', { name: /beta/ }).uncheck();
+  await page.getByTestId('discover-add').click();
+  await expect(page.getByTestId('project-card')).toHaveCount(2);
+  await expect(page.getByTestId('project-card').filter({ hasText: 'alpha' })).toBeVisible();
+  await expect(page.getByTestId('project-card').filter({ hasText: 'beta' })).toHaveCount(0);
+  // Search narrows, and archive hides until asked for.
+  await page.getByRole('searchbox', { name: 'Search projects' }).fill('alp');
+  await expect(page.getByTestId('project-card')).toHaveCount(1);
+  await page.getByTestId('project-card').getByRole('button', { name: 'Archive' }).click();
+  await expect(page.getByTestId('project-card')).toHaveCount(0);
+  await page.getByLabel(/Show archived/).check();
+  await expect(page.getByTestId('project-card').filter({ hasText: 'alpha' })).toContainText('archived');
+  await page.getByTestId('project-card').getByRole('button', { name: 'Restore' }).click();
+});
+
+test('a folder that is a whole drive, or missing, is refused when looking for projects', async ({ page, env }) => {
+  await env.pair(page);
+  await page.getByTestId('find-projects').click();
+  await page.getByLabel(/Folder to look in/).fill(join(env.dir, 'nothing-here'));
+  await page.getByRole('button', { name: 'Look', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('does not exist');
 });

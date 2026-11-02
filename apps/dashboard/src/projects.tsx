@@ -19,7 +19,7 @@ const lastActivity = (a: any, actions: any[]): string | null => {
   return times.at(-1) ?? null;
 };
 
-function ProjectCard({ p, tick, onOpen }: { p: any; tick: number; onOpen: (id: string) => void }) {
+function ProjectCard({ p, tick, onOpen, onChanged }: { p: any; tick: number; onOpen: (id: string) => void; onChanged: () => void }) {
   const skip = p.missing;
   const an = useLoad(() => (skip ? Promise.resolve(null) : get(forProject('/api/analytics', p.id))), [tick, p.id, skip]);
   const ac = useLoad(() => (skip ? Promise.resolve([]) : get<any[]>(forProject('/api/actions', p.id))), [tick, p.id, skip]);
@@ -31,44 +31,129 @@ function ProjectCard({ p, tick, onOpen }: { p: any; tick: number; onOpen: (id: s
       <div className="project-card-head">
         <h2>{p.missing ? p.name : <button className="project-open" onClick={() => onOpen(p.id)}>{p.name}</button>}</h2>
         {isDemo() ? <span className="prov prov-demo" data-testid="card-demo-label">Demo data</span> : null}
-        {p.missing ? <span className="badge bad">folder missing</span> : null}
+        {p.missing ? <span className="badge bad">folder missing</span> : <span className="badge muted" title="This project's folder is on this computer">On this computer</span>}
+        {p.archived ? <span className="badge muted">archived</span> : null}
       </div>
       <p className="project-goal">{p.goal ?? <span className="muted">No goal set</span>}</p>
       <dl className="project-facts">
         <div><dt>Status</dt><dd data-testid="card-status">{p.activeTask ? <Badge value={p.activeTask.status} /> : <span className="muted">No active task</span>}</dd></div>
         <div><dt>Pending approvals</dt><dd data-testid="card-pending" className={p.pendingApprovals ? 'attention' : ''}>{p.pendingApprovals ?? 0}</dd></div>
         <div><dt>Tokens used</dt><dd data-testid="card-tokens">{a ? (a.totals.sessions ? fmt(totalTokens(a)) : 'Unavailable') : an.error ? 'Unavailable' : '…'}{a?.totals.sessions ? <> <Provenance kind={kind} /></> : null}</dd></div>
+        <div><dt>Connection</dt><dd data-testid="card-connection">{p.missing ? 'Folder not found' : isDemo() ? 'Demo' : 'Connected'}</dd></div>
         <div><dt>Last activity</dt><dd data-testid="card-activity">{last ? new Date(last).toLocaleString() : a ? <span className="muted">None recorded</span> : '…'}</dd></div>
       </dl>
+      {isDemo() ? null : <div className="row"><button className="btn small card-action" onClick={async () => { await post('/api/projects/update', { id: p.id, archived: !p.archived }); onChanged(); }}>{p.archived ? 'Restore' : 'Archive'}</button></div>}
     </article>
   );
 }
 
 function AddProject({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const [path, setPath] = useState('');
-  const [mode, setMode] = useState<'import' | 'create'>('import');
+  const [mode, setMode] = useState<'import' | 'create' | 'github'>('import');
+  const [url, setUrl] = useState('');
   const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
   return (
-    <Modal label="Add a project" onClose={onClose} onSubmit={async (e) => { e.preventDefault(); try { await post('/api/projects', { path, create: mode === 'create' }); onDone(); onClose(); } catch (err) { setMsg((err as Error).message); } }}>
+    <Modal label="Add a project" onClose={onClose} onSubmit={async (e) => {
+      e.preventDefault(); setMsg(''); setBusy(true);
+      try {
+        if (mode === 'github') await post('/api/projects/clone', { url, dest: path });
+        else await post('/api/projects', { path, create: mode === 'create' });
+        onDone(); onClose();
+      } catch (err) { setMsg((err as Error).message); } finally { setBusy(false); }
+    }}>
       <h2>Add a project</h2>
-      <div className="row" role="group" aria-label="Import or create">
+      <div className="row wrap" role="group" aria-label="How to add it">
         <button type="button" className={`chip ${mode === 'import' ? 'on' : ''}`} aria-pressed={mode === 'import'} onClick={() => setMode('import')}>Import an existing folder</button>
         <button type="button" className={`chip ${mode === 'create' ? 'on' : ''}`} aria-pressed={mode === 'create'} onClick={() => setMode('create')}>Create a new folder</button>
+        <button type="button" className={`chip ${mode === 'github' ? 'on' : ''}`} aria-pressed={mode === 'github'} onClick={() => setMode('github')}>From GitHub</button>
       </div>
-      <p className="muted small">{mode === 'import' ? 'Attaching writes nothing into the folder. Your goal, approvals and evidence are kept outside it, on this machine.' : 'The folder is created if it does not exist. Nothing is written into it yet.'}</p>
+      <p className="muted small">{mode === 'import' ? 'Attaching writes nothing into the folder. Your goal, approvals and evidence are kept outside it, on this machine.' : mode === 'create' ? 'The folder is created if it does not exist. Nothing is written into it yet.' : 'Copies a GitHub repository to a new folder on this computer, using your own git setup. AgentOnTrack never sees a GitHub password or token. Private repositories work if your git is already signed in.'}</p>
       {msg ? <div className="alert bad" role="alert">{msg}</div> : null}
-      <label>Absolute folder path<input value={path} onChange={(e) => setPath(e.target.value)} required name="path" spellCheck={false} data-autofocus placeholder="Full path to the folder" /></label>
-      <div className="row end"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" type="submit">Attach</button></div>
+      {mode === 'github' ? <label>GitHub address<input value={url} onChange={(e) => setUrl(e.target.value)} required name="github-url" spellCheck={false} placeholder="https://github.com/owner/repo" data-autofocus /></label> : null}
+      <label>{mode === 'github' ? 'New folder on this computer (full path)' : 'Absolute folder path'}<input value={path} onChange={(e) => setPath(e.target.value)} required name="path" spellCheck={false} placeholder="Full path to the folder" {...(mode === 'github' ? {} : { 'data-autofocus': true })} /></label>
+      <div className="row end"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" type="submit" disabled={busy}>{mode === 'github' ? (busy ? 'Copying…' : 'Copy and add') : 'Attach'}</button></div>
     </Modal>
   );
 }
 
+/** Looks inside one folder the person names, for Git repositories. Nothing is added until they choose. */
+function Discover({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const [dir, setDir] = useState('');
+  const [found, setFound] = useState<{ path: string; name: string; registered: boolean }[] | null>(null);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [truncated, setTruncated] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
+  const look = async () => {
+    setMsg(''); setBusy(true);
+    try {
+      const r = await post('/api/projects/discover', { dir, depth: 2 });
+      setFound(r.found); setTruncated(r.truncated);
+      setPicked(new Set(r.found.filter((x: any) => !x.registered).map((x: any) => x.path)));
+    } catch (err) { setMsg((err as Error).message); setFound(null); } finally { setBusy(false); }
+  };
+  const add = async () => {
+    setBusy(true); setMsg('');
+    try { for (const p of picked) await post('/api/projects', { path: p }); onDone(); onClose(); } catch (err) { setMsg((err as Error).message); } finally { setBusy(false); }
+  };
+  return (
+    <Modal label="Find projects on this computer" onClose={onClose} wide>
+      <h2>Find projects on this computer</h2>
+      <p className="muted small">Name one folder, such as where you keep your code. AgentOnTrack looks two levels down for Git repositories there and nowhere else. It reads folder names only, and adds nothing until you choose.</p>
+      {msg ? <div className="alert bad" role="alert">{msg}</div> : null}
+      <form className="row wrap" onSubmit={(e) => { e.preventDefault(); void look(); }}>
+        <label className="grow">Folder to look in (full path)<input value={dir} onChange={(e) => setDir(e.target.value)} required name="discover-dir" spellCheck={false} data-autofocus placeholder="Full path to the folder" /></label>
+        <button className="btn end-self" type="submit" disabled={busy}>{busy && !found ? 'Looking…' : 'Look'}</button>
+      </form>
+      {found ? (found.length === 0 ? <Empty>No Git repositories were found in that folder.</Empty> : (
+        <div data-testid="discover-results">
+          <ul className="list">{found.map((r) => (
+            <li key={r.path}>
+              <label className="check"><input type="checkbox" disabled={r.registered} checked={r.registered || picked.has(r.path)} onChange={(e) => { const n = new Set(picked); if (e.target.checked) n.add(r.path); else n.delete(r.path); setPicked(n); }} /> <b>{r.name}</b> {r.registered ? <span className="badge good">already added</span> : null}</label>
+              <div className="muted small mono">{r.path}</div>
+            </li>
+          ))}</ul>
+          {truncated ? <p className="muted small">There are more than this. Look in a smaller folder to see the rest.</p> : null}
+        </div>
+      )) : null}
+      <div className="row end"><button className="btn" onClick={onClose}>Close</button><button className="btn primary" disabled={busy || picked.size === 0} onClick={() => void add()} data-testid="discover-add">Add {picked.size || ''} selected</button></div>
+    </Modal>
+  );
+}
+
+type Sort = 'attention' | 'recent' | 'name';
+
 export function ProjectsHome({ projects, tick, reloadShell, onOpen }: { projects: any[]; tick: number; reloadShell: () => void; onOpen: (id: string) => void }) {
   const [adding, setAdding] = useState(false);
+  const [finding, setFinding] = useState(false);
+  const [q, setQ] = useState('');
+  const [sort, setSort] = useState<Sort>('attention');
+  const [archived, setArchived] = useState(false);
+  const newest = (x: any, y: any) => String(y.lastEventAt ?? '').localeCompare(String(x.lastEventAt ?? ''));
+  const shown = projects
+    .filter((p) => (archived ? p.archived : !p.archived))
+    .filter((p) => !q.trim() || `${p.name} ${p.goal ?? ''}`.toLowerCase().includes(q.trim().toLowerCase()))
+    .sort((x, y) => (sort === 'name' ? x.name.localeCompare(y.name) : sort === 'recent' ? newest(x, y) : (y.pendingApprovals ?? 0) - (x.pendingApprovals ?? 0) || newest(x, y)));
+  const hidden = projects.filter((p) => p.archived).length;
   return (
-    <Page title="Projects" intro="Each project has its own local record, read from the companion on this machine. Open one for its workspace, workflow, usage, verification and environment." actions={<button className="btn primary" onClick={() => setAdding(true)} data-testid="add-project">Add project</button>}>
+    <Page title="My projects" intro="Every project registered on this computer appears here. Open one to work in it." actions={<div className="row wrap"><button className="btn" onClick={() => setFinding(true)} data-testid="find-projects">Find projects on this computer</button><button className="btn primary" onClick={() => setAdding(true)} data-testid="add-project">Add project</button></div>}>
       {adding ? <AddProject onClose={() => setAdding(false)} onDone={reloadShell} /> : null}
-      {projects.length === 0 ? <Empty>No project attached yet. Use Add project to import a folder or create one.</Empty> : <section className="project-grid" aria-label="Your projects">{projects.map((p) => <ProjectCard key={p.id} p={p} tick={tick} onOpen={onOpen} />)}</section>}
+      {finding ? <Discover onClose={() => setFinding(false)} onDone={reloadShell} /> : null}
+      {projects.length > 1 || hidden ? (
+        <div className="toolbar" role="search">
+          <label className="sr-only" htmlFor="project-search">Search projects</label>
+          <input id="project-search" type="search" placeholder="Search projects" value={q} onChange={(e) => setQ(e.target.value)} name="project-search" />
+          <label className="sr-only" htmlFor="project-sort">Sort by</label>
+          <select id="project-sort" value={sort} onChange={(e) => setSort(e.target.value as Sort)} name="project-sort">
+            <option value="attention">Needs attention first</option><option value="recent">Recently active</option><option value="name">Name</option>
+          </select>
+          {hidden ? <label className="check"><input type="checkbox" checked={archived} onChange={(e) => setArchived(e.target.checked)} /> Show archived ({hidden})</label> : null}
+        </div>
+      ) : null}
+      {projects.length === 0 ? <Empty>No project is registered on this computer yet. Use Find projects to look in your code folder, or Add project to import a folder, copy one from GitHub or start a new one.</Empty>
+        : shown.length === 0 ? <Empty>No project matches.</Empty>
+        : <section className="project-grid" aria-label="Your projects">{shown.map((p) => <ProjectCard key={p.id} p={p} tick={tick} onOpen={onOpen} onChanged={reloadShell} />)}</section>}
     </Page>
   );
 }

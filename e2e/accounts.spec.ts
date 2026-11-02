@@ -143,3 +143,124 @@ test('delete removes the person\'s documents and sign-in', async ({ page }) => {
   const accounts = await (await fetch(`http://${AUTH}/identitytoolkit.googleapis.com/v1/projects/${PROJECT}/accounts:query`, { method: 'POST', headers: { 'content-type': 'application/json', ...owner }, body: '{}' })).json() as { userInfo: { email: string }[] };
   expect(accounts.userInfo.some((u) => u.email === 'third@example.com')).toBe(false);
 });
+
+/** The Auth emulator's own sign-in page, for any provider that opens a popup. */
+async function popupSignIn(page: Page, button: string, email: string, name: string) {
+  await page.goto(`${SITE}/account/`);
+  const [popup] = await Promise.all([page.waitForEvent('popup'), page.getByTestId(button).click()]);
+  await expect(async () => {
+    await popup.getByText('Add new account').click({ timeout: 3000 });
+    await expect(popup.locator('#email-input')).toBeVisible({ timeout: 2000 });
+  }).toPass({ timeout: 30_000 });
+  await popup.locator('#email-input').fill(email);
+  await popup.locator('#display-name-input').fill(name);
+  await popup.locator('#sign-in').click();
+  await expect(page.getByTestId('signed-in')).toBeVisible({ timeout: 20_000 });
+}
+
+test('GitHub sign-in saves only the name and email, and signing out returns to the choices', async ({ page }) => {
+  await popupSignIn(page, 'sign-in-github', 'octo@example.com', 'Octo Person');
+  await expect(page.getByTestId('profile-email')).toHaveText('octo@example.com');
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await expect(page.getByTestId('signed-out')).toBeVisible();
+  await expect(page.getByTestId('sign-in')).toBeVisible();
+  await expect(page.getByTestId('sign-in-github')).toBeVisible();
+  await expect(page.getByTestId('email-form')).toBeVisible();
+});
+
+test('email: create an account, sign out, sign in again, and a wrong password is refused in plain words', async ({ page }) => {
+  await page.goto(`${SITE}/account/`);
+  await page.getByRole('button', { name: 'Create an account' }).click();
+  await page.getByLabel('Name').fill('Email Person');
+  await page.getByLabel('Email').fill('mailer@example.com');
+  await page.getByLabel('Password').fill('correct horse battery');
+  await page.getByTestId('email-submit').click();
+  await expect(page.getByTestId('signed-in')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('profile-name')).toHaveText('Email Person');
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await page.getByRole('button', { name: 'Sign in with email' }).click();
+  await page.getByLabel('Email').fill('mailer@example.com');
+  await page.getByLabel('Password').fill('wrong password');
+  await page.getByTestId('email-submit').click();
+  await expect(page.getByRole('alert')).toHaveText('The email or password is not right.');
+  await page.getByLabel('Password').fill('correct horse battery');
+  await page.getByTestId('email-submit').click();
+  await expect(page.getByTestId('signed-in')).toBeVisible({ timeout: 20_000 });
+  // The sign-in lasts across a reload, in this browser.
+  await page.reload();
+  await expect(page.getByTestId('profile-email')).toHaveText('mailer@example.com', { timeout: 20_000 });
+});
+
+test('email: a short password and a duplicate address are explained, and reset sends a link without revealing who has an account', async ({ page }) => {
+  await page.goto(`${SITE}/account/`);
+  await page.getByRole('button', { name: 'Create an account' }).click();
+  await page.getByLabel('Email').fill('short@example.com');
+  await page.getByLabel('Password').fill('12345');
+  await page.getByTestId('email-submit').click();
+  await expect(page.getByLabel('Password')).toBeFocused().catch(() => undefined);
+  await page.getByLabel('Password').fill('long enough password');
+  await page.getByTestId('email-submit').click();
+  await expect(page.getByTestId('signed-in')).toBeVisible({ timeout: 20_000 });
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await page.getByRole('button', { name: 'Create an account' }).click();
+  await page.getByLabel('Email').fill('short@example.com');
+  await page.getByLabel('Password').fill('long enough password');
+  await page.getByTestId('email-submit').click();
+  await expect(page.getByRole('alert')).toContainText('already has an account');
+  // The same sentence for an address nobody has used.
+  for (const address of ['short@example.com', 'nobody-here@example.com']) {
+    await page.getByRole('button', { name: 'Reset password' }).click();
+    await page.getByLabel('Email').fill(address);
+    await page.getByTestId('email-submit').click();
+    await expect(page.getByTestId('account-note')).toHaveText('If that address has an account, a reset link is on its way.');
+  }
+  const codes = await (await fetch(`http://${AUTH}/emulator/v1/projects/${PROJECT}/oobCodes`)).json() as { oobCodes: { email: string; requestType: string }[] };
+  expect(codes.oobCodes.some((c) => c.email === 'short@example.com' && c.requestType === 'PASSWORD_RESET')).toBe(true);
+});
+
+test('email: deleting the account needs the password, and removes the sign-in', async ({ page }) => {
+  await page.goto(`${SITE}/account/`);
+  await page.getByRole('button', { name: 'Create an account' }).click();
+  await page.getByLabel('Email').fill('gone@example.com');
+  await page.getByLabel('Password').fill('a password to delete');
+  await page.getByTestId('email-submit').click();
+  await expect(page.getByTestId('signed-in')).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId('delete-account').click();
+  await page.getByLabel('Your password, to confirm').fill('a password to delete');
+  await page.getByTestId('delete-confirm').click();
+  await expect(page.getByTestId('sign-in')).toBeVisible({ timeout: 20_000 });
+  const accounts = await (await fetch(`http://${AUTH}/identitytoolkit.googleapis.com/v1/projects/${PROJECT}/accounts:query`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer owner' }, body: '{}' })).json() as { userInfo?: { email: string }[] };
+  expect((accounts.userInfo ?? []).some((u) => u.email === 'gone@example.com')).toBe(false);
+});
+
+test('coming from the dashboard welcome page, signing in returns there, and it still asks to connect the computer', async ({ page }) => {
+  await page.goto(`${SITE}/account/?next=dashboard`);
+  await page.getByRole('button', { name: 'Create an account' }).click();
+  await page.getByLabel('Email').fill('back@example.com');
+  await page.getByLabel('Password').fill('back to the dashboard');
+  await page.getByTestId('email-submit').click();
+  await page.waitForURL(/\/dashboard\//, { timeout: 30_000 });
+  await expect(page.getByRole('heading', { name: 'Keep your AI coding agents on track' })).toBeVisible();
+  await expect(page.getByText('You are signed in.')).toBeVisible();
+  // Signed in is not connected: nothing about this computer was granted.
+  await expect(page.getByLabel('Pairing code')).toHaveCount(0);
+  await expect(page.getByTestId('continue-local')).toBeVisible();
+});
+
+test('rules: usage counts can be created once a week by anyone, and never read, changed, deleted or padded', async () => {
+  const week = '2026-W44';
+  const id = `install123_${week}`;
+  const good = (extra: object = {}) => ({ week: stringField(week), version: stringField('1.0'), installId: stringField('install123'), runtimesConnected: { arrayValue: { values: [stringField('claude-code')] } }, tasksVerified: { integerValue: '2' }, tasksTotal: { integerValue: '3' }, activeDays: { integerValue: '4' }, ...extra });
+  const create = (name: string, fields: object) => commit(null, `telemetry/${name}`, fields, 'createdAt');
+  expect((await create(id, good())).status).toBe(200);
+  // Once per install per week: the same document cannot be written again, because nobody can update it.
+  expect((await create(id, good())).status).not.toBe(200);
+  // Not under another name, not with an extra field, not with too many days, not with a path in a list.
+  expect((await create('other_2026-W44', good())).status).not.toBe(200);
+  expect((await create('install123_2026-W45', good({ week: stringField('2026-W45'), path: stringField('/Users/x/code') }))).status).not.toBe(200);
+  expect((await create('install123_2026-W46', good({ week: stringField('2026-W46'), activeDays: { integerValue: '9' } }))).status).not.toBe(200);
+  // No client reads it back, with or without an account.
+  expect((await fetch(`${DOCS}/telemetry/${id}`)).status).not.toBe(200);
+  const someone = await otherUser('reader@example.com');
+  expect((await fetch(`${DOCS}/telemetry/${id}`, { headers: asUser(someone.idToken) })).status).not.toBe(200);
+});

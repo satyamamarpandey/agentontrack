@@ -54,6 +54,7 @@ export function demoGet(path: string): unknown {
       { id: 'hermes', name: 'Hermes', version: null, installed: false, authenticated: null, hooksInstalled: false, coverage: coverage('real-host-scripted-model', 'closed', 'none'), liveStatus: 'Demo: not connected' },
     ];
     case '/api/runs': return [];
+    case '/api/runtimes': return [{ id: 'claude-code', name: 'Claude Code', canStart: false, how: null, reason: 'This is the demo, so nothing can be started.' }];
     case '/api/files': return { dir: '', truncated: false, entries: [{ name: 'src', path: 'src', type: 'dir', size: 0 }, { name: 'README.md', path: 'README.md', type: 'file', size: 120 }] };
     case '/api/handoffs': return [];
     case '/api/worktrees': return { worktrees: [], conflicts: [] };

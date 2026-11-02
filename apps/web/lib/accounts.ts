@@ -1,18 +1,22 @@
 // Loaded only through loadAccounts, when someone signs in, sends feedback on a configured site, or was signed in before.
 // What this may store is fixed here and in firestore.rules: profile, preferences, feedback, and summaries of counts.
 import { getApp, getApps, initializeApp } from 'firebase/app';
-import { connectAuthEmulator, deleteUser, getAuth, GoogleAuthProvider, reauthenticateWithPopup, signInWithPopup, signOut, type User } from 'firebase/auth';
+import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check';
+import { connectAuthEmulator, createUserWithEmailAndPassword, deleteUser, EmailAuthProvider, getAuth, GithubAuthProvider, GoogleAuthProvider, reauthenticateWithCredential, reauthenticateWithPopup, sendPasswordResetEmail, signInWithEmailAndPassword, signInWithPopup, signOut, updateProfile, type AuthProvider, type User } from 'firebase/auth';
 import { collection, connectFirestoreEmulator, deleteDoc, doc, getDoc, getDocs, getFirestore, serverTimestamp, setDoc, writeBatch } from 'firebase/firestore';
 import { SIGNED_IN_FLAG } from './accounts-config';
 import type { Feedback } from './feedback';
 
 const EMULATORS = process.env.NEXT_PUBLIC_FIREBASE_EMULATORS === '1';
+/** A reCAPTCHA v3 site key, public by design. With it, Firebase can refuse feedback and sign-in calls that do not come from this site. Enforcement is switched on by the owner in the Firebase console. */
+const APP_CHECK_KEY = process.env.NEXT_PUBLIC_APPCHECK_SITE_KEY;
 
 function connect() {
   const fresh = getApps().length === 0;
   const app = fresh ? initializeApp(JSON.parse(process.env.NEXT_PUBLIC_FIREBASE_CONFIG!)) : getApp();
   const auth = getAuth(app);
   const db = getFirestore(app);
+  if (fresh && APP_CHECK_KEY && !EMULATORS) initializeAppCheck(app, { provider: new ReCaptchaV3Provider(APP_CHECK_KEY), isTokenAutoRefreshEnabled: true });
   if (fresh && EMULATORS) {
     connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
     connectFirestoreEmulator(db, '127.0.0.1', 8080);
@@ -34,15 +38,61 @@ export async function currentUser(): Promise<User | null> {
   return auth.currentUser;
 }
 
-/** Only the name and email from Google are kept. Merging keeps an earlier saved preference. */
-export async function signIn(theme: string): Promise<User> {
-  const { auth, db } = connect();
-  const { user } = await signInWithPopup(auth, new GoogleAuthProvider());
+export type Method = 'google' | 'github';
+const provider = (m: Method): AuthProvider => (m === 'github' ? new GithubAuthProvider() : new GoogleAuthProvider());
+
+/** Records the person's name and email, and keeps an earlier saved preference. No provider token is read or kept. */
+async function finish(user: User, theme: string): Promise<User> {
+  const { db } = connect();
   await setDoc(doc(db, 'users', user.uid), { profile: { name: (user.displayName ?? '').slice(0, 200), email: user.email ?? '' }, updatedAt: serverTimestamp() }, { merge: true });
   const saved = await getDoc(doc(db, 'users', user.uid));
   if (!saved.data()?.preferences) await savePreferences(user.uid, theme);
   localStorage.setItem(SIGNED_IN_FLAG, '1');
   return user;
+}
+
+/** Only the name and email are kept. Merging keeps an earlier saved preference. */
+export async function signIn(theme: string, method: Method = 'google'): Promise<User> {
+  const { auth } = connect();
+  const { user } = await signInWithPopup(auth, provider(method));
+  return finish(user, theme);
+}
+
+const MESSAGES: Record<string, string> = {
+  'auth/email-already-in-use': 'That email already has an account. Sign in instead, or reset the password.',
+  'auth/invalid-credential': 'The email or password is not right.',
+  'auth/wrong-password': 'The email or password is not right.',
+  'auth/user-not-found': 'The email or password is not right.',
+  'auth/weak-password': 'Use a password of at least 6 characters.',
+  'auth/invalid-email': 'That does not look like an email address.',
+  'auth/too-many-requests': 'Too many tries. Wait a few minutes, then try again.',
+  'auth/operation-not-allowed': 'This way of signing in is not switched on for this site yet.',
+  'auth/account-exists-with-different-credential': 'That email already has an account that signs in another way. Use that way.',
+  'auth/popup-closed-by-user': 'The sign-in window was closed before it finished.',
+  'auth/popup-blocked': 'Your browser blocked the sign-in window. Allow pop-ups for this site, then try again.',
+};
+/** A plain sentence for a Firebase error, and never the raw error code to the person. */
+export function explain(e: unknown): string {
+  const code = (e as { code?: string })?.code ?? '';
+  return MESSAGES[code] ?? (code ? 'Sign-in did not work. Try again in a moment.' : (e as Error)?.message ?? 'Something went wrong.');
+}
+
+export async function emailSignUp(name: string, email: string, password: string, theme: string): Promise<User> {
+  const { auth } = connect();
+  const { user } = await createUserWithEmailAndPassword(auth, email, password);
+  if (name.trim()) await updateProfile(user, { displayName: name.trim().slice(0, 200) });
+  return finish(user, theme);
+}
+
+export async function emailSignIn(email: string, password: string, theme: string): Promise<User> {
+  const { auth } = connect();
+  const { user } = await signInWithEmailAndPassword(auth, email, password);
+  return finish(user, theme);
+}
+
+/** Firebase answers the same way whether or not the address has an account, so this never reveals which do. */
+export async function resetPassword(email: string): Promise<void> {
+  await sendPasswordResetEmail(connect().auth, email);
 }
 
 export async function signOutHere(): Promise<void> {
@@ -91,7 +141,18 @@ export function downloadData(data: AccountData): void {
 }
 
 /** Removes everything this account stored, then the sign-in itself. Firebase asks for a fresh sign-in first if the last one was long ago. */
-export async function deleteEverything(user: User): Promise<void> {
+/** Deleting an account needs a recent sign-in. An email account gives its password again, and others sign in again with their own provider. */
+async function reauthenticate(user: User, password?: string): Promise<void> {
+  const id = user.providerData[0]?.providerId;
+  if (id === 'password') {
+    if (!password || !user.email) throw new Error('Enter your password to confirm.');
+    await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, password));
+  } else {
+    await reauthenticateWithPopup(user, provider(id === 'github.com' ? 'github' : 'google'));
+  }
+}
+
+export async function deleteEverything(user: User, password?: string): Promise<void> {
   const { db } = connect();
   const feedback = await getDocs(collection(db, 'users', user.uid, 'feedback'));
   const summaries = await getDocs(collection(db, 'users', user.uid, 'summaries'));
@@ -105,7 +166,7 @@ export async function deleteEverything(user: User): Promise<void> {
     await deleteUser(user);
   } catch (e) {
     if ((e as { code?: string }).code !== 'auth/requires-recent-login') throw e;
-    await reauthenticateWithPopup(user, new GoogleAuthProvider());
+    await reauthenticate(user, password);
     await deleteUser(user);
   }
   localStorage.removeItem(SIGNED_IN_FLAG);

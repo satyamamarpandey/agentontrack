@@ -49,11 +49,18 @@ export const test = base.extend<{ env: Env }>({
   },
 });
 
+/** The six places in the main navigation, and which of them hold tabs. A screen name here is the old, specific one. */
+const SECTION: Record<string, string> = { Projects: 'Projects', Goals: 'Projects', Workspace: 'Workspace', Agents: 'Agents', Approvals: 'Activity', Safety: 'Activity', Evidence: 'Activity', Overview: 'Analytics', Usage: 'Analytics', Results: 'Analytics', Comparisons: 'Analytics', Evaluations: 'Analytics', Environment: 'Analytics', Settings: 'Settings', Feedback: 'Settings' };
+const TAB: Record<string, string> = { Projects: 'My projects', Goals: 'Goals and tasks', Evidence: 'Records', Results: 'Results and evidence' };
+const HAS_TABS = new Set(['Projects', 'Activity', 'Analytics', 'Settings']);
+
 /** Goes to a screen on any viewport; on mobile the nav sits behind the menu button. */
 export async function go(page: Page, name: string) {
   const menu = page.getByRole('button', { name: 'Menu' });
   if (await menu.isVisible() && (await menu.getAttribute('aria-expanded')) === 'false') await menu.click();
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name, exact: true }).click();
+  const section = SECTION[name] ?? name;
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: section, exact: true }).click();
+  if (HAS_TABS.has(section)) await page.getByRole('tablist', { name: 'Section' }).getByRole('tab', { name: TAB[name] ?? name, exact: true }).click();
 }
 
 /** Completes the confirmation dialog the way a person does: reads the code and types it back. */

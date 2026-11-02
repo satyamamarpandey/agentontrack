@@ -55,6 +55,27 @@ service cloud.firestore {
       }
     }
 
+    // Optional, separately consented usage counts. Create only, once per install per week, and no client can read, change or delete them.
+    function validCounts(d, id) {
+      return d.keys().hasOnly(['week', 'version', 'runtimesConnected', 'tasksVerified', 'tasksTotal', 'activeDays', 'installId', 'createdAt'])
+        && d.keys().hasAll(['week', 'version', 'runtimesConnected', 'tasksVerified', 'tasksTotal', 'activeDays', 'installId', 'createdAt'])
+        && d.week is string && d.week.matches('^[0-9]{4}-W[0-9]{2}
+        && (request.resource.data.uid == null || isOwner(request.resource.data.uid));
+      allow delete: if request.auth != null && resource.data.uid == request.auth.uid;
+    }
+  }
+}
+)
+        && isString(d.version, 30) && isString(d.installId, 64)
+        && id == d.installId + '_' + d.week
+        && d.runtimesConnected is list && d.runtimesConnected.size() <= 12
+        && isCount(d.tasksVerified) && isCount(d.tasksTotal) && isCount(d.activeDays) && d.activeDays <= 7
+        && d.createdAt == request.time;
+    }
+    match /telemetry/{id} {
+      allow create: if validCounts(request.resource.data, id);
+    }
+
     match /feedback/{id} {
       allow create: if validFeedback(request.resource.data)
         && (request.resource.data.uid == null || isOwner(request.resource.data.uid));

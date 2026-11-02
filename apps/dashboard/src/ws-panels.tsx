@@ -11,7 +11,7 @@ const ago = (ts: string | number) => new Date(ts).toLocaleTimeString();
 /* ---------- Agent tab: the prompt composer and what the agent is doing ---------- */
 
 /** Only Claude Code can be started from here. Others run in their own terminal, and their hooks report to this same record. */
-export function AgentTab({ agents, tick }: { agents: any[]; tick: number }) {
+export function AgentTab({ tick }: { tick: number }) {
   const runs = useLoad<any[]>(() => get('/api/runs'), [tick]);
   const [prompt, setPrompt] = useState('');
   const [runtime, setRuntime] = useState('claude-code');
@@ -20,8 +20,13 @@ export function AgentTab({ agents, tick }: { agents: any[]; tick: number }) {
   const [msg, setMsg] = useState('');
   const [sent, setSent] = useState<Record<string, string>>({});
   useEffect(() => { const t = setInterval(runs.reload, 1500); return () => clearInterval(t); }, [runs.reload]);
-  const claude = agents.find((a) => a.id === 'claude-code');
-  const canStart = runtime === 'claude-code' && !!claude?.hooksInstalled;
+  // What can really be started is decided by the companion, per runtime. A Run control exists only for one that can.
+  const runtimes = useLoad<any[]>(() => get('/api/runtimes'), [tick]);
+  const options = runtimes.data ?? [];
+  const startable = options.filter((r) => r.canStart);
+  const chosen = options.find((r) => r.id === runtime);
+  const canStart = !!chosen?.canStart;
+  useEffect(() => { if (runtimes.data && !runtimes.data.find((r) => r.id === runtime)?.canStart && startable[0]) setRuntime(startable[0].id); }, [runtimes.data]); // eslint-disable-line react-hooks/exhaustive-deps
   const submit = async () => {
     setMsg('');
     try {
@@ -51,14 +56,16 @@ export function AgentTab({ agents, tick }: { agents: any[]; tick: number }) {
         <div className="row wrap">
           <label>Agent
             <select value={runtime} onChange={(e) => setRuntime(e.target.value)} name="runtime">
-              {agents.map((a) => <option key={a.id} value={a.id} disabled={a.id !== 'claude-code'}>{a.name}{a.id !== 'claude-code' ? ' (runs in its own terminal)' : ''}</option>)}
+              {options.length === 0 ? <option value="claude-code">Claude Code</option> : null}
+              {startable.length ? <optgroup label="Can start from AgentOnTrack">{startable.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</optgroup> : null}
+              {options.filter((r) => !r.canStart).length ? <optgroup label="Not available here">{options.filter((r) => !r.canStart).map((r) => <option key={r.id} value={r.id} disabled>{r.name}</option>)}</optgroup> : null}
             </select>
           </label>
           <label>Model<input value={model} onChange={(e) => setModel(e.target.value)} name="model" style={{ width: 110 }} /></label>
           <label>Budget cap (USD)<input type="number" min={0.01} max={5} step={0.01} value={budget} onChange={(e) => setBudget(Number(e.target.value))} name="budget" style={{ width: 110 }} /></label>
           <button className="btn primary end-self" type="submit" disabled={!canStart || !prompt.trim()} data-testid="ws-run"><Icon name="play" size={12} />Run <kbd>Ctrl ↵</kbd></button>
         </div>
-        <p className="muted small">{!claude?.installed ? 'Claude Code is not installed on this machine.' : !claude.hooksInstalled ? 'Connect Claude Code in the Agents panel first, so its hooks are in place.' : 'This starts your own logged-in Claude Code, uses your usage, and is capped per run. Other agents start in their own terminal and report here.'}</p>
+        <p className="muted small" data-testid="run-note">{canStart ? 'This starts your own logged-in agent, uses your usage, and is capped per run. Others start in their own terminal and report here.' : (chosen?.reason ?? startable.length ? chosen?.reason : 'No agent can be started from here yet. Connect Claude Code in the Agents tab, or start an agent in its own terminal: it reports here.')}</p>
       </form>
     </>
   );

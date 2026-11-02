@@ -14,3 +14,9 @@ export async function saveSummary(projectId: string, summary: ProjectSummary): P
   const { saveProjectSummary } = await import('./accounts-firebase');
   await saveProjectSummary(CONFIG, projectId, summary);
 }
+
+export async function sendCounts(installId: string, counts: import('./telemetry').UsageCounts): Promise<void> {
+  if (!CONFIG) throw new Error('Sending is not set up on this site.');
+  const { sendUsageCounts } = await import('./accounts-firebase');
+  await sendUsageCounts(CONFIG, installId, counts);
+}

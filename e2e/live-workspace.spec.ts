@@ -153,7 +153,7 @@ test('real Claude Code through the web workspace composer, end to end', async ({
   const head = inProj((p) => p.store.head()!.seq);
   await go(page, 'Settings');
   await page.getByRole('button', { name: 'Disconnect this browser' }).click();
-  await expect(page.getByRole('heading', { name: 'Pair this browser' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Connect this computer' })).toBeVisible();
   await page.getByLabel('Pairing code').fill(env.c.newPairingCode());
   await page.getByRole('button', { name: 'Pair', exact: true }).click();
   await go(page, 'Evidence');

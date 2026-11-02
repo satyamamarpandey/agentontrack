@@ -5,6 +5,17 @@ export const metadata = { title: 'Changelog' };
 export default function Changelog() {
   return (
     <Article title="Changelog" intro="Changes that matter to users.">
+      <h2>1.0.0-rc.4</h2>
+      <ul>
+        <li>A new first screen: choose to continue on this computer, sign in (Google, GitHub or email, once the site's owner switches accounts on), or look at a labelled demo. Signing in never gives the website access to your computer.</li>
+        <li>Connecting a computer is a guided step. The page looks for AgentOnTrack on your computer by itself, shows how to get and start it if it is not there, and asks for the one-time code from your terminal. If the computer stops answering, a clear screen offers Retry, Connect again, Download and the local dashboard.</li>
+        <li>Projects registered on your computer appear as soon as it is connected, with search, sort, archive, and a way to find Git repositories inside one folder you name, import a folder, or copy a GitHub repository.</li>
+        <li>A searchable catalog of 18 agents, editors, model servers and research tools, each with its maker's install page, how it connects, what has really been tested, and what it can and cannot do. Only agents that can really be started from AgentOnTrack show a Run control, decided by the helper.</li>
+        <li>Six places to go: Projects, Workspace, Agents, Activity, Analytics, Settings. A Results and evidence center, with an exportable receipts file.</li>
+        <li>Reading source files from the public site now needs a short permission you give in your terminal. The dashboard page has a Content-Security-Policy. <code>agentontrack dashboard --allow-origin</code> takes a dedicated hostname.</li>
+        <li>Optional anonymous usage counts, off by default, with a preview of exactly what would be sent.</li>
+        <li>Not changed or not claimed: sign-in is written and tested against emulators only, and is off until the owner creates a Firebase project. Only Claude Code starts from the product. AgentOnTrack still used more tokens and time than the agent alone in its own benchmarks.</li>
+      </ul>
       <h2>1.0.0-rc.3</h2>
       <ul>
         <li>A redesigned dashboard and site, with a command palette, light and dark themes, and dialogs that trap focus</li>

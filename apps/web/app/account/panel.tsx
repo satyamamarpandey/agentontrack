@@ -6,6 +6,8 @@ import { loadAccounts, SIGNED_IN_FLAG } from '../../lib/accounts-config';
 import { applyTheme } from '../theme-toggle';
 
 type Api = NonNullable<Awaited<ReturnType<NonNullable<typeof loadAccounts>>>>;
+// Kept outside React state so an error on the very first click can still be put in plain words.
+let loadedApi: Api | null = null;
 
 export function AccountPanel() {
   const [api, setApi] = useState<Api | null>(null);
@@ -15,6 +17,11 @@ export function AccountPanel() {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [mode, setMode] = useState<'signin' | 'create' | 'reset'>('signin');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [deletePassword, setDeletePassword] = useState('');
 
   const refresh = useCallback(async (a: Api, u: User) => {
     const d = await a.loadData(u.uid);
@@ -23,7 +30,7 @@ export function AccountPanel() {
   }, []);
   const act = async (fn: () => Promise<void>) => {
     setBusy(true); setError(''); setNote('');
-    try { await fn(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+    try { await fn(); } catch (e) { setError(loadedApi ? loadedApi.explain(e) : (e as Error).message); } finally { setBusy(false); }
   };
 
   // Firebase loads here only for someone who signed in on this browser before.
@@ -38,21 +45,42 @@ export function AccountPanel() {
     });
   }, [refresh]);
 
+  const theme = () => document.documentElement.dataset.theme ?? 'dark';
+  const finishWith = async (a: Api, u: User) => {
+    setUser(u);
+    await refresh(a, u);
+    // Came from the dashboard's welcome page: go back there, now signed in. Signing in grants nothing on the computer.
+    if (new URLSearchParams(location.search).get('next') === 'dashboard') location.href = `${process.env.NEXT_PUBLIC_BASE_PATH ?? ''}/dashboard/`;
+  };
+  const withApi = async () => { const a = api ?? await loadAccounts!(); loadedApi = a; setApi(a); return a; };
+
   if (!user) {
     return (
       <section className="panel stack" data-testid="signed-out">
-        <h2>What an account does</h2>
-        <p>It keeps your name and email from Google, your theme, any feedback you send while signed in, and project summaries you choose to save. They are stored in Firebase, on Google&apos;s servers, under your own account only.</p>
-        <p>It never receives code, prompts, paths, commands or project records. You can export or delete all of it here.</p>
-        <p className="muted small">Pressing the button loads Google&apos;s sign-in and Firebase from their servers, so Google and Firebase become third parties for you. Until then, nothing is loaded from them.</p>
+        <h2>Sign in or create an account</h2>
+        <p>An account is optional. It keeps your name and email, your theme, feedback you send while signed in, and project summaries you choose to save, in Firebase under your own account only.</p>
+        <p><b>Signing in never gives this website access to your computer, your files or your agents.</b> Connecting your computer is a separate step, confirmed in your terminal.</p>
+        <p className="muted small">Pressing a button loads Firebase, and for Google or GitHub their sign-in too, from their servers, so Google and Firebase become third parties for you. Until then, nothing is loaded from them. Code, prompts, paths, commands and project records are never sent.</p>
         {error ? <p className="alert" role="alert">{error}</p> : null}
-        <div><button className="btn primary" disabled={busy} data-testid="sign-in" onClick={() => act(async () => {
-          const a = api ?? await loadAccounts!();
-          setApi(a);
-          const u = await a.signIn(document.documentElement.dataset.theme ?? 'dark');
-          setUser(u);
-          await refresh(a, u);
-        })}>Sign in with Google</button></div>
+        <div className="row">
+          <button className="btn primary" disabled={busy} data-testid="sign-in" onClick={() => act(async () => { const a = await withApi(); await finishWith(a, await a.signIn(theme(), 'google')); })}>Continue with Google</button>
+          <button className="btn" disabled={busy} data-testid="sign-in-github" onClick={() => act(async () => { const a = await withApi(); await finishWith(a, await a.signIn(theme(), 'github')); })}>Continue with GitHub</button>
+        </div>
+        <form className="form" data-testid="email-form" onSubmit={(e) => { e.preventDefault(); act(async () => {
+          const a = await withApi();
+          if (mode === 'reset') { await a.resetPassword(email); setNote('If that address has an account, a reset link is on its way.'); return; }
+          await finishWith(a, mode === 'create' ? await a.emailSignUp(name, email, password, theme()) : await a.emailSignIn(email, password, theme()));
+        }).catch(() => undefined); }}>
+          <div className="row" role="group" aria-label="Email">
+            {(['signin', 'create', 'reset'] as const).map((m) => <button key={m} type="button" className={`btn small ${mode === m ? 'primary' : ''}`} aria-pressed={mode === m} onClick={() => { setMode(m); setError(''); setNote(''); }}>{m === 'signin' ? 'Sign in with email' : m === 'create' ? 'Create an account' : 'Reset password'}</button>)}
+          </div>
+          {mode === 'create' ? <label>Name<input value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" name="name" /></label> : null}
+          <label>Email<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" name="email" required /></label>
+          {mode !== 'reset' ? <label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={mode === 'create' ? 'new-password' : 'current-password'} name="password" required minLength={6} /></label> : null}
+          <div><button className="btn" type="submit" disabled={busy} data-testid="email-submit">{mode === 'create' ? 'Create account' : mode === 'reset' ? 'Send reset link' : 'Sign in'}</button></div>
+          {note ? <p role="status" data-testid="account-note">{note}</p> : null}
+        </form>
+        <p className="small"><a href={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ''}/dashboard/`}>Skip this: continue without an account</a></p>
       </section>
     );
   }
@@ -88,9 +116,10 @@ export function AccountPanel() {
           {!confirmDelete ? <button className="btn danger" disabled={busy} data-testid="delete-account" onClick={() => setConfirmDelete(true)}>Delete my account and data</button> : null}
         </div>
         {confirmDelete ? <div className="alert" role="alert">
+          {user.providerData[0]?.providerId === 'password' ? <label>Your password, to confirm<input type="password" value={deletePassword} onChange={(e) => setDeletePassword(e.target.value)} autoComplete="current-password" name="delete-password" /></label> : null}
           <p>This deletes your profile, preferences, saved summaries, feedback sent while signed in, and your sign-in. It cannot be undone. Feedback sent while signed out is not linked to you, so it cannot be found this way.</p>
           <div className="row">
-            <button className="btn danger" disabled={busy} data-testid="delete-confirm" onClick={() => act(async () => { await api!.deleteEverything(user); setUser(null); setData(null); setConfirmDelete(false); })}>Delete everything</button>
+            <button className="btn danger" disabled={busy} data-testid="delete-confirm" onClick={() => act(async () => { await api!.deleteEverything(user, deletePassword); setUser(null); setData(null); setConfirmDelete(false); })}>Delete everything</button>
             <button className="btn" onClick={() => setConfirmDelete(false)}>Cancel</button>
           </div>
         </div> : null}

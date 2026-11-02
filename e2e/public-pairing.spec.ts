@@ -13,8 +13,8 @@ import { Project } from '../packages/core/dist/index.js';
 import { confirmDialog, confirmOutsideOrigin, expect, go } from './fixtures';
 
 const ORIGIN = 'http://127.0.0.1:4199';
-const DASHBOARD = `${ORIGIN}/agentontrack/dashboard/`;
-const FALLBACK = /local address the companion prints, such as http:\/\/127\.0\.0\.1:\d+\//;
+const DASHBOARD = `${ORIGIN}/agentontrack/dashboard/?connect=1`;
+const FALLBACK = /address the helper prints in your terminal, such as http:\/\/127\.0\.0\.1:\d+\//;
 
 function record(info: TestInfo, step: string, outcome: string) {
   const dir = join('test-results', 'public-pairing');
@@ -46,7 +46,13 @@ const test = base.extend<{ env: Env }>({
 
 /** Pairs through the form, as a person would. Returns whether the browser let the page reach the companion. */
 async function pair(page: Page, port: number, code: string): Promise<'paired' | 'refused' | 'blocked'> {
+  if (!(await page.getByLabel('Companion port').isVisible())) await page.getByText('This computer uses a different port').click();
   await page.getByLabel('Companion port').fill(String(port));
+  await page.getByTestId('retry').click();
+  // The page looks for the companion by itself. A browser that will not let it, or finds nothing, shows that instead of a code box.
+  const status = page.getByTestId('probe-status');
+  await expect(status).not.toContainText('Looking', { timeout: 20_000 });
+  if (!(await status.textContent())?.includes('Found')) return 'blocked';
   await page.getByLabel('Pairing code').fill(code);
   await page.getByRole('button', { name: 'Pair', exact: true }).click();
   const shell = page.getByTestId('live-status');
@@ -63,12 +69,12 @@ async function pairOrRecordBlock(page: Page, env: Env, info: TestInfo) {
   await page.goto(DASHBOARD);
   const out = await pair(page, env.c.port, env.c.newPairingCode());
   if (out === 'blocked') {
-    await expect(page.getByRole('alert')).toContainText(FALLBACK);
+    await expect(page.locator('main')).toContainText(FALLBACK);
     record(info, info.title, 'BLOCKED by the browser: message and local fallback shown');
     test.skip(true, 'This browser blocked the page from reaching the companion, so this step cannot run. The block is the recorded result.');
   }
   expect(out).toBe('paired');
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Projects');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('My projects');
 }
 
 const openGoalDialog = async (page: Page, statement: string) => {
@@ -89,7 +95,7 @@ test('a wrong pairing code is refused, and the right one still works', async ({ 
   const code = env.c.newPairingCode();
   const out = await pair(page, env.c.port, 'WRONGCOD');
   if (out === 'blocked') {
-    await expect(page.getByRole('alert')).toContainText(FALLBACK);
+    await expect(page.locator('main')).toContainText(FALLBACK);
     record(info, 'wrong pairing code', 'BLOCKED by the browser: message and local fallback shown');
     test.skip(true, 'This browser blocked the request, so the companion never saw the code.');
   }
@@ -146,9 +152,9 @@ test('when the browser stops the connection, the page says so and gives the loca
       await set.send('Browser.setPermission', { permission: { name: 'local-network-access' }, setting: 'denied', origin: ORIGIN, browserContextId: targetInfo.browserContextId });
       const state = await p.evaluate(async () => (await navigator.permissions.query({ name: 'local-network-access' as PermissionName })).state);
       expect(await pair(p, env.c.port, env.c.newPairingCode())).toBe('blocked');
-      const alert = p.getByRole('alert');
+      const alert = p.locator('main');
       await expect(alert).toContainText(FALLBACK);
-      if (state === 'denied') await expect(alert).toContainText('denied this page access to your local network');
+      if (state === 'denied') await expect(p.getByTestId('probe-blocked')).toContainText('local network access');
       record(info, 'local network access denied', `real block; permission state read as ${state}; message and local fallback shown`);
     } finally {
       await strict.close();
@@ -159,7 +165,7 @@ test('when the browser stops the connection, the page says so and gives the loca
   await page.goto(DASHBOARD);
   await env.c.close();
   expect(await pair(page, env.c.port, 'ABCDEFGH')).toBe('blocked');
-  await expect(page.getByRole('alert')).toContainText(FALLBACK);
+  await expect(page.locator('main')).toContainText(FALLBACK);
   env.c = await env.start();
   record(info, 'local network access denied', 'NOT APPLICABLE: no such permission in this browser. Tested an unreachable companion instead: message and local fallback shown');
 });
@@ -181,10 +187,67 @@ test('the local dashboard address still works as the fallback, with no terminal 
   await page.goto(env.c.url);
   await page.getByLabel('Pairing code').fill(env.c.newPairingCode());
   await page.getByRole('button', { name: 'Pair', exact: true }).click();
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Projects');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('My projects');
   await openGoalDialog(page, 'Local fix');
   await confirmDialog(page);
   await expect.poll(() => env.goal()).toMatchObject({ statement: 'Local fix' });
   expect(env.codes).toHaveLength(0);
   record(info, 'local address fallback', 'paired and changed a goal, with its on-screen code');
+});
+
+test('welcome: the choices are clear, sign-in is honest when it is off, and nothing is asked before a choice', async ({ page, env }) => {
+  await page.goto(`${ORIGIN}/agentontrack/dashboard/`);
+  await expect(page.getByRole('heading', { name: 'Keep your AI coding agents on track' })).toBeVisible();
+  await expect(page.getByTestId('continue-local')).toBeVisible();
+  await expect(page.getByTestId('explore-demo')).toBeVisible();
+  for (const id of ['continue-google', 'continue-github', 'continue-email']) await expect(page.getByTestId(id)).toBeDisabled();
+  await expect(page.getByTestId('signin-off')).toContainText('not switched on');
+  // No pairing code box, no port and no terminal talk on the first screen.
+  await expect(page.getByLabel('Pairing code')).toHaveCount(0);
+  expect(env.codes).toEqual([]);
+});
+
+test('connect: not found shows what to do, found shows the one-time code, and the demo is labelled', async ({ page, env }, info) => {
+  await page.goto(`${ORIGIN}/agentontrack/dashboard/`);
+  await page.getByTestId('continue-local').click();
+  await page.getByText('This computer uses a different port').click();
+  // A port nothing listens on: the page says so, and offers the way forward.
+  await page.getByLabel('Companion port').fill('47999');
+  await page.getByTestId('retry').click();
+  await expect(page.getByTestId('probe-status')).toContainText('not found', { timeout: 20_000 });
+  await expect(page.getByTestId('probe-steps')).toContainText('agentontrack dashboard --allow-public-site');
+  await expect(page.getByTestId('download-link')).toBeVisible();
+  await expect(page.getByTestId('open-local')).toBeVisible();
+  await expect(page.getByLabel('Pairing code')).toHaveCount(0);
+  // The real companion: found, then the code box appears.
+  await page.getByLabel('Companion port').fill(String(new URL(env.c.url).port));
+  await page.getByTestId('retry').click();
+  const status = page.getByTestId('probe-status');
+  await expect(status).not.toContainText('Looking', { timeout: 20_000 });
+  if (!(await status.textContent())?.includes('Found')) { record(info, 'probe', 'blocked by this browser'); return; }
+  await expect(page.getByLabel('Pairing code')).toBeVisible();
+  record(info, 'probe', 'found');
+  // The demo says it is a demo.
+  await page.goto(`${ORIGIN}/agentontrack/dashboard/`);
+  await page.getByTestId('explore-demo').click();
+  await expect(page.getByTestId('demo-banner')).toBeVisible();
+});
+
+test('from the public site, source files stay closed until the terminal allows them, for a short time', async ({ page, env }, info) => {
+  await page.addLocatorHandler(page.getByTestId('terminal-code-dialog'), async (d) => {
+    await d.getByLabel('Code from your terminal').fill(env.codes.at(-1)!.code);
+    await d.getByRole('button', { name: 'Confirm' }).click();
+  });
+  await pairOrRecordBlock(page, env, info);
+  await go(page, 'Workspace');
+  // Nothing about the project's files is shown, and the page says why and how to allow it.
+  const ask = page.getByTestId('grant-files');
+  await expect(ask).toContainText('Allow this page to read the files in this project?');
+  await expect(page.getByRole('button', { name: 'src', exact: true })).toHaveCount(0);
+  expect(env.codes).toEqual([]);
+  await ask.getByRole('button', { name: 'Allow for 30 minutes' }).click();
+  await expect(page.getByRole('button', { name: 'src', exact: true })).toBeVisible({ timeout: 20_000 });
+  expect(env.codes.at(-1)!.action).toMatch(/files\/grant/);
+  await expect(ask).toHaveCount(0);
+  record(info, 'file access grant', 'asked in the terminal, then allowed');
 });

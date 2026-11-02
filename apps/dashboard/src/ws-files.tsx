@@ -8,13 +8,30 @@ export interface Buffer { path: string; content: string; saved: string; hash: st
 
 const enc = encodeURIComponent;
 
+/**
+ * Source code is the most sensitive thing the helper can read, so a page on the public site may read it only after you allow it from your
+ * terminal, for a short time. This page shows why, and asks.
+ */
+export function GrantFiles({ onGranted }: { onGranted: () => void }) {
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="alert warn stack" role="status" data-testid="grant-files">
+      <p><b>Allow this page to read the files in this project?</b> It is on a website, so your terminal will ask you to confirm. The permission lasts 30 minutes, covers this project only, and you can withdraw it any time.</p>
+      {err ? <p role="alert">{err}</p> : null}
+      <div><button className="btn small primary" disabled={busy} onClick={async () => { setBusy(true); setErr(''); try { await post('/api/files/grant', { minutes: 30 }); onGranted(); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); } }}>Allow for 30 minutes</button></div>
+    </div>
+  );
+}
+
 /** The project's folders, read from the companion one folder at a time. Dot-folders such as .git are not offered. */
 export function FileTree({ onOpen, current, onLoaded }: { onOpen: (path: string) => void; current: string | null; onLoaded: (files: string[]) => void }) {
   const [dirs, setDirs] = useState<Record<string, Entry[]>>({});
   const [open, setOpen] = useState<Set<string>>(() => new Set(['']));
   const [error, setError] = useState('');
+  const [needsGrant, setNeedsGrant] = useState(false);
   const [filter, setFilter] = useState('');
-  const load = (dir: string) => get<{ entries: Entry[] }>(`/api/files?dir=${enc(dir)}`).then((r) => setDirs((d) => ({ ...d, [dir]: r.entries ?? [] }))).catch((e) => setError(e.message));
+  const load = (dir: string) => get<{ entries: Entry[] }>(`/api/files?dir=${enc(dir)}`).then((r) => { setNeedsGrant(false); setDirs((d) => ({ ...d, [dir]: r.entries ?? [] })); }).catch((e) => { if ((e as ApiError).data?.needsGrant) setNeedsGrant(true); else setError(e.message); });
   useEffect(() => { void load(''); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { onLoaded(Object.values(dirs).flat().filter((e) => e.type === 'file').map((e) => e.path)); }, [dirs]); // eslint-disable-line react-hooks/exhaustive-deps
   const toggle = (e: Entry) => {
@@ -33,6 +50,7 @@ export function FileTree({ onOpen, current, onLoaded }: { onOpen: (path: string)
   );
   return (
     <div className="stack" style={{ gap: 6 }}>
+      {needsGrant ? <GrantFiles onGranted={() => { setNeedsGrant(false); setDirs({}); void load(''); }} /> : null}
       <label className="sr-only" htmlFor="ws-filter">Filter loaded files</label>
       <input id="ws-filter" type="search" placeholder="Filter files" value={filter} onChange={(e) => setFilter(e.target.value)} name="ws-filter" />
       {error ? <div className="alert bad" role="alert">{error}</div> : null}

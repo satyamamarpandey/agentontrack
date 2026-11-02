@@ -1,53 +1,32 @@
-# Setting up optional accounts
+# Accounts: what the owner has to switch on
 
-Accounts are off by default. With no config, the site has no sign-in UI, holds no Firebase code and makes no third-party request. Nothing in AgentOnTrack requires an account. These steps are for the site's owner only. They have not yet been done on a real Firebase project.
+Accounts are optional, and off in any build without a Firebase config. The code for Google, GitHub and email sign-in, password reset, export, deletion and optional usage counts is in the repository and passes against the Firebase **emulators** in CI. **That is not production.** Nothing here is working for real visitors until the owner has done the steps below, and until a real sign-in has been tried on the live site.
 
-## 1. Create the Firebase project
+## Status
 
-1. At <https://console.firebase.google.com>, create a project. Decline Google Analytics, since the site promises none.
-2. Check it is on the free Spark plan. Do not add a billing account. On Spark, going over a quota makes requests fail, instead of costing money.
-3. Under **Build > Firestore Database**, create a database in production mode.
+| Part | Status |
+|---|---|
+| Sign-in code for Google, GitHub and email, reset, sign-out, export, delete | Written. Tested against the Auth and Firestore emulators in CI |
+| Per-user Firestore rules, and create-only usage counts | Written. Tested against the emulator |
+| A real Firebase project | **Owner action, not done** |
+| A real Google or GitHub sign-in on the live site | **NOT TESTED** |
+| App Check | Code present, **off** until a key is set. Enforcement is switched on by the owner |
 
-## 2. Turn on Google sign-in
+## Steps (owner only)
 
-1. Under **Build > Authentication > Sign-in method**, enable the **Google** provider and set a support email.
-2. Under **Authentication > Settings > Authorized domains**, add `pandeysatyam.com`.
+1. **Create a Firebase project** (the free Spark plan is enough) and register a web app. Copy its web config: `apiKey`, `authDomain`, `projectId`, `appId`. These are public identifiers, not secrets.
+2. **Authentication:** enable Google, GitHub and Email/Password. For GitHub, create an OAuth app at GitHub, set its callback to the URL Firebase shows, and paste the client id and secret into Firebase (the secret goes only into Firebase). Turn on email enumeration protection, and add `pandeysatyam.com` (and any dedicated hostname) to Authorized domains.
+3. **Firestore:** create the database in production mode, then deploy `firestore.rules` from this repository.
+4. **Repository variables** (public repo, Settings, Variables): `FIREBASE_WEB_CONFIG` set to the config as one line of JSON. Re-run the Pages workflow.
+5. **App Check (recommended):** register the web app with reCAPTCHA v3, set the variable `APPCHECK_SITE_KEY` to the **site key** (public), re-run Pages, watch the App Check metrics for a few days, then switch enforcement on for Firestore and Authentication in the console. Feedback and usage counts are the calls an anonymous visitor can make, so they are the ones to protect.
+6. **Try it for real:** sign in with Google, with GitHub and with an email, send feedback, export, then delete, on the live site. Only then is this PASS.
 
-## 3. Deploy the rules
+## What is stored, and never stored
 
-From a checkout, with `firebase-tools` available and logged in:
+Stored, under the person's own user id: name and email, theme, feedback they sent while signed in, project summaries they chose to save (counts only). Anonymous feedback is stored without a link to anyone. Usage counts, if a person opts in, hold a random install id, a week, agent program names and four counts.
 
-```
-firebase deploy --only firestore:rules --project <your-project-id>
-```
+Never stored or sent: code, prompts, file paths, commands, goals, conversations, provider logins or tokens. No GitHub token is read: sign-in keeps only the name and email, and importing a repository uses your own git setup on your own computer.
 
-Before that, Firestore refuses every request from the site. `firestore.rules` and `firebase.json` are at the root of the repository.
+## Cost
 
-## 4. Set the config
-
-Under **Project settings > General > Your apps**, add a web app, and copy its config object as JSON with at least `apiKey`, `authDomain`, `projectId` and `appId`. These values identify the project and are visible to every visitor once published. Access is controlled by the rules, so they are not secrets, but keep them out of the repository anyway, so that the default build stays without accounts.
-
-Set the JSON, on one line, when building the site:
-
-```
-NEXT_PUBLIC_FIREBASE_CONFIG='{"apiKey":"...","authDomain":"...","projectId":"...","appId":"..."}' pnpm build:pages
-```
-
-`scripts/build-pages.mjs` passes it to the dashboard as `VITE_FIREBASE_CONFIG`, and refuses to build if it is not valid JSON with those fields. For GitHub Pages, keep it in a repository variable named `FIREBASE_WEB_CONFIG`, which the public `pages.yml` workflow passes to the build. An unset variable builds the site with no accounts.
-
-## 5. Check it
-
-- Sign in at `/account/`. Your name and email appear.
-- Send feedback at `/feedback/`. The document appears in the `feedback` collection in the console, which is where you read it.
-- Export, then delete your account, and check that its documents are gone.
-
-## What to know
-
-- **Feedback is open to anyone**, so it can be spammed, up to Firestore's free quota, after which writes fail until the next day. The rules limit each document's fields and length, but not the number of documents. Firebase App Check would reduce this, and is not set up here.
-- **Reading feedback** is only possible in the Firebase console. No client can read it.
-- **Deleting anonymous feedback** is only possible in the console, since it is not linked to anyone. Honour such requests there.
-- **The privacy page** changes by itself when the config is set. Have it reviewed before turning accounts on.
-
-## Testing
-
-`e2e/accounts.spec.ts` runs against the Firebase emulators, in the `accounts` job of `.github/workflows/ci.yml`. It needs Java, and it skips unless `FIREBASE_AUTH_EMULATOR_HOST` is set.
+Spark limits apply. If a limit is reached the site keeps working and accounts stop, because nothing else depends on them.

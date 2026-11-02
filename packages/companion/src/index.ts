@@ -1,10 +1,10 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { homedir } from 'node:os';
-import { dirname, extname, relative, sep, isAbsolute, join, normalize, resolve } from 'node:path';
+import { basename, dirname, extname, relative, sep, isAbsolute, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { failoverOptions, runtimeFacts, coverageFor, PROVIDERS, providerInstalled, hooksInstalled, installHooks, probeLocalModel, uninstallHooks } from '@agentontrack/adapters';
 import { renderHandoffMarkdown, acceptHandoff2, buildHandoff, listHandoffs, loadHandoff, planWorkflow, checkSpec, saveHandoff, validateHandoff, hashText, listDir, WorkspaceError, updateRegistered, approvalView, agentontrackHome, computeAnalytics, isPendingLive, loadRegistry, Project, registerProject, saveRegistry, stateDirFor, type Registered } from '@agentontrack/core';
@@ -13,7 +13,7 @@ import * as z from 'zod/v4';
 const SESSION_TTL_MS = 8 * 3_600_000;
 const REMOTE_SESSION_TTL_MS = 2 * 3_600_000;
 /** Things a paired outside page may do without a terminal code: none of them grants or disables anything. */
-const REMOTE_FREE = new Set(['/api/challenge', '/api/unpair', '/api/feedback']);
+const REMOTE_FREE = new Set(['/api/challenge', '/api/unpair', '/api/feedback', '/api/files/revoke']);
 const MAX_TERMINAL_FAILURES = 5;
 const MAX_SHOWN_REQUEST = 4000;
 const CODE_TTL_MS = 5 * 60_000;
@@ -50,7 +50,7 @@ export interface Companion {
   server: Server;
 }
 
-interface Session { tokenHash: string; csrf: string; createdAt: number; expiresAt: number; userAgent: string; origin?: string; surface?: 'editor'; terminalFailures?: number }
+interface Session { tokenHash: string; csrf: string; createdAt: number; expiresAt: number; userAgent: string; origin?: string; surface?: 'editor'; terminalFailures?: number; fileGrant?: { project: string; until: number } }
 interface Run { id: string; project: string; child: ChildProcess; started: number; events: string[]; status: string }
 
 const hash = (s: string) => createHash('sha256').update(s).digest('hex');
@@ -64,6 +64,45 @@ const saveSettings = (s: Settings) => { mkdirSync(dirname(settingsPath()), { rec
 const TaskInput = z.object({ title: z.string().min(1).max(300), criteria: z.array(z.unknown()).max(50).default([]), limits: z.unknown().optional() });
 const RunInput = z.object({ runtime: z.enum(['claude-code', 'codex', 'hermes']), prompt: z.string().min(1).max(20_000).regex(/^[^-]/, 'A prompt cannot start with a hyphen'), model: z.string().regex(/^\w[\w.:-]{0,79}$/).default('haiku'), maxBudgetUsd: z.number().positive().max(5).default(0.5) });
 const HumanFields = { confirm: z.string(), passphrase: z.string().optional() };
+
+/** Only github.com over https, as owner/repo with an optional .git. Anything else, such as a local path or another scheme, is refused. */
+export function parseGithubUrl(raw: string): string | null {
+  const m = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/.exec(raw.trim());
+  return m && m[1] !== '.' && m[1] !== '..' && m[2] !== '.' && m[2] !== '..' ? `https://github.com/${m[1]}/${m[2]}.git` : null;
+}
+
+const SKIP = new Set(['node_modules', 'vendor', 'dist', 'build', 'target', '__pycache__', 'venv', 'AppData', 'Library']);
+/** Breadth-first, bounded in depth, in folders visited, and in results. A repository is reported and not entered. */
+export function discoverRepos(top: string, depth: number, registered: Set<string>): { dir: string; found: { path: string; name: string; registered: boolean }[]; truncated: boolean } {
+  const found: { path: string; name: string; registered: boolean }[] = [];
+  let visited = 0; let truncated = false;
+  let level = [top];
+  for (let d = 0; d <= depth && level.length; d++) {
+    const next: string[] = [];
+    for (const dir of level) {
+      if (++visited > 2000 || found.length >= 200) { truncated = true; break; }
+      if (existsSync(join(dir, '.git'))) { found.push({ path: dir, name: basename(dir), registered: registered.has(dir) }); continue; }
+      if (d === depth) continue;
+      let names: string[] = [];
+      try { names = readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory() && !e.isSymbolicLink() && !e.name.startsWith('.') && !SKIP.has(e.name)).map((e) => e.name); } catch { continue; }
+      for (const n of names) next.push(join(dir, n));
+    }
+    level = next;
+  }
+  return { dir: top, found: found.sort((a, b) => a.name.localeCompare(b.name)), truncated };
+}
+
+/** Runs git without ever waiting for a person: a prompt for credentials is a failure, not a hang. */
+function runGit(args: string[]): Promise<{ ok: boolean; message: string }> {
+  return new Promise((done) => {
+    const child = spawn('git', args, { env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }, stdio: ['ignore', 'ignore', 'pipe'] });
+    let err = '';
+    child.stderr.setEncoding('utf8').on('data', (d: string) => { err += d; });
+    const timer = setTimeout(() => { child.kill(); done({ ok: false, message: 'it took longer than 5 minutes' }); }, 300_000);
+    child.on('error', (e) => { clearTimeout(timer); done({ ok: false, message: e.message }); });
+    child.on('close', (code) => { clearTimeout(timer); done({ ok: code === 0, message: err.trim().split('\n').pop()?.slice(0, 200) ?? 'git failed' }); });
+  });
+}
 
 function detectVersionArgs(cmd: string, args: string[]): string | null {
   const r = spawnSync(cmd, args, { encoding: 'utf8', timeout: 8000, shell: process.platform === 'win32' });
@@ -344,7 +383,7 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
         const { p } = projectFor(r.id);
         const s = p.state();
         const t = s.activeTaskId ? s.tasks.get(s.activeTaskId) : null;
-        return { ...r, missing, goal: s.goal?.statement ?? null, goalVersion: s.goal?.version ?? null, activeTask: t ? { id: t.id, title: t.title, status: p.evaluate(t.id).status } : null, pendingApprovals: [...s.approvals.values()].filter((a) => isPendingLive(a, new Date())).length };
+        return { ...r, missing, goal: s.goal?.statement ?? null, lastEventAt: ((h) => (h ? p.store.eventAt(h.seq)?.ts ?? null : null))(p.store.head()), goalVersion: s.goal?.version ?? null, activeTask: t ? { id: t.id, title: t.title, status: p.evaluate(t.id).status } : null, pendingApprovals: [...s.approvals.values()].filter((a) => isPendingLive(a, new Date())).length };
       }));
     }
     if (path === '/api/projects' && method === 'POST') {
@@ -361,6 +400,31 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
         if (g.status !== 0) throw new HttpError(409, `git init failed: ${(g.stderr || g.error?.message || '').slice(0, 200)}`);
       }
       return json(res, 200, register(body.path));
+    }
+    // Finds Git repositories inside ONE folder the person names. It never walks the whole disk, never enters a repository, skips
+    // dot-folders and dependency folders, and returns folder names only. An outside page needs a terminal code for it, like any POST.
+    if (path === '/api/projects/discover' && method === 'POST') {
+      const body = z.object({ dir: z.string().min(1).max(1000), depth: z.number().int().min(1).max(3).default(2) }).parse(await readBody(req));
+      if (!isAbsolute(body.dir)) throw new HttpError(400, 'Use an absolute path');
+      const top = resolve(body.dir);
+      if (dirname(top) === top) throw new HttpError(400, 'Choose a folder such as your code folder, not a whole drive');
+      if (!existsSync(top) || !statSync(top).isDirectory()) throw new HttpError(400, 'That folder does not exist');
+      return json(res, 200, discoverRepos(top, body.depth, new Set(loadRegistry().map((r) => resolve(r.root)))));
+    }
+    // Clones a GitHub repository into a new folder, using the person's own git setup. No GitHub credential reaches AgentOnTrack.
+    if (path === '/api/projects/clone' && method === 'POST') {
+      const body = z.object({ url: z.string().min(1).max(300), dest: z.string().min(1).max(1000) }).parse(await readBody(req));
+      const url = parseGithubUrl(body.url);
+      if (!url) throw new HttpError(400, 'Use a GitHub address such as https://github.com/owner/repo');
+      if (!isAbsolute(body.dest)) throw new HttpError(400, 'Use an absolute path for the new folder');
+      const dest = resolve(body.dest);
+      const home = resolve(agentontrackHome());
+      if (dirname(dest) === dest || dest === resolve(homedir()) || dest === home || dest.startsWith(home + sep)) throw new HttpError(400, 'Choose a new folder for this project');
+      if (existsSync(dest) && (!statSync(dest).isDirectory() || readdirSync(dest).length)) throw new HttpError(409, 'That folder already exists and is not empty. Choose a new one.');
+      mkdirSync(dirname(dest), { recursive: true });
+      const out = await runGit(['clone', '--', url, dest]);
+      if (!out.ok) { rmSync(dest, { recursive: true, force: true }); throw new HttpError(409, `Could not clone it: ${out.message}`); }
+      return json(res, 200, register(dest));
     }
     if (path === '/api/projects/update' && method === 'POST') {
       const body = z.object({ id: z.string().min(1), name: z.string().min(1).max(120).optional(), archived: z.boolean().optional() }).parse(await readBody(req));
@@ -382,6 +446,19 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
       const { entry } = projectFor(projectId);
       return json(res, 200, Object.values(PROVIDERS).map((a) => { const version = detectVersionArgs(a.bin, a.versionArgs); return { id: a.id, name: a.name, kind: a.kind, surfaces: a.surfaces, version, installed: !!version, hooksInstalled: providerInstalled(a, entry.root), failure: a.failure, limitations: a.limitations, connect: `agentontrack install ${a.id}` }; }));
     }
+    // Which agents this companion can really start, and why not for the rest. The interface shows a Run control only where canStart is true.
+    if (path === '/api/runtimes' && method === 'GET') {
+      const { entry } = projectFor(projectId);
+      const claudeInstalled = !!detectVersion('claude');
+      const claudeHooked = hooksInstalled('claude-code', entry.root);
+      const terminal = (name: string) => `Starting ${name} from AgentOnTrack is not built yet. Start it in its own terminal: its hooks still report to this project.`;
+      return json(res, 200, [
+        { id: 'claude-code', name: 'Claude Code', canStart: claudeInstalled && claudeHooked, how: 'claude -p, started by AgentOnTrack in this project, with its hooks reporting here', reason: !claudeInstalled ? 'Claude Code is not installed on this computer.' : !claudeHooked ? 'Connect Claude Code to this project first, so its hooks are in place.' : null },
+        { id: 'codex', name: 'Codex', canStart: false, how: null, reason: terminal('Codex') },
+        { id: 'hermes', name: 'Hermes', canStart: false, how: null, reason: terminal('Hermes') },
+        ...Object.values(PROVIDERS).map((a) => ({ id: a.id, name: a.name, canStart: false, how: null, reason: terminal(a.name) })),
+      ]);
+    }
     const agentAction = /^\/api\/agents\/(claude-code|codex)\/(connect|disconnect)$/.exec(path);
     if (agentAction && method === 'POST') {
       const { entry } = projectFor(projectId);
@@ -400,6 +477,24 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
     }
 
     const { entry, p } = projectFor(projectId);
+    /**
+     * Source code is the most sensitive thing this companion can read. A page on an outside origin may read project files and diffs
+     * only after the person allows it from the terminal, for a short time and for one project. The local address and editors are not affected.
+     */
+    if (method === 'GET' && session.origin && ['/api/files', '/api/file', '/api/worktrees/diff', '/api/spec/check'].includes(path)) {
+      const g = session.fileGrant;
+      if (!g || g.project !== entry.id || g.until < Date.now()) throw Object.assign(new HttpError(403, "This page is not allowed to read this project's files yet. Allow it for a short time first."), { extra: { needsGrant: true } });
+    }
+    if (path === '/api/files/grant' && method === 'POST') {
+      const b = z.object({ minutes: z.number().int().min(1).max(120).default(30) }).parse(await readBody(req));
+      session.fileGrant = { project: entry.id, until: Date.now() + b.minutes * 60_000 };
+      return json(res, 200, { until: session.fileGrant.until });
+    }
+    if (path === '/api/files/revoke' && method === 'POST') { delete session.fileGrant; return json(res, 200, { ok: true }); }
+    if (path === '/api/files/status' && method === 'GET') {
+      const g = session.fileGrant;
+      return json(res, 200, { needed: !!session.origin, granted: !session.origin || (!!g && g.project === entry.id && g.until > Date.now()), until: session.origin ? g?.until ?? null : null });
+    }
     const s = () => p.state();
 
     if (path === '/api/state' && method === 'GET') {

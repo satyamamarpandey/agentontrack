@@ -5,8 +5,8 @@ import { randomBytes } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
-import { approvalView, checkAnchor, isPendingLive, Project, pushAnchor, registerProject, routeIntent, type ProjectState } from '@agentontrack/core';
-import { coverageFor, handleHookSafely, handleProviderHookSafely, installMcpClient, isProvider, MCP_CLIENTS, perplexityMcpConfig, PROVIDERS, providerInstalled, providerSelfTest, hermesHookConfig, hookSelfTest, hooksInstalled, installHooks, probeLocalModel, uninstallHooks, type RuntimeId } from '@agentontrack/adapters';
+import { approvalView, checkAnchor, isPendingLive, PhasePlanSchema, phaseViews, planSha, Project, pushAnchor, registerProject, routeIntent, suggestNext, type ProjectState } from '@agentontrack/core';
+import { coverageFor, handleHookSafely, handleProviderHookSafely, installMcpClient, isProvider, MCP_CLIENTS, perplexityMcpConfig, PROVIDERS, providerInstalled, providerSelfTest, hermesHookConfig, hookSelfTest, hooksInstalled, installHooks, probeLocalModel, uninstallHooks, discoverModels, type RuntimeId } from '@agentontrack/adapters';
 import { runSelf, stableCommand, VERSION } from './self.js';
 import { resolveProject, workspaceCommand } from './workspace-cmds.js';
 import { planProjectFiles, applyProjectFiles } from './init.js';
@@ -122,7 +122,7 @@ const nativeRuntime = (r: string | undefined) => {
   return r;
 };
 
-const ALL_COMMANDS = ['setup', 'doctor', 'providers', 'mcp-config', 'research', 'run', 'init', 'sync-docs', 'install', 'uninstall', 'status', 'dashboard', 'approver', 'goal', 'decision', 'policy', 'task', 'approvals', 'approve', 'deny', 'revoke', 'ack', 'verify', 'audit', 'anchor', 'probe', 'suggest', 'mcp', 'hook', 'self', 'version'];
+const ALL_COMMANDS = ['setup', 'doctor', 'providers', 'mcp-config', 'research', 'run', 'init', 'sync-docs', 'install', 'uninstall', 'status', 'dashboard', 'approver', 'goal', 'decision', 'policy', 'task', 'approvals', 'approve', 'deny', 'revoke', 'ack', 'verify', 'audit', 'anchor', 'probe', 'suggest', 'models', 'next', 'mcp', 'hook', 'self', 'version'];
 
 async function main(): Promise<void> {
   const [cmd, sub, arg] = argv;
@@ -378,6 +378,24 @@ async function main(): Promise<void> {
       return;
     case 'suggest':
       print(routeIntent(argv.slice(1).join(' ')));
+      return;
+    // The models this computer has: named in a runtime's config, used in this project's recorded runs, or listed by a local server. Never "available to you".
+    case 'models':
+      await withProject(async (p) => {
+        const seen = p.store.byType(['usage.recorded']).map((e: any) => ({ agent: String(e.payload.runtime ?? 'claude-code'), model: String(e.payload.model ?? ''), worked: true }));
+        print({ models: await discoverModels({ seen, inits: [] }), note: 'Found on this computer or used in a recorded run. Whether your plan allows a model is only known when a run uses it.' });
+      });
+      return;
+    // The same suggestions the website and the phone show, from the same record.
+    case 'next':
+      await withProject((p) => {
+        const cur = p.state().plan;
+        const doc = cur ? PhasePlanSchema.parse(cur.doc) : null;
+        const approved = !!cur && !!doc && cur.approvedSha === planSha(doc);
+        const views = doc ? phaseViews(doc, approved, p.planRuns(), p.planTasks()) : [];
+        const claude = !!toolVersion('claude --version') && hooksInstalled('claude-code', root);
+        print(suggestNext({ goal: p.state().goal?.statement ?? null, plan: doc, approved, views, pendingApprovals: [...p.state().approvals.values()].filter((a) => isPendingLive(a, new Date())).length, agents: [{ id: 'claude-code', name: 'Claude Code', canStart: claude }] }));
+      });
       return;
     case 'approvals':
       await withProject((p) => print(listApprovals(p.state())));

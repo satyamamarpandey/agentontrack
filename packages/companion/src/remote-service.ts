@@ -128,7 +128,7 @@ export class RemoteService {
     if (!this.running || this.now() < this.quotaUntil) return;
     const devices = this.host.state.devices.filter((d) => !d.revokedAt);
     if (!devices.length) return;
-    const parts: [string, unknown][] = [['list', this.o.list()]];
+    const parts: [string, unknown][] = [['list', { items: this.o.list() }]];
     for (const p of this.o.projects()) parts.push([await snapshotKey(this.o.file.computerId, p.id), p.snapshot()]);
     for (const [name, body] of parts) {
       const stable = JSON.parse(JSON.stringify(body, (k, v) => (k === 'generatedAt' ? undefined : v)));

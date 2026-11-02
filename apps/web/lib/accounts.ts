@@ -92,7 +92,10 @@ export async function emailSignIn(email: string, password: string, theme: string
 
 /** Firebase answers the same way whether or not the address has an account, so this never reveals which do. */
 export async function resetPassword(email: string): Promise<void> {
-  await sendPasswordResetEmail(connect().auth, email);
+  try { await sendPasswordResetEmail(connect().auth, email); } catch (e) {
+    // Whether an address has an account is not told to whoever asks, so "no such account" looks the same as success. Anything else (offline, a bad address) is still shown.
+    if ((e as { code?: string }).code !== 'auth/user-not-found') throw e;
+  }
 }
 
 export async function signOutHere(): Promise<void> {

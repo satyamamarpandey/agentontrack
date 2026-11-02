@@ -1,4 +1,4 @@
-// Keeps the app shell available when the network is slow. It never caches Firebase, the account page, or anything with a person's data.
+// Keeps the phone page shell available when the network is slow. It never keeps another site's responses, a write, or anything with a person's data.
 const SHELL = 'aot-shell-v1';
 self.addEventListener('install', (e) => { self.skipWaiting(); e.waitUntil(caches.open(SHELL).then((c) => c.addAll(['./?m=1', './manifest.webmanifest', './icon-192.png']).catch(() => undefined))); });
 self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== SHELL).map((k) => caches.delete(k)))).then(() => self.clients.claim())); });

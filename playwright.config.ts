@@ -16,12 +16,15 @@ export default defineConfig({
     { command: 'node e2e/serve.mjs', port: SITE_PORT, reuseExistingServer: false, timeout: 30_000, env: { SITE_ROOT: process.env.SITE_ROOT ?? 'dist-pages', SITE_PORT: String(SITE_PORT) } },
   ],
   projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] }, testIgnore: /live/ },
-    { name: 'firefox', use: { ...devices['Desktop Firefox'] }, testIgnore: /live/ },
-    { name: 'webkit', use: { ...devices['Desktop Safari'] }, testIgnore: /live/ },
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] }, testIgnore: /live|phone-shell/ },
+    { name: 'firefox', use: { ...devices['Desktop Firefox'] }, testIgnore: /live|phone-shell/ },
+    { name: 'webkit', use: { ...devices['Desktop Safari'] }, testIgnore: /live|phone-shell/ },
     ...(edgeAvailable ? [{ name: 'edge', use: { ...devices['Desktop Edge'], channel: 'msedge' as const }, testIgnore: /live/ }] : []),
     // Pairing is about the browser's network rules, which the desktop Chromium project covers. The mobile project checks layout.
-    { name: 'mobile', use: { ...devices['Pixel 7'] }, testIgnore: /live|public-pairing/ },
+    { name: 'mobile', use: { ...devices['Pixel 7'] }, testIgnore: /live|public-pairing|phone/ },
+    // Device PROFILES for the phone page and PWA files. Not physical phones: those are recorded separately.
+    { name: 'android', testMatch: /phone-shell/, use: { ...devices['Pixel 7'] } },
+    { name: 'iphone', testMatch: /phone-shell/, use: { ...devices['iPhone 14'] } },
     { name: 'live', testMatch: /live/, use: { ...devices['Desktop Chrome'] }, timeout: 420_000 },
   ],
 });

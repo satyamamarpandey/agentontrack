@@ -132,6 +132,8 @@ describe('what a phone is shown', () => {
   it('is a signed snapshot per project and one for the list, readable only by that phone, with the time it was made inside', async () => {
     const pk = `ph1__${await snapshotKey(file.computerId, 'proj1')}`;
     expect([...tr.snapshots.keys()].sort()).toEqual(['ph1__list', pk].sort());
+    // The list is an object with items, so the phone can show it; a bare array would be spread into numbered keys.
+    expect((await read(tr.snapshots.get('ph1__list')!)).items).toEqual([{ id: 'proj1', name: 'My project' }]);
     const snap = await read(tr.snapshots.get(pk)!);
     expect(snap).toMatchObject({ n: 1, project: { id: 'proj1' } });
     expect(Date.parse(snap.generatedAt)).toBe(T);

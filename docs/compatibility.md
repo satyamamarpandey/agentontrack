@@ -53,6 +53,17 @@ Clean install, upgrade, rollback and uninstall: Windows x64, Linux x64 and arm64
 | Antigravity | NOT TESTED. Documented plugin interfaces were not exercised. |
 | JetBrains, Zed, others | Not supported. |
 
+## Large plugin collections (for example ECC)
+
+Some Claude Code plugin collections ship dozens of agents, hundreds of skills, slash-command shims and their own hooks (the ECC repository, MIT licensed, describes itself this way). AgentOnTrack does **not** bundle, copy or depend on any of it: it governs the agent you already run, whatever instructions that agent was given.
+
+What to know before combining them. **None of this has been tested** with ECC or any similar collection:
+
+* Their hooks and ours both run. AgentOnTrack's decision is made by its own hook, and `agentontrack doctor` tests that hook. It cannot see or vouch for what another hook decides. Do not enable a plugin that auto-approves tools or loosens permissions in a project you want governed.
+* Agent, skill and hook files are instructions the agent obeys. AgentOnTrack treats the host's config folders as protected paths, so an agent cannot edit them by itself. A plugin you install yourself is outside that protection. Review it as you would code you run.
+* Skills and agents do not make AgentOnTrack's evidence stronger. A skill that says "all tests pass" is a claim, not a receipt.
+* Install only from the plugin's official source. The ECC project warns that unofficial mirrors may contain malware.
+
 ## Agents started from the product
 
 Only **Claude Code** can be started from the web workspace or the VS Code sidebar. Codex, Hermes and the other platforms run in their own terminal, and their hooks report to the same record. Assigning a role to an agent in the Team panel records the plan. It does not start that agent.

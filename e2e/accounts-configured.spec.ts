@@ -59,6 +59,10 @@ test('privacy and security say what accounts store, and that they are optional',
   await page.goto(`${SITE}/privacy/`);
   const main = page.locator('main');
   for (const text of ['You never need an account', 'Google and Firebase become third parties', 'never sent', 'Export or delete']) await expect(main).toContainText(text);
+  // The cloud features are disclosed as experimental, with what each one sends and what cannot be deleted.
+  const all = (await main.innerText()).replace(/\s+/g, ' ');
+  for (const text of ['optional cloud features that can send data', 'experimental', 'Phone control', 'signed and encrypted with keys Firebase never sees', 'has not been run on a real Firebase project or a physical phone', 'Anonymous usage counts', 'off unless you turn them on', 'cannot be deleted once sent', 'No AgentOnTrack account is required for local use', 'processed by that provider']) expect(all).toContain(text);
+  for (const claim of ['Nothing leaves your machine', 'no telemetry']) expect(all).not.toContain(claim);
   await page.goto(`${SITE}/security/`);
   await expect(page.locator('main')).toContainText('Optional accounts');
 });

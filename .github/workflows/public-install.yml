@@ -1,10 +1,18 @@
 name: public-install
 # A stranger's first run: the published commands, on a clean runner, with no checkout and no token.
+# It installs the EXACT version that was just published, not "latest": a pre-release is never "latest", so an unpinned install would test an older
+# release and could pass for the wrong build. It also fails unless the installed program reports that version.
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: Exact version to install and test, for example 1.0.0-rc.5
+        required: true
   release:
     types: [published]
 permissions: {}
+env:
+  RELEASE_TAG: ${{ github.event.release.tag_name || inputs.version }}
 jobs:
   install:
     strategy:
@@ -18,9 +26,12 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          curl -fsSL https://pandeysatyam.com/agentontrack/install.sh | sh
+          VERSION="${RELEASE_TAG#v}"
+          printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$' || { echo "not a version: $VERSION"; exit 1; }
+          curl -fsSL https://pandeysatyam.com/agentontrack/install.sh | sh -s -- --version "$VERSION"
           export PATH="$HOME/.agentontrack/app/bin:$PATH"
-          agentontrack --version
+          agentontrack --version | tee v.txt
+          grep -Fq -- "$VERSION" v.txt || { echo "installed program does not report $VERSION"; exit 1; }
           mkdir p && cd p && git init -q
           agentontrack setup --yes
           agentontrack doctor --json > d.json
@@ -32,10 +43,14 @@ jobs:
         if: runner.os == 'Windows'
         shell: powershell
         run: |
+          $version = $env:RELEASE_TAG -replace '^v', ''
+          if ($version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$') { Write-Host "not a version: $version"; exit 1 }
+          $env:AOT_VERSION = $version
           irm https://pandeysatyam.com/agentontrack/install.ps1 | iex
           $b = Join-Path $HOME '.agentontrack\app\bin\agentontrack.cmd'
-          & $b --version
+          $reported = & $b --version | Out-String
           if ($LASTEXITCODE -ne 0) { exit 1 }
+          if (-not $reported.Contains($version)) { Write-Host "installed program does not report $version"; exit 1 }
           New-Item -ItemType Directory p | Out-Null; Set-Location p; git init -q
           & $b setup --yes
           if ($LASTEXITCODE -ne 0) { exit 1 }

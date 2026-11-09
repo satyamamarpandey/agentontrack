@@ -376,3 +376,37 @@ main.bleed > * { flex-shrink: 1; }
 .phase[data-status='running'], .phase[data-status='ready'] { border-left-color: var(--accent); }
 .phase p { margin: 0; }
 .plan-bar { position: sticky; bottom: 0; background: var(--bg); padding: 10px 0; border-top: 1px solid var(--border); z-index: 2; }
+
+.composer.dragging { outline: 2px dashed var(--accent); outline-offset: -4px; }
+.composer .chip { cursor: default; }
+.composer .chip button { background: none; border: 0; color: inherit; cursor: pointer; padding: 0 2px; }
+
+/* Sessions pane in the Workspace. The wrap is a size container so it adapts to the pane, not to the window. */
+.sess-wrap { flex: 1; min-height: 0; overflow: auto; container-type: inline-size; }
+.sess { display: grid; grid-template-columns: minmax(240px, 340px) minmax(0, 1fr); gap: 0; min-height: 100%; }
+.sess-side { padding: 12px; border-right: 1px solid var(--border); min-width: 0; align-content: start; }
+.sess-side:focus { outline: none; }
+.sess-main { padding: 12px; min-width: 0; }
+.sess-h { margin: 8px 0 4px; font-size: 13px; }
+.sess-list { display: flex; flex-direction: column; gap: 6px; padding: 0; margin: 0; list-style: none; }
+.sess-row { display: flex; flex-direction: column; gap: 3px; width: 100%; text-align: left; font: inherit; color: var(--text); background: var(--raised); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; cursor: pointer; min-width: 0; }
+.sess-row:hover { border-color: var(--border-strong); }
+.sess-row[aria-current='true'] { border-color: var(--accent); background: var(--accent-soft); }
+.sess-row .clip, .sess-detail .clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.sess-meta { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0; }
+.sess-meta dt { color: var(--muted); }
+.sess-meta dd { margin: 0; overflow-wrap: anywhere; }
+.sess-out { margin: 0; max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12.5px; background: var(--sunken); border: 1px solid var(--border); border-radius: 6px; padding: 8px; }
+.sess-t { overflow-wrap: anywhere; margin: 0; }
+.sess-resume textarea, .sess-new textarea { min-height: 90px; resize: vertical; width: 100%; }
+@container (max-width: 700px) {
+  .sess { grid-template-columns: minmax(0, 1fr); }
+  .sess-side { border-right: 0; border-bottom: 1px solid var(--border); }
+}
+
+.dictation { display: inline-flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.dictation-btn { min-height: 32px; padding: 0 .75rem; border-radius: 6px; border: 1px solid var(--border, currentColor); background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.dictation-btn.on { background: #b3261e; color: #fff; border-color: #b3261e; }
+.dictation-status.err { color: #b3261e; }
+.dictation-interim { opacity: .7; font-style: italic; }
+.dictation-consent { display: block; padding: .6rem; border: 1px solid var(--border, currentColor); border-radius: 6px; margin-top: .5rem; }

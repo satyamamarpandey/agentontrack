@@ -22,6 +22,15 @@ const usage = [{ seq: 45, ts: day(0), runtime: 'claude-code', model: 'demo-model
 const byDay = [2, 1, 0].map((n, i) => ({ day: d(n), allow: 9 + i * 4, request_approval: 2, deny: i, input: 30 + i * 20, output: 1500 + i * 500, cacheRead: 40_000, cacheCreate: 12_000 }));
 const coverage = (evidence: string, hostFailMode: string, containment: string) => ({ evidence, hostFailMode, containment, enforced: ['Shell commands that classify statically', 'File tools'], observedOnly: ['File effects of opaque scripts in the project'], unsupported: ['Network effects of opaque scripts'], notes: ['Demo. See the integrations page for what has really been tested.'] });
 
+/** Invented sessions, one in each state the Sessions pane has to show honestly. */
+const sess = (id: string, o: Record<string, unknown>) => ({ id, runtime: 'claude-code', model: 'demo-model', title: 'Claude Code session', titleSource: 'default', status: 'idle', createdAt: day(2), updatedAt: day(1), pinned: false, archived: false, worktreeId: null, linked: true, runIds: ['run_demo1'], lastRunId: 'run_demo1', canResume: true, source: 'user', lastPrompt: null, messages: 0, ...o });
+const demoSessions = [
+  sess('ses_demo0001', { title: 'Fix the date parser', status: 'running', updatedAt: day(0), canResume: false, source: 'phone' }),
+  sess('ses_demo0002', { title: 'Add parser tests', status: 'failed', updatedAt: day(1), worktreeId: 'wt_demo', source: 'plan' }),
+  sess('ses_demo0003', { title: 'Try an alternative regex', status: 'orphaned', updatedAt: day(2), canResume: false }),
+  sess('ses_demo0004', { title: 'Old exploration', status: 'stopped', updatedAt: day(6), archived: true }),
+];
+
 const EMPTY_ID = 'demo-new';
 const emptyProject = { id: EMPTY_ID, name: 'demo-new-project', root: 'example/demo-new-project' };
 /** A second invented project, with nothing recorded yet, so the empty states can be seen too. */
@@ -54,6 +63,8 @@ export function demoGet(path: string): unknown {
       { id: 'hermes', name: 'Hermes', version: null, installed: false, authenticated: null, hooksInstalled: false, coverage: coverage('real-host-scripted-model', 'closed', 'none'), liveStatus: 'Demo: not connected' },
     ];
     case '/api/runs': return [];
+    case '/api/agent-sessions': return { keepTranscripts: false, sessions: demoSessions };
+    case '/api/remote/status': return { exists: false };
     case '/api/runtimes': return [{ id: 'claude-code', name: 'Claude Code', canStart: false, how: null, reason: 'This is the demo, so nothing can be started.' }];
     case '/api/files': return { dir: '', truncated: false, entries: [{ name: 'src', path: 'src', type: 'dir', size: 0 }, { name: 'README.md', path: 'README.md', type: 'file', size: 120 }] };
     case '/api/handoffs': return [];
@@ -63,6 +74,7 @@ export function demoGet(path: string): unknown {
     case '/api/evaluations': return { heldout: pick('heldout'), matched: pick('matched-v3') ?? pick('matched-v3.partial'), securityCampaign: pick('security-campaign'), performance: pick('performance') };
     case '/api/settings': return { telemetry: false, diagnostics: false, theme: 'dark', environment: { show: true }, sync: { enabled: false, endpoint: '', deviceToken: '', lastSync: null }, syncPreview: { schema: 'agentontrack.sync/v1', projectLabel: 'demo-project', totals: { input: 130, output: 6300 } }, sessions: [{ id: 'demo', current: true, expiresAt: Date.now() + 3_600_000 }] };
     default:
+      if (p?.startsWith('/api/agent-sessions/')) { const s = demoSessions.find((x) => x.id === p.split('/').pop()); return s ? { ...s, runs: [{ id: 'run_demo1', status: null, events: s.status === 'failed' ? ['Demo output', 'Error: 2 tests failed'] : ['Demo output'] }], transcript: [] } : {}; }
       if (p?.startsWith('/api/event/')) return { note: 'Demo: pair with your local companion to see real source records.', seq: Number(p.split('/').pop()) };
       return {};
   }

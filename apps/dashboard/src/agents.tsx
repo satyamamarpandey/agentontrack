@@ -99,7 +99,7 @@ export function AgentCatalog({ tick }: { tick: number }) {
                 <div className="muted small">{m.maker}{version ? ` · version ${version}` : ''}</div>
                 <div className="chips">
                   <span className={`badge ${level === 'verified-hooks' ? 'good' : level === 'partial' || level === 'model' || level === 'mcp' || level === 'research' || level === 'observation' ? 'warn' : 'muted'}`} title={SUPPORT[level].help} data-testid="agent-support">{SUPPORT[level].label}</span>
-                  {m.kind === 'core' || m.kind === 'adapter' ? <span className={`badge ${run?.canStart ? 'good' : 'muted'}`} data-testid="agent-start">{run?.canStart ? 'Can start from AgentOnTrack' : m.id === 'claude-code' && state === 'installed' ? 'Can start once connected' : 'Starts in its own terminal'}</span> : null}
+                  {m.kind === 'core' || m.kind === 'adapter' ? <span className={`badge ${run?.canStart ? 'good' : 'muted'}`} data-testid="agent-start">{run?.canStart ? 'Can start from AgentOnTrack' : m.id === 'claude-code' || m.id === 'codex' ? (state === 'installed' ? 'Can start once connected' : 'Can start once installed and connected') : 'Starts in its own terminal'}</span> : null}
                   {roles.map((r) => <span key={r} className="badge">{r}</span>)}
                 </div>
                 <p className="small">{m.kind === 'model' && level === 'untested' ? 'No test has been recorded for this model server.' : SUPPORT[level].help}</p>

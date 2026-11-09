@@ -3,6 +3,13 @@ export const RELEASE_VERSION = (process.env.NEXT_PUBLIC_RELEASE_VERSION ?? '').t
 /** A release with no version cannot have a real file address, so it does not count as published. */
 export const RELEASE_PUBLISHED = process.env.NEXT_PUBLIC_RELEASE_PUBLISHED === '1' && RELEASE_VERSION !== '';
 
+/**
+ * A published PRE-RELEASE, shown on its own and never as the stable download. The plain installer does not get it: it needs the version spelled out.
+ * Empty (and off) unless the build says a preview exists.
+ */
+export const PREVIEW_VERSION = (process.env.NEXT_PUBLIC_PREVIEW_VERSION ?? '').trim();
+export const PREVIEW_PUBLISHED = process.env.NEXT_PUBLIC_PREVIEW_PUBLISHED === '1' && PREVIEW_VERSION !== '';
+
 export const REPO = 'https://github.com/satyamamarpandey/agentontrack';
 export const RELEASES = `${REPO}/releases`;
 export const ISSUES = `${REPO}/issues`;

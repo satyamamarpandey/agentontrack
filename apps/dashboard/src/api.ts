@@ -1,4 +1,6 @@
 import { demoGet } from './demo';
+import { stopAllWith, stopRunWith } from './stop-run';
+export { describeCancel } from './stop-run';
 
 let csrf = '';
 let project = '';
@@ -61,18 +63,50 @@ export async function get<T = any>(path: string): Promise<T> {
   return body;
 }
 
+export interface UploadedFile { id: string; kind: 'image' | 'pdf' | 'text'; bytes: number; name: string }
+
+/** Sends one file as raw bytes. The companion decides whether it is allowed from the bytes themselves, and only the local dashboard may upload. */
+export async function uploadAttachment(file: File): Promise<UploadedFile> {
+  if (demo) throw new ApiError(403, 'This is the demo, so nothing was uploaded.');
+  const r = await send(withProject('/api/attachments'), { method: 'POST', headers: { 'content-type': 'application/octet-stream', 'x-agentontrack-csrf': csrf, 'x-attachment-name': encodeURIComponent(file.name || 'pasted'), ...auth() }, body: file });
+  const out = await r.json().catch(() => ({}));
+  if (!r.ok) throw new ApiError(r.status, out.error ?? `Upload failed (${r.status})`, out);
+  return out;
+}
+
 /** The public site can change nothing without a code that only the terminal shows. Set by the app. */
 let askTerminalCode: (action: string) => Promise<string> = () => Promise.reject(new ApiError(428, 'Enter the code shown in your terminal'));
 export const setTerminalPrompt = (fn: typeof askTerminalCode) => { askTerminalCode = fn; };
 
-export async function post<T = any>(path: string, body: Record<string, unknown> | object = {}): Promise<T> {
+export const post = <T = any>(path: string, body: Record<string, unknown> | object = {}): Promise<T> => postWith<T>(path, body, {});
+async function postWith<T>(path: string, body: Record<string, unknown> | object, extra: Record<string, string>): Promise<T> {
   if (demo) throw new ApiError(403, 'This is the demo, so nothing was changed. Pair with your local companion to do this for real.');
-  const r = await send(withProject(path), { method: 'POST', headers: { 'content-type': 'application/json', 'x-agentontrack-csrf': csrf, ...auth() }, body: JSON.stringify(body) });
+  const r = await send(withProject(path), { method: 'POST', headers: { 'content-type': 'application/json', 'x-agentontrack-csrf': csrf, ...extra, ...auth() }, body: JSON.stringify(body) });
   const out = await r.json().catch(() => ({}));
-  if (r.status === 428) return post<T>(path, { ...body, challengeId: out.challengeId, confirm: await askTerminalCode(out.action ?? path) });
+  if (r.status === 428) return postWith<T>(path, { ...body, challengeId: out.challengeId, confirm: await askTerminalCode(out.action ?? path) }, extra);
   if (!r.ok) throw new ApiError(r.status, out.error ?? out.issues?.join('; ') ?? `Request failed (${r.status})`, out);
   return out;
 }
+
+/** A fresh key for one click. It is 32 hex characters, inside the companion's 22 to 64 character rule. */
+const newStartKey = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
+
+/**
+ * Starts an agent. One key per click: if the connection drops before the answer arrives, the SAME key is sent once more, so the companion returns the first
+ * answer instead of starting a second agent. A new click makes a new key, so a deliberate repeat of the same text is an ordinary new start.
+ */
+export async function postStart<T = any>(path: string, body: Record<string, unknown> | object = {}): Promise<T> {
+  const key = newStartKey();
+  for (let attempt = 0; ; attempt++) {
+    try { return await postWith<T>(path, body, { 'idempotency-key': key }); }
+    catch (e) { if (attempt === 0 && e instanceof ApiError && e.status === 0 && !demo) continue; throw e; }
+  }
+}
+
+/** Stops a run. A run that already ended is a normal answer (`stopped: false`), not an error; a run that could not be ended still throws. See stop-run.ts. */
+export const stopRun = (id: string) => stopRunWith(post, id);
+/** Stops several runs; one failing does not prevent the others. */
+export const stopRuns = (ids: string[]) => stopAllWith(post, ids);
 
 export async function resumeSession(): Promise<boolean> {
   if (new URLSearchParams(location.search).has('demo')) { enterDemo(); return true; }

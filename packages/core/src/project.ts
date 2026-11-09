@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { driftBrief, findDrift } from './drift.js';
 import { randomBytes, type KeyObject } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir, userInfo } from 'node:os';
@@ -337,9 +338,18 @@ export class Project {
       if (!prop || prop.status !== 'open') throw new Error(`No open proposal ${id}`);
       this.humanAppend({ type: prop.kind === 'goal' ? 'goal.rejected' : 'decision.rejected', payload: { id, note } });
     },
-    recordDecision: (title: string, rationale: string) => {
+    recordDecision: (title: string, rationale: string, supersedes?: string) => {
       const s = this.state();
-      this.humanAppend({ type: 'decision.approved', ...this.stamp(s, null), payload: { id: newId('dec'), title, rationale } });
+      if (supersedes && !s.decisions.some((d) => d.id === supersedes)) throw new Error(`No decision ${supersedes} to replace`);
+      const id = newId('dec');
+      this.humanAppend({ type: 'decision.approved', ...this.stamp(s, null), payload: { id, title, rationale, ...(supersedes ? { supersedes } : {}) } });
+      return id;
+    },
+    /** Says what a decision governs. When the decision is later replaced, whatever is linked to it is reported as drifted. */
+    linkDecision: (decisionId: string, kind: 'task' | 'phase' | 'file', ref: string) => {
+      const s = this.state();
+      if (!s.decisions.some((d) => d.id === decisionId)) throw new Error(`No decision ${decisionId}`);
+      this.humanAppend({ type: 'decision.linked', ...this.stamp(s, null), payload: { decisionId, kind, ref } });
     },
   };
 
@@ -904,6 +914,17 @@ export class Project {
 
   resetContext() { this.store.append({ type: 'context.reset', actor: { kind: 'system' }, payload: {} }); }
 
+  /**
+   * The brief for a session start, or null when it would tell the agent nothing it cannot already see. Injecting text costs the agent time and
+   * tokens on every session, and a brief that holds only the goal showed a measurable cost in benchmarks/results/bench-components.json.
+   * It is injected when a task is bound to the session, decisions exist, something has drifted, or an approval is pending.
+   */
+  rehydrateIfUseful(sessionId?: string, opts: { always?: boolean } = {}): string | null {
+    const s = this.state();
+    const useful = !!this.taskForSession(s, sessionId) || s.decisions.length > 0 || findDrift(s).length > 0 || [...s.approvals.values()].some((a) => isPendingLive(a, new Date()));
+    return useful || opts.always ? this.rehydrate(sessionId) : null;
+  }
+
   /** Compact state for a fresh or compacted context. It is built from the record, not from a model summary. */
   rehydrate(sessionId?: string): string {
     const s = this.state();
@@ -928,8 +949,17 @@ export class Project {
       .map((d) => ({ d, score: `${d.title} ${d.rationale}`.toLowerCase().split(/\W+/).filter((w) => words.has(w)).length }))
       .sort((a, b) => b.score - a.score || b.d.ts.localeCompare(a.d.ts)).slice(0, 5);
     for (const { d } of relevant) lines.push(`Decision: ${d.title}: ${d.rationale}`);
+    lines.push(...driftBrief(findDrift(s)));
     lines.push('Only a human can grant approvals or change the goal. Evidence, not your statement, decides completion.');
     return lines.join('\n');
+  }
+
+  /** Leaves a note. An agent may leave one, but it is context only: it can approve nothing and a private one is visible to that agent and the person alone. */
+  addNote(text: string, scope: 'private' | 'project', actor: Actor): string {
+    if (!text.trim()) throw new Error('A note cannot be empty');
+    const id = newId('note');
+    this.store.append({ type: 'note.added', actor, payload: { id, text: text.slice(0, 2000), scope } });
+    return id;
   }
 
   prepareHandoff(fromRuntime: string, taskId?: string) {

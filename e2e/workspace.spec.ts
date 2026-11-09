@@ -96,7 +96,7 @@ test('approve a held action from the workspace', async ({ page, env }) => {
   await page.getByRole('button', { name: 'Approve…' }).click();
   await confirmDialog(page);
   await expect(page.getByTestId('ws-approval')).toHaveCount(0);
-  expect(env.project((p) => [...p.state().approvals.values()].find((a) => a.effect.kind === 'vcs.push')?.status)).toBe('granted');
+  await expect.poll(() => env.project((p) => [...p.state().approvals.values()].find((a) => a.effect.kind === 'vcs.push')?.status)).toBe('granted');
 });
 
 test('create a handoff and read it', async ({ page, env }) => {
@@ -267,4 +267,20 @@ test('spec check: a vague design is no-go, a complete one is go, and the spec-re
   await page.getByRole('tab', { name: 'Team', exact: true }).click();
   await page.locator('select[name=workflow]').selectOption('spec-review');
   await expect(page.getByTestId('plan-stages')).toBeVisible();
+});
+
+test('attach files to a prompt: a text file is accepted and can be removed, and an SVG is refused', async ({ page, env }) => {
+  await env.pair(page);
+  await openWorkspace(page);
+  await page.getByRole('tab', { name: 'Agent', exact: true }).click();
+  const input = page.getByTestId('ws-attachments').locator('input[type=file]');
+  await input.setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('The secret number is 4417.') });
+  await expect(page.getByTestId('ws-attachment')).toContainText('notes.txt');
+  await page.getByRole('button', { name: 'Remove notes.txt' }).click();
+  await expect(page.getByTestId('ws-attachment')).toHaveCount(0);
+  // The bytes decide, not the name: an SVG renamed to .png is still refused, and nothing is attached.
+  await input.setInputFiles({ name: 'harmless.png', mimeType: 'image/png', buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>1</script></svg>') });
+  await expect(page.getByRole('alert')).toContainText('Only images');
+  await expect(page.getByTestId('ws-attachment')).toHaveCount(0);
+  await expect(page.getByTestId('auth-mode').or(page.getByTestId('run-note')).first()).toBeVisible();
 });

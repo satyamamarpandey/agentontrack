@@ -169,7 +169,7 @@ test('goal proposal from an agent: accept in the browser changes the goal versio
   await expect(page.getByRole('dialog')).toContainText('Earlier approvals stop matching');
   await confirmDialog(page);
   await expect(page.getByText('Goal v2')).toBeVisible();
-  expect(env.project((p) => p.state().goal)).toMatchObject({ statement: 'Also fix docs', version: 2 });
+  await expect.poll(() => env.project((p) => p.state().goal)).toMatchObject({ statement: 'Also fix docs', version: 2 });
 });
 
 test('effects: an out-of-scope change is shown as detected, not prevented, and blocks VERIFIED until reviewed', async ({ page, env }) => {
@@ -329,8 +329,8 @@ test('weak checks hold back VERIFIED until a human accepts them, with a note in 
   await confirmDialog(page);
   await expect(page.getByTestId('weak-checks')).toHaveCount(0);
   await expect(page.getByText('Weak check (accepted by a human)', { exact: false })).toBeVisible();
-  expect(env.project((p) => p.evaluate('t1').status)).toBe('VERIFIED');
-  expect(env.project((p) => p.store.all().find((e) => e.type === 'weak.accepted')?.payload.note)).toBe('Generated file, reviewed by hand');
+  await expect.poll(() => env.project((p) => p.evaluate('t1').status)).toBe('VERIFIED');
+  await expect.poll(() => env.project((p) => p.store.all().find((e) => e.type === 'weak.accepted')?.payload.note)).toBe('Generated file, reviewed by hand');
 });
 
 test('the Agents screen says in plain words what each runtime does if its hook cannot run', async ({ page, env }) => {

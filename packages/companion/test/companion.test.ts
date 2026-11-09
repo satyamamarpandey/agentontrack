@@ -306,11 +306,13 @@ describe('projects, runs and data', () => {
 
   it('refuses a run for an unavailable runtime rather than faking one', async () => {
     const s = await pair();
-    for (const runtime of ['codex', 'hermes']) {
-      const r = await api(s, '/api/runs', { runtime, prompt: 'x' });
-      expect(r.status).toBe(409);
-      expect((await r.json()).error).toMatch(/not built yet/);
-    }
+    const h = await api(s, '/api/runs', { runtime: 'hermes', prompt: 'x' });
+    expect(h.status).toBe(409);
+    expect((await h.json()).error).toMatch(/not built yet/);
+    // Codex can be started, but not in a project where its hooks are missing: it would run actions unchecked.
+    const cx = await api(s, '/api/runs', { runtime: 'codex', prompt: 'x' });
+    expect(cx.status).toBe(409);
+    expect((await cx.json()).error).toMatch(/Connect Codex/);
   });
 
   it('refuses a run until hooks are connected', async () => {

@@ -5,6 +5,7 @@ import { Icon, type IconName } from './icons';
 import type { Command } from './palette';
 import { Badge, Empty, Loading, useLoad } from './ui';
 import { PlanPanel } from './plan';
+import { SessionsPane } from './sessions';
 import { DiffView, Editor, FileTree, type Buffer } from './ws-files';
 import { AgentTab, BOTTOM_TABS, BottomPanel, RIGHT_TABS, RightPanel, type BottomTab, type RightTab } from './ws-panels';
 
@@ -12,7 +13,7 @@ interface Layout { left: number; right: number; bottom: number; showLeft: boolea
 const DEFAULT: Layout = { left: 264, right: 320, bottom: 240, showLeft: true, showRight: true, showBottom: true, leftTab: 'Files', rightTab: 'Agents', bottomTab: 'Activity' };
 const LIMITS = { left: [180, 520], right: [240, 560], bottom: [120, 640] } as const;
 const KEY = 'aot-ws-layout';
-type Tab = { key: string; kind: 'plan' } | { key: string; kind: 'agent' } | { key: string; kind: 'file'; path: string } | { key: string; kind: 'diff'; wt: string; path: string };
+type Tab = { key: string; kind: 'plan' } | { key: string; kind: 'agent' } | { key: string; kind: 'sessions' } | { key: string; kind: 'file'; path: string } | { key: string; kind: 'diff'; wt: string; path: string };
 type View = 'files' | 'editor' | 'agents' | 'panel';
 
 const clamp = (n: number, [lo, hi]: readonly [number, number]) => Math.max(lo, Math.min(hi, n));
@@ -76,7 +77,7 @@ export function Workspace({ tick, projectName, open, setCommands }: { tick: numb
   const [layout, setLayoutState] = useState<Layout>(loadLayout);
   const setLayout = useCallback((patch: Partial<Layout>) => setLayoutState((l) => { const n = { ...l, ...patch }; localStorage.setItem(KEY, JSON.stringify(n)); return n; }), []);
   const [view, setView] = useState<View>('editor');
-  const [tabs, setTabs] = useState<Tab[]>([{ key: 'plan', kind: 'plan' }, { key: 'agent', kind: 'agent' }]);
+  const [tabs, setTabs] = useState<Tab[]>([{ key: 'plan', kind: 'plan' }, { key: 'agent', kind: 'agent' }, { key: 'sessions', kind: 'sessions' }]);
   const [active, setActive] = useState('plan');
   const [bufs, setBufs] = useState<Record<string, Buffer>>({});
   const [files, setFiles] = useState<string[]>([]);
@@ -118,6 +119,7 @@ export function Workspace({ tick, projectName, open, setCommands }: { tick: numb
     { id: 'ws-right', label: 'Toggle the agents panel', group: 'Workspace', hint: 'Ctrl Shift B', run: () => setLayout({ showRight: !layout.showRight }) },
     { id: 'ws-bottom', label: 'Toggle the bottom panel', group: 'Workspace', hint: 'Ctrl J', run: () => setLayout({ showBottom: !layout.showBottom }) },
     { id: 'ws-agent', label: 'Go to the prompt composer', group: 'Workspace', run: () => { setActive('agent'); setView('editor'); } },
+    { id: 'ws-sessions', label: 'Go to sessions', group: 'Workspace', run: () => { setActive('sessions'); setView('editor'); } },
     { id: 'ws-reset', label: 'Reset the panel layout', group: 'Workspace', run: () => setLayout({ ...DEFAULT }) },
     ...RIGHT_TABS.map((t) => ({ id: `ws-r-${t}`, label: `Show ${t.toLowerCase()}`, group: 'Workspace', run: () => { setLayout({ showRight: true, rightTab: t }); setView('agents'); } })),
     ...BOTTOM_TABS.map((t) => ({ id: `ws-b-${t}`, label: `Show ${t.toLowerCase()} panel`, group: 'Workspace', run: () => { setLayout({ showBottom: true, bottomTab: t }); setView('panel'); } })),
@@ -156,7 +158,7 @@ export function Workspace({ tick, projectName, open, setCommands }: { tick: numb
       <section className="ws-center" aria-label="Work area">
         <div className="ws-bar">
           <div className="crumbs"><Icon name="folder" /> <b>{projectName}</b><span className="muted clip hide-m" title={state.goal?.statement}>{state.goal ? `— ${state.goal.statement}` : '— no goal set'}</span></div>
-          {tab.kind !== 'agent' && tab.kind !== 'plan' ? <button className="btn small" onClick={() => close(tab.key)} data-testid="ws-close-tab"><Icon name="x" size={14} />Close tab</button> : null}
+          {tab.kind !== 'agent' && tab.kind !== 'plan' && tab.kind !== 'sessions' ? <button className="btn small" onClick={() => close(tab.key)} data-testid="ws-close-tab"><Icon name="x" size={14} />Close tab</button> : null}
           {pending ? <button className="btn small" onClick={() => { setLayout({ showRight: true, rightTab: 'Approvals' }); setView('agents'); }} data-testid="ws-pending"><Icon name="alert" size={14} />{pending} waiting</button> : null}
           <span className="hide-m" style={{ display: 'contents' }}>
             {toggle('Files sidebar', 'panelLeft', layout.showLeft, () => setLayout({ showLeft: !layout.showLeft }))}
@@ -167,10 +169,10 @@ export function Workspace({ tick, projectName, open, setCommands }: { tick: numb
         <div className="editor-tabs" role="tablist" aria-label="Open items">
           {tabs.map((t) => {
             const dirty = t.kind === 'file' && bufs[t.path] && bufs[t.path]!.content !== bufs[t.path]!.saved;
-            const name = t.kind === 'plan' ? 'Plan' : t.kind === 'agent' ? 'Agent' : t.kind === 'file' ? t.path.split('/').pop()! : `Diff ${t.path.split('/').pop()}`;
+            const name = t.kind === 'plan' ? 'Plan' : t.kind === 'agent' ? 'Agent' : t.kind === 'sessions' ? 'Sessions' : t.kind === 'file' ? t.path.split('/').pop()! : `Diff ${t.path.split('/').pop()}`;
             return (
-              <button key={t.key} role="tab" className="etab" aria-selected={active === t.key} onClick={() => setActive(t.key)} onAuxClick={(e) => { if (e.button === 1 && t.kind !== 'agent' && t.kind !== 'plan') close(t.key); }} title={t.kind === 'file' ? t.path : undefined}>
-                <Icon name={t.kind === 'plan' ? 'target' : t.kind === 'agent' ? 'bot' : t.kind === 'diff' ? 'branch' : 'file'} size={14} />{name}{dirty ? <><span className="dot" aria-hidden="true" /><span className="sr-only"> unsaved</span></> : null}
+              <button key={t.key} role="tab" className="etab" aria-selected={active === t.key} onClick={() => setActive(t.key)} onAuxClick={(e) => { if (e.button === 1 && t.kind !== 'agent' && t.kind !== 'plan' && t.kind !== 'sessions') close(t.key); }} title={t.kind === 'file' ? t.path : undefined}>
+                <Icon name={t.kind === 'plan' ? 'target' : t.kind === 'agent' ? 'bot' : t.kind === 'sessions' ? 'message' : t.kind === 'diff' ? 'branch' : 'file'} size={14} />{name}{dirty ? <><span className="dot" aria-hidden="true" /><span className="sr-only"> unsaved</span></> : null}
               </button>
             );
           })}
@@ -179,6 +181,7 @@ export function Workspace({ tick, projectName, open, setCommands }: { tick: numb
         <div role="tabpanel" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
           {tab.kind === 'plan' ? <PlanPanel tick={tick} agents={ag.data.map((a: any) => ({ id: a.id, name: a.name, startable: !!rt.data?.find((r: any) => r.id === a.id)?.canStart }))} onRunStarted={() => st.reload()} reloadShell={() => st.reload()} /> : null}
           {tab.kind === 'agent' ? <AgentTab tick={tick} /> : null}
+          {tab.kind === 'sessions' ? <SessionsPane tick={tick} projectName={projectName} /> : null}
           {tab.kind === 'diff' ? <DiffView wt={tab.wt} path={tab.path} /> : null}
           {tab.kind === 'file' ? (bufs[tab.path] ? <Editor key={tab.path} buf={bufs[tab.path]!}
             onChange={(content) => setBufs((b) => ({ ...b, [tab.path]: { ...b[tab.path]!, content } }))}

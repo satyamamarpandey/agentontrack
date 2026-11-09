@@ -134,3 +134,15 @@ it('does not leave stray files when uninstalling a missing config', () => {
   expect(uninstallHooks('codex', root)).toBe(false);
   expect(existsSync(join(root, '.codex'))).toBe(false);
 });
+
+describe('Git Bash paths on Windows', () => {
+  it('reads /tmp and /d/ the way Git Bash does, and leaves other paths alone', async () => {
+    const { msysToWindows } = await import('../src/index.js');
+    expect(msysToWindows('/tmp/proj/a.txt', 'C:/Users/u/AppData/Local/Temp')).toBe('C:/Users/u/AppData/Local/Temp/proj/a.txt');
+    expect(msysToWindows('/tmp', 'C:/T')).toBe('C:/T');
+    expect(msysToWindows('/d/work/x', 'C:/T')).toBe('D:/work/x');
+    expect(msysToWindows('/cygdrive/c/Users', 'C:/T')).toBe('C:/Users');
+    expect(msysToWindows('/c', 'C:/T')).toBe('C:/');
+    for (const same of ['/etc/passwd', '/tmpfoo/x', 'relative/a.txt', 'C:/x', '/usr/bin', '/dev/null']) expect(msysToWindows(same, 'C:/T'), same).toBe(same);
+  });
+});

@@ -1,4 +1,4 @@
-import { RELEASE_VERSION } from '../../lib/release';
+import { PREVIEW_PUBLISHED, PREVIEW_VERSION, RELEASE_VERSION } from '../../lib/release';
 import { Article } from '../content';
 
 export const metadata = { title: 'Changelog' };
@@ -6,8 +6,21 @@ export const metadata = { title: 'Changelog' };
 export default function Changelog() {
   return (
     <Article title="Changelog" intro="Changes that matter to users.">
-      <h2>1.0.0-rc.4</h2>
-      {RELEASE_VERSION === '1.0.0-rc.4' ? null : <p className="alert" role="note" data-testid="unpublished-rc">Not published yet. Downloads on this site are still {RELEASE_VERSION}.</p>}
+      <p className="alert" role="note" data-testid="changelog-state">The stable download on this site is {RELEASE_VERSION}. Newer versions below are pre-releases and are not what the plain installer installs.</p>
+      {PREVIEW_PUBLISHED ? <>
+        <h2>{PREVIEW_VERSION} (preview, published as a pre-release)</h2>
+        <ul>
+          <li>Desktop only. Phone control is switched off in this build.</li>
+          <li>Running several phases in a row, repeating a phase until its checks pass, and phone-started runs are refused for agents signed in with a subscription by the program itself; they need your own API key in paid API mode and a time-limited grant created with the terminal confirmation code.</li>
+          <li>Sessions pane with New session, resume and history for sessions AgentOnTrack started, with Claude Code and Codex, read-only sessions, and image, PDF (Claude Code only) and text attachments.</li>
+          <li>Stopping a run ends the agent and the programs it started; at most 4 agents at once; running agents stop when the dashboard is closed; plain messages for a missing or signed-out agent.</li>
+          <li>Not verified: voice dictation with a real microphone, a physical phone, a real Firebase project. Provider terms for automated use are not confirmed. Not equal to Claude Code or Codex (no fork, effort choice, steering or queueing, native audio, subagent management).</li>
+        </ul>
+      </> : null}
+      <h2>1.0.0-rc.5 (pre-release)</h2>
+      <ul><li>Codex runs through its own app-server, with approvals, resume, an isolated-worktree run and a Claude Code and Codex cross-review; Claude Code and Codex attachments; managed goal and phase loops. Published as a pre-release; the stable download did not change.</li></ul>
+      <h2>1.0.0-rc.4 (never published)</h2>
+      <p className="muted small">This version was never released. Its changes first shipped in 1.0.0-rc.5. The phone remote control listed here is switched off in 1.0.0-rc.6 and was only ever tested against local emulators.</p>
       <ul>
         <li>Phone remote control for projects already on a computer you authorized: signed and encrypted end to end, approved device by device at the computer, with no terminal and no code editing, installable as an app. Plans with limits, a bounded loop, agent and model discovery from what the computer reports, commands sent only if the agent reported them, and next-prompt suggestions. Verified against the Firebase emulators, not a real Firebase project, and with device profiles, not physical phones.</li>
         <li>A new first screen: choose to continue on this computer, use an optional account (Google, GitHub or email, once the site's owner switches accounts on), or look at a labelled demo. An account never gives the website access to your computer.</li>

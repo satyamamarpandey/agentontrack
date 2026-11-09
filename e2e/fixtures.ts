@@ -38,7 +38,7 @@ export const test = base.extend<{ env: Env; fakeAgent: boolean }>({
     writeFileSync(join(root, 'src', 'a.txt'), 'a');
     process.env.AGENTONTRACK_HOME = home;
     if (fakeAgent) writeFileSync(join(dir, 'fake-claude.mjs'), FAKE_AGENT);
-    const c = await startCompanion({ root, ...(fakeAgent ? { claudeCommand: [process.execPath, join(dir, 'fake-claude.mjs')] } : {}) });
+    const c = await startCompanion({ root, ...(fakeAgent ? { claudeCommand: [process.execPath, join(dir, 'fake-claude.mjs')], allowPaidApi: true, detectedAuthMode: () => 'api-key' as const } : {}) });
     const env: Env = {
       c, root, dir, home,
       project: (fn) => { const p = new Project(root); try { return fn(p); } finally { p.close(); } },
@@ -81,7 +81,7 @@ export async function confirmDialog(page: Page, passphrase?: string) {
   await dialog.getByLabel(/to confirm/).fill((await code.textContent())!);
   if (passphrase) await dialog.getByLabel('Approver passphrase').fill(passphrase);
   await dialog.getByRole('button', { name: 'Confirm' }).click();
-  await expect(dialog).toBeHidden();
+  await expect(dialog).toBeHidden({ timeout: 15_000 }); // a confirmed request that is still being answered keeps the dialog up; a loaded runner can take longer than 5 s
 }
 
 /** The same dialog on a page from an outside origin: it shows no code, and confirming then asks for the one in the terminal. Pair with a locator handler for that. */

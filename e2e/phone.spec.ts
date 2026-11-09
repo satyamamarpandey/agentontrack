@@ -2,7 +2,7 @@
 // A desktop browser and a phone-sized browser sign in to the same emulated account. The companion runs a fake agent script (it writes one file), so no model is used.
 // What this proves: the real protocol, the real rules, the real companion and the real pages. What it does not prove: a real Firebase project, or a real phone's OS.
 // Run by the `accounts` CI job under `firebase emulators:exec`; the site is built with the demo config and AOT_FIREBASE_EMULATORS=1.
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import AxeBuilder from '@axe-core/playwright';
@@ -19,10 +19,12 @@ test.skip(!process.env.FIREBASE_AUTH_EMULATOR_HOST, 'Needs the Firebase emulator
 test.describe.configure({ mode: 'serial' });
 
 const FAKE_AGENT = `
-import { writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 console.log(JSON.stringify({ type: 'system', subtype: 'init', model: 'fake' }));
 const prompt = process.argv[process.argv.indexOf('-p') + 1] ?? '';
-if (/slow job/.test(prompt)) { await new Promise((ok) => setTimeout(ok, 25000)); writeFileSync('slow-finished.txt', 'ran to the end'); }
+// A slow job waits for a gate file the test opens, not for a fixed time: how long the phone, Firebase and the companion take to relay a stop varies, and a fixed delay made
+// the agent finish by itself on a slow runner, which looks exactly like a stop that failed. It records its pid so the test can see that the process is really gone.
+if (/slow job/.test(prompt)) { writeFileSync('slow.pid', String(process.pid)); while (!existsSync('release-slow')) await new Promise((ok) => setTimeout(ok, 20)); writeFileSync('slow-finished.txt', 'ran to the end'); }
 else writeFileSync('from-phone.txt', 'ok');
 console.log(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Wrote the file.' }] } }));
 console.log(JSON.stringify({ type: 'result', subtype: 'success', total_cost_usd: 0.01, duration_ms: 5, duration_api_ms: 3, num_turns: 1, usage: { input_tokens: 1, output_tokens: 1 } }));
@@ -77,6 +79,9 @@ test.beforeAll(async ({ browser }) => {
   writeFileSync(join(root, 'README.md'), '# Readme for the phone\n');
   writeFileSync(join(dir, 'fake-claude.mjs'), FAKE_AGENT);
   process.env.AGENTONTRACK_HOME = join(dir, 'home');
+  // Starting an agent from a phone is off until the owner allows it at the computer; this is what that setting stores.
+  mkdirSync(join(dir, 'home'), { recursive: true });
+  writeFileSync(join(dir, 'home', 'settings.json'), JSON.stringify({ allowMobileExecution: true }));
   const seed = new Project(root);
   seed.human.setGoal({ statement: 'Keep the phone link honest', scope: { include: ['**'] } });
   seed.human.createTask({ id: 't1', title: 'A task', criteria: [] });
@@ -171,17 +176,43 @@ test('a prompt sent from the phone runs the desktop agent, and the evidence come
 });
 
 test('a prompt can be cancelled from the phone, and the agent really stops', async () => {
+  // History: an earlier version of this test failed once in CI. It passed "Sent to your computer" at once (that text was left by the test before) and pressed Stop on a "running"
+  // row that was the PREVIOUS test's run, already finished but still shown as running from the last snapshot the phone had. The computer correctly answered "That run is not
+  // running on this computer", the slow agent was never stopped, and it finished by itself. So this test works only with the run it starts: it clears its own leftovers, lets earlier
+  // runs settle, remembers them, finds the new run by id, and checks that the agent PROCESS is gone, not that a timer ran out.
+  const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const t0 = Date.now();
+  for (const f of ['slow.pid', 'release-slow', 'slow-finished.txt']) rmSync(join(root, f), { force: true });
+  await ppage.getByTestId('m-tab-activity').click();
+  await expect(ppage.locator('[data-testid=m-run][data-status=running]')).toHaveCount(0, { timeout: 30_000 });
+  const known = await ppage.locator('[data-testid=m-run] b.mono').allTextContents();
   await ppage.getByTestId('m-tab-progress').click();
   await ppage.getByTestId('m-prompt').fill('slow job please');
   await ppage.getByTestId('m-send').click();
-  await expect(ppage.getByTestId('m-result')).toContainText('Sent to your computer', { timeout: 60_000 });
   await ppage.getByTestId('m-tab-activity').click();
-  const running = ppage.locator('[data-testid=m-run][data-status=running]').first();
-  await expect(running).toBeVisible({ timeout: 40_000 });
-  await running.getByTestId('m-stop-run').click();
-  await expect(ppage.locator('[data-testid=m-run][data-status=running]')).toHaveCount(0, { timeout: 30_000 });
-  await ppage.waitForTimeout(2000);
+  // The agent has started once it has written its pid, and the phone shows one NEW run as running.
+  await expect.poll(() => existsSync(join(root, 'slow.pid')), { timeout: 60_000 }).toBe(true);
+  const tStarted = Date.now();
+  let runId = '';
+  await expect.poll(async () => { const ids = (await ppage.locator('[data-testid=m-run][data-status=running] b.mono').allTextContents()).filter((id) => !known.includes(id)); runId = ids[0] ?? ''; return ids.length; }, { timeout: 60_000 }).toBe(1);
+  const pid = Number(readFileSync(join(root, 'slow.pid'), 'utf8'));
+  expect(alive(pid)).toBe(true);
+  const tRunning = Date.now();
+  const row = ppage.locator('[data-testid=m-run]').filter({ hasText: runId });
+  await row.getByTestId('m-stop-run').click();
+  const tClicked = Date.now();
+  await expect(row).toHaveAttribute('data-status', 'stopped', { timeout: 30_000 });
+  const tRowStopped = Date.now();
+  // The click reached a running run: the phone did not show the computer's refusal for a run that is not running.
+  await expect(ppage.getByText('That run is not running on this computer.')).toHaveCount(0);
+  await expect.poll(() => alive(pid), { timeout: 30_000 }).toBe(false);
+  const tGone = Date.now();
+  // Had the process survived, opening the gate would now let it write the file. The short wait only shows absence; the process check above is the real proof.
+  writeFileSync(join(root, 'release-slow'), '1');
+  await ppage.waitForTimeout(1000);
   expect(existsSync(join(root, 'slow-finished.txt'))).toBe(false);
+  // Evidence for the CI record: which run was chosen, that it was new, and how long each step took (ms).
+  test.info().annotations.push({ type: 'cancel-evidence', description: JSON.stringify({ runId, pid, runsListedBeforeSending: known, wasNew: !known.includes(runId), refusalShown: false, finishedFileWritten: false, msToAgentStart: tStarted - t0, msFromStartToRowRunning: tRunning - tStarted, msClickToRowStopped: tRowStopped - tClicked, msClickToProcessGone: tGone - tClicked }) });
 });
 
 test('a held approval shows on the phone: a push cannot be approved there, and can be declined', async () => {

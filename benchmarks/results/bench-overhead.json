@@ -1,0 +1,96 @@
+{
+  "date": "2026-11-05",
+  "what": "Real Claude Code on the signed-in subscription. Script: scripts/bench-overhead.mjs",
+  "task": "Create a file named hello.txt containing exactly the text: hi. Then reply with the single word done.",
+  "trialsEach": 3,
+  "model": "haiku",
+  "A": [
+    {
+      "seconds": 7.2,
+      "correct": true,
+      "input": 4,
+      "output": 167,
+      "cacheRead": 44322,
+      "cacheCreate": 14247,
+      "turns": 2
+    },
+    {
+      "seconds": 7.8,
+      "correct": true,
+      "input": 4,
+      "output": 114,
+      "cacheRead": 44322,
+      "cacheCreate": 16433,
+      "turns": 2
+    },
+    {
+      "seconds": 7.3,
+      "correct": true,
+      "input": 4,
+      "output": 114,
+      "cacheRead": 44322,
+      "cacheCreate": 13345,
+      "turns": 2
+    }
+  ],
+  "B": [
+    {
+      "seconds": 13.5,
+      "correct": true,
+      "status": "finished",
+      "input": 4,
+      "output": 391,
+      "cacheRead": 48276,
+      "cacheCreate": 15085,
+      "actionsGatedSoFar": 1
+    },
+    {
+      "seconds": 12.4,
+      "correct": true,
+      "status": "finished",
+      "input": 4,
+      "output": 334,
+      "cacheRead": 62902,
+      "cacheCreate": 386,
+      "actionsGatedSoFar": 2
+    },
+    {
+      "seconds": 12.1,
+      "correct": true,
+      "status": "finished",
+      "input": 4,
+      "output": 426,
+      "cacheRead": 62902,
+      "cacheCreate": 420,
+      "actionsGatedSoFar": 3
+    }
+  ],
+  "notes": [
+    "Variant C (improved AgentOnTrack) is not measured: no token-saving change exists to compare. N is too small for a significance claim. B includes the companion, its hooks and --setting-sources project,local; A does not."
+  ],
+  "median_seconds": {
+    "A": 7.3,
+    "B": 12.4
+  },
+  "median_input": {
+    "A": 4,
+    "B": 4
+  },
+  "median_output": {
+    "A": 114,
+    "B": 391
+  },
+  "median_cacheRead": {
+    "A": 44322,
+    "B": 62902
+  },
+  "median_cacheCreate": {
+    "A": 14247,
+    "B": 420
+  },
+  "correct": {
+    "A": 3,
+    "B": 3,
+    "of": 3
+  }
+}

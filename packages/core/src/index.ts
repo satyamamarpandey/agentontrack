@@ -19,3 +19,8 @@ export * from './handoff.js';
 export * from './team.js';
 export * from './commands.js';
 export * from './suggest.js';
+export * from './drift.js';
+export * from './ask.js';
+export * from './attachments.js';
+export * from './sessions.js';
+export * from './envfile.js';

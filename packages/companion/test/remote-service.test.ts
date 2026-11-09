@@ -25,7 +25,12 @@ class MemoryTransport implements Transport {
 
 let T: number; let file: RemoteFile; let tr: MemoryTransport; let svc: RemoteService; let phone: Identity; let key: CryptoKey; let ctr: number;
 let projectState: { n: number }; let ran: string[];
-const settle = () => new Promise((ok) => setTimeout(ok, 30));
+// A fixed sleep is a race: the service decrypts, runs and answers with async crypto, which can take longer than any chosen pause on a busy machine.
+// So a check that something HAPPENED waits for that thing (up to 10 s), and a check that something did NOT happen waits a longer fixed time.
+const settle = async (until?: () => boolean) => {
+  if (!until) { await new Promise((ok) => setTimeout(ok, 150)); return; }
+  for (let i = 0; i < 1000 && !until(); i++) await new Promise((ok) => setTimeout(ok, 10));
+};
 
 beforeEach(async () => {
   T = 1_800_000_000_000; ctr = 0; ran = []; projectState = { n: 1 };
@@ -38,7 +43,8 @@ beforeEach(async () => {
   await svc.start();
   phone = await createIdentity();
   tr.devices([{ did: 'ph1', name: 'My phone', pub: phone.pub, status: 'pending' }]);
-  await settle();
+  // Wait for the service to have worked out the fingerprint (async crypto) instead of a fixed pause.
+  for (let i = 0; i < 1000 && !(await svc.status()).pending.some((d) => d.did === 'ph1' && d.fingerprint); i++) await new Promise((ok) => setTimeout(ok, 10));
   key = await pairKey(phone, svc.host.pub.agree, { uid: UID, cid: file.computerId, did: 'ph1' });
 });
 const stop = () => svc.stop();
@@ -62,7 +68,7 @@ describe('approving a phone', () => {
     expect(tr.statuses.get('ph1')).toBe('trusted');
     expect((await svc.status()).pending).toEqual([]);
     tr.deliver(await ask('projects.list'));
-    await settle();
+    await settle(() => ran.length > 0 && tr.responses.size > 0);
     expect(ran).toEqual(['projects.list']);
     const res = [...tr.responses.values()][0]!;
     expect(await read(res)).toEqual({ ok: true, result: { done: 'projects.list' } });
@@ -86,7 +92,7 @@ describe('the channel', () => {
   it('takes a handled request off the channel, so nothing waits there to be replayed', async () => {
     const env = await ask('ping');
     tr.deliver(env);
-    await settle();
+    await settle(() => tr.requests.size === 0);
     expect(tr.requests.size).toBe(0);
     await stop();
   });
@@ -94,7 +100,7 @@ describe('the channel', () => {
   it('answers a request that arrives twice with the same answer, and runs it once', async () => {
     const env = await ask('ping');
     tr.deliver(env); tr.deliver(env);
-    await settle();
+    await settle(() => tr.responses.size === 1 && ran.length === 1);
     tr.deliver(env);
     await settle();
     expect(ran).toEqual(['ping']);

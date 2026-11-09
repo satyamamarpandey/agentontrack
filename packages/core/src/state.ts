@@ -96,7 +96,11 @@ export interface ProjectState {
   goal: (GoalContract & { version: number; status: string }) | null;
   goals: (GoalContract & { version: number; ts: string; fromProposal?: string })[];
   proposals: Proposal[];
-  decisions: { id: string; title: string; rationale: string; ts: string; goalVersion: number | null }[];
+  decisions: { id: string; title: string; rationale: string; ts: string; goalVersion: number | null; supersedes: string | null; supersededBy: string | null }[];
+  /** What a decision governs, set by a person. A link to a replaced decision is how drift is found. */
+  /** Notes people and agents leave. A private note is read only by its owner; a note whose scope is unclear is private. They are context, never authority. */
+  notes: { id: string; text: string; scope: 'private' | 'project'; owner: string; ts: string }[];
+  decisionLinks: { decisionId: string; kind: 'task' | 'phase' | 'file'; ref: string; ts: string }[];
   policy: Policy;
   policyVersion: number;
   tasks: Map<string, Task>;
@@ -116,7 +120,7 @@ export interface ProjectState {
 
 export function emptyState(): ProjectState {
   return {
-    lastSeq: 0, instance: null, approverKey: null, rejectedEvents: [], goal: null, goals: [], proposals: [], decisions: [],
+    lastSeq: 0, instance: null, approverKey: null, rejectedEvents: [], goal: null, goals: [], proposals: [], decisions: [], decisionLinks: [], notes: [],
     policy: PolicySchema.parse({}), policyVersion: 0, tasks: new Map(), activeTaskId: null, sessions: new Map(), approvals: new Map(),
     worktrees: [], team: { version: 0, members: [] }, plan: null, receipts: [], claims: [], actions: [], actionCounts: new Map(), lastDigest: '', mismatches: [], failures: [], seenNonces: new Set(), reads: new Map(),
   };
@@ -169,7 +173,17 @@ export function applyEvent(s: ProjectState, e: StoredEvent): void {
     case 'decision.approved': {
       const prop = p.fromProposal ? s.proposals.find((x) => x.id === p.fromProposal) : undefined;
       if (prop) prop.status = 'accepted';
-      s.decisions.push({ id: p.id, title: p.title, rationale: p.rationale, ts: e.ts, goalVersion: e.goalVersion });
+      const old = typeof p.supersedes === 'string' ? s.decisions.find((d) => d.id === p.supersedes) : undefined;
+      if (old && !old.supersededBy) old.supersededBy = p.id;
+      s.decisions.push({ id: p.id, title: p.title, rationale: p.rationale, ts: e.ts, goalVersion: e.goalVersion, supersedes: old ? old.id : null, supersededBy: null });
+      break;
+    }
+    case 'note.added': {
+      if (typeof p.id === 'string' && typeof p.text === 'string' && p.text.trim()) s.notes.push({ id: p.id, text: p.text.slice(0, 2000), scope: p.scope === 'project' ? 'project' : 'private', owner: e.actor?.kind === 'human' ? 'human' : (e.actor?.runtime ?? 'agent'), ts: e.ts });
+      break;
+    }
+    case 'decision.linked': {
+      if (s.decisions.some((d) => d.id === p.decisionId) && ['task', 'phase', 'file'].includes(p.kind) && typeof p.ref === 'string') s.decisionLinks.push({ decisionId: p.decisionId, kind: p.kind, ref: p.ref.slice(0, 300), ts: e.ts });
       break;
     }
     case 'policy.set':

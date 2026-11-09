@@ -41,6 +41,9 @@ export function removeWorktree(root: string, dir: string, branch: string, delete
   if (deleteBranch) git(root, 'branch', '-D', branch);
 }
 
+/** Files AgentOnTrack itself puts in a worktree so the agent's hooks reach the project. They are never part of the agent's work, a diff or a commit. */
+const INFRA_FILES = new Set(['.claude/settings.local.json']);
+
 export interface Changed { path: string; status: 'added' | 'modified' | 'deleted' | 'renamed' }
 
 /** Everything this worktree changed since its base: committed, staged, unstaged and untracked. */
@@ -52,12 +55,13 @@ export function changedSince(wt: string, base: string): Changed[] {
     out.set(rest.at(-1)!, kind(c!));
   }
   for (const f of git(wt, 'ls-files', '--others', '--exclude-standard').out.split('\n').filter(Boolean)) out.set(f, 'added');
-  return [...out].map(([path, status]) => ({ path, status })).sort((a, b) => a.path.localeCompare(b.path));
+  return [...out].filter(([path]) => !INFRA_FILES.has(path)).map(([path, status]) => ({ path, status })).sort((a, b) => a.path.localeCompare(b.path));
 }
 
 /** Records the agent's work as a commit on its branch, so it can be compared and merged. */
 export function commitAll(wt: string, message: string): { commit: string; empty: boolean } {
   git(wt, 'add', '-A');
+  for (const f of INFRA_FILES) git(wt, 'reset', '-q', '--', f);
   const staged = git(wt, 'diff', '--cached', '--quiet');
   if (staged.ok) return { commit: headOf(wt), empty: true };
   const r = git(wt, 'commit', '-q', '-m', message);

@@ -11,8 +11,8 @@ import { createIdentity, exportIdentity, fingerprint, importIdentity, newId, ope
 export type Level = 'view' | 'control';
 
 /** The only things a phone can ask for. Anything else is refused by name, before any code looks at its parameters. */
-export const READ_ACTIONS = ['ping', 'projects.list', 'project.snapshot', 'files.list', 'file.read', 'diff.read', 'handoffs.list', 'models.list', 'agents.list'] as const;
-export const CONTROL_ACTIONS = ['run.start', 'run.stop', 'plan.state', 'plan.continue', 'plan.loop', 'plan.verify', 'handoff.create', 'handoff.accept', 'approval.decide'] as const;
+export const READ_ACTIONS = ['ping', 'projects.list', 'project.snapshot', 'files.list', 'file.read', 'diff.read', 'handoffs.list', 'models.list', 'agents.list', 'session.get', 'session.status'] as const;
+export const CONTROL_ACTIONS = ['run.start', 'run.stop', 'plan.state', 'plan.continue', 'plan.loop', 'plan.verify', 'handoff.create', 'handoff.accept', 'approval.decide', 'session.new'] as const;
 
 export interface TrustedDevice {
   did: string; name: string; pub: PublicIdentity; fingerprint: string;
@@ -31,6 +31,8 @@ export interface RemoteFile {
   seen: Record<string, number>;
   /** Most it will let a phone spend on one run, in USD. A person changes it on the desktop. */
   maxUsdPerRun: number;
+  /** The project a phone may start sessions in by asking for "default". Chosen on the desktop only; the phone never names a path. realRoot is the folder's real path when it was chosen, checked again at every start. */
+  defaultProject?: { projectId: string; realRoot: string; setAt: string } | null;
 }
 
 export const remotePath = () => join(agentontrackHome(), 'remote.json');
@@ -171,7 +173,7 @@ export class RemoteHost {
     else if (isControl && device.level !== 'control') out = { ok: false, code: 'view-only', message: 'This phone was approved to look, not to control. Change that on the computer.' };
     else {
       try { out = { ok: true, result: await this.run(plain.action, plain.params, { did: device.did, device }) }; }
-      catch (e) { const err = e as { code?: string; message?: string }; out = { ok: false, code: err.code ?? 'refused', message: err.message ?? 'The computer refused this request.' }; }
+      catch (e) { const err = e as { code?: string; message?: string }; out = { ok: false, code: typeof err.code === 'string' ? err.code.slice(0, 40) : 'refused', message: phoneSafeMessage(err.message) }; }
     }
     const response = await this.reply(device, env.rid, 'response', out);
     this.file.cache.push({ did: device.did, rid: env.rid, response, exp: env.exp + 60_000 });
@@ -184,6 +186,20 @@ export class RemoteHost {
     for (const [k, until] of Object.entries(this.file.seen)) if (until < t) delete this.file.seen[k];
     this.file.cache = this.file.cache.filter((c) => c.exp >= t);
   }
+}
+
+/**
+ * What a phone is told when the computer refuses or fails. The text is bounded and any file path is replaced, because a folder name on this computer is not for a phone to learn
+ * (the project list never gives one), and an internal error can carry one (a missing folder, a failed read). Refusals the executor writes by hand contain no path.
+ */
+export function phoneSafeMessage(raw: unknown): string {
+  if (typeof raw !== 'string' || !raw.trim()) return 'The computer refused this request.';
+  // Greedy to the end of the line or the next quote: a folder name can contain spaces, so over-removing text after a path is the safe side.
+  const noPaths = raw
+    .replace(/(?<![\w])[A-Za-z]:[\\/](?![\\/])[^'"`<>|\n]*/g, '<path>')
+    .replace(/(?<![\w.<>:/-])\/(?:[\w.@~+-]+\/)+[^'"`<>|\n]*/g, '<path>')
+    .replace(/\\\\[^'"`<>|\n]+/g, '<path>');
+  return noPaths.length > 300 ? `${noPaths.slice(0, 300)}…` : noPaths;
 }
 
 /** An error the executor throws to say why it refused, in words a person reads on their phone. */

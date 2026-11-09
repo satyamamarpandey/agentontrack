@@ -10,6 +10,8 @@ export default defineConfig({
   timeout: 90_000,
   fullyParallel: false,
   workers: 2,
+  // One retry on CI only. A test that passes on the retry is reported as "flaky", not as passed, and the flaky list is recorded in the release evidence.
+  retries: process.env.CI ? 1 : 0,
   reporter: [['list'], ['json', { outputFile: 'test-results/e2e.json' }]],
   use: { trace: 'retain-on-failure', screenshot: 'only-on-failure' },
   webServer: process.env.AGENTONTRACK_LIVE ? [] : [

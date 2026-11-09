@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { accountPage, accountsEnabled, signedInHere } from './accounts';
 import { currentPort, enterDemo, localAddress, onPublicSite, pair, probeCompanion, setPort, type Probe } from './api';
 import { Icon, Logo } from './icons';
@@ -36,7 +36,7 @@ function Welcome({ onLocal, onDemo }: { onLocal: () => void; onDemo: () => void 
         <button className="btn big" disabled={!on} onClick={go} data-testid="continue-email">Sign up or sign in with email</button>
         {!on
           ? <p className="muted small" data-testid="signin-off">Sign-in is not switched on for this site yet. Everything else works without it.</p>
-          : <p className="muted small">Signing in saves your preferences. It never gives this website access to your computer.</p>}
+          : <p className="muted small">Signing in is experimental (tested against emulators only) and saves your preferences. It never gives this website access to your computer.</p>}
         <div className="divider"><span>or look around first</span></div>
         <button className="btn big" onClick={onDemo} data-testid="explore-demo">Explore a demo <span className="badge warn">invented data</span></button>
       </div>
@@ -61,13 +61,16 @@ function Connect({ onPaired, notice, onBack }: { onPaired: () => void; notice?: 
   const [error, setError] = useState('');
   const [probe, setProbe] = useState<Probe | null>(null);
   const [busy, setBusy] = useState(false);
+  const lookSeq = useRef(0);
   const pub = onPublicSite();
 
   const look = useCallback(async () => {
     if (!pub) return;
+    const mine = ++lookSeq.current; // answers can arrive out of order (mount probe vs a later Retry); only the newest one may set the result
     setProbe(null);
     try { setPort(port); } catch (e) { setError((e as Error).message); return; }
-    setProbe(await probeCompanion(port));
+    const answer = await probeCompanion(port);
+    if (mine === lookSeq.current) setProbe(answer);
   }, [pub, port]);
   useEffect(() => { void look(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 

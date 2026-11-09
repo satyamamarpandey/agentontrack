@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { accountPage, accountsEnabled, mobileBackend } from './accounts';
 import { Icon, Logo } from './icons';
 import { RemoteError } from './remote-error';
+import { DictationButton } from './dictation';
+import { forgetKey, keyFor, markUnsure, pendingUnsure, pollStatus, signatureOf, statusAdvice, type SessionStatus } from './new-session';
 import type { Backend, ComputerRow, DeviceStatus, Snapshot } from './mobile-backend';
 
 const STALE_AFTER_MS = 3 * 60_000;
@@ -60,13 +62,14 @@ export function MobileApp() {
   if (state === 'out') return (
     <Shell title="AgentOnTrack">
       <div className="m-card stack">
-        <h2>Sign in to see your computers</h2>
+        <h2>Sign in to see your computers</h2><p className="m-note" data-testid="experimental-note">Experimental: tested against emulators only, not on a real Firebase project or phone.</p>
         <p>Use the same account you used on your computer. Signing in only shows you what is linked to it. Each computer asks you to approve this phone separately.</p>
         <a className="btn primary m-btn" href={`${accountPage()}?next=mobile`} data-testid="m-signin">Sign in</a>
       </div>
     </Shell>
   );
   const go = (r: Partial<typeof route>) => setRoute((cur) => ({ tab: 'progress', ...r, ...(r.cid === undefined && r.project === undefined ? {} : {}), ...(cur && r.tab === undefined && r.project === cur.project ? { tab: cur.tab } : {}) }));
+  if (route.cid && route.project === '_new') return <NewSessionScreen be={be} cid={route.cid} go={go} />;
   if (route.cid && route.project) return <ProjectScreen be={be} cid={route.cid} project={route.project} tab={route.tab} go={go} />;
   if (route.cid) return <ProjectsScreen be={be} cid={route.cid} go={go} />;
   return <HomeScreen be={be} go={go} onOut={() => setState('out')} />;
@@ -151,6 +154,7 @@ function ProjectsScreen({ be, cid, go }: { be: Backend; cid: string; go: (r: { c
   return (
     <Shell title={name} back={() => go({})}>
       <Freshness online={online} last={last} snap={list} />
+      <button className="btn primary m-btn" disabled={!online} onClick={() => go({ cid, project: '_new', tab: 'progress' })} data-testid="m-new-session">New session</button>
       {!list ? <p className="m-note" role="status">Waiting for the computer&apos;s list of projects…</p> : null}
       {items.length === 0 && list ? <div className="m-card"><p>No projects are registered on this computer.</p></div> : null}
       {items.filter((p: any) => !p.archived).map((p: any) => (
@@ -160,6 +164,135 @@ function ProjectsScreen({ be, cid, go }: { be: Backend; cid: string; go: (r: { c
           {p.activeTask ? <span className="badge">{String(p.activeTask.status).replace(/_/g, ' ').toLowerCase()}</span> : null}
         </button>
       ))}
+    </Shell>
+  );
+}
+
+/* ---------- A brand new agent session, started on the computer ---------- */
+
+const NEW_ERRORS: Record<string, string> = {
+  'no-default-project': 'This computer has no default project for phone sessions. Pick a project below, or choose a default on the computer.',
+  'default-unavailable': 'The default project is not available on the computer right now. Pick a project from the list.',
+  'project-archived': 'That project is archived on the computer.', 'no-project': 'That project is not on the computer any more.',
+  'agent-unavailable': 'That agent cannot be started in this project right now.', busy: 'Several runs are already going on the computer. Wait for one to finish.',
+  'idem-mismatch': 'That request changed after it was sent. Nothing was started; send it again.',
+  'in-doubt': 'An earlier attempt may have started a session on the computer. Check the Activity tab before trying again. Nothing new was started.',
+  unavailable: 'The computer cannot start sessions from a phone (it may need updating).',
+};
+
+function NewSessionScreen({ be, cid, go }: { be: Backend; cid: string; go: (r: { cid?: string; project?: string; tab?: Tab }) => void }) {
+  const { last, online } = usePresence(be, cid);
+  const phoneOnline = useOnline();
+  const [list, setList] = useState<Snapshot | null>(null);
+  useEffect(() => be.watchSnapshot(cid, 'list', setList), [be, cid]);
+  const items: any[] = (Array.isArray(list?.body) ? list!.body : (list?.body?.items ?? [])).filter((p: any) => !p.archived && !p.missing);
+  const dflt = items.find((p: any) => p.isDefault);
+  const [project, setProject] = useState('');
+  const picked = project || (dflt ? 'default' : items[0]?.id ?? '');
+  const choicesProject = picked === 'default' ? dflt?.id ?? '' : picked;
+  const choices = useChoices(be, cid, choicesProject, online && !!choicesProject);
+  const [agent, setAgent] = useState(''); const [model, setModel] = useState(''); const [policy, setPolicy] = useState<'standard' | 'read-only'>('standard'); const [prompt, setPrompt] = useState('');
+  const startable = (choices.agents ?? []).filter((a) => a.canStart);
+  const chosen = agent || startable[0]?.id || '';
+  const modelsFor = (choices.models ?? []).filter((m) => m.agent === chosen);
+  const modelChoice = model || modelsFor.find((m) => m.entitlement === 'worked')?.id || modelsFor[0]?.id || (chosen ? 'haiku' : '');
+  const act = useAction();
+  const [started, setStarted] = useState<{ sessionId: string; project: { id: string; name: string }; deduped: boolean; usedDefault: boolean } | null>(null);
+  const [unsure, setUnsure] = useState(() => pendingUnsure(sessionStorage, cid) !== null);
+  const [status, setStatus] = useState<SessionStatus | null>(null);
+  const [checking, setChecking] = useState(false); const [checkFailed, setCheckFailed] = useState(false);
+  const alive = useRef(true); useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  /** Asks the computer what became of the unanswered request. Bounded; shows the real state; on "started" goes to the live view. */
+  const reconcile = useCallback(async () => {
+    const key = pendingUnsure(sessionStorage, cid); if (!key) return;
+    setChecking(true); setCheckFailed(false);
+    const got = await pollStatus(() => be.call<SessionStatus>(cid, 'session.status', { v: 1, idemKey: key }, 20_000), undefined, undefined, () => !alive.current);
+    if (!alive.current) return;
+    setChecking(false); setStatus(got); setCheckFailed(got === null);
+    if (got?.state === 'started') { forgetKey(sessionStorage); setUnsure(false); setPrompt(''); setStarted({ sessionId: got.sessionId, project: got.project, deduped: false, usedDefault: false }); go({ cid, project: got.project.id, tab: 'activity' }); }
+    else if (got?.state === 'refused-before-start') { forgetKey(sessionStorage); setUnsure(false); }
+  }, [be, cid, go]);
+  const askedOnce = useRef(false);
+  useEffect(() => { if (unsure && !askedOnce.current && online && !started) { askedOnce.current = true; void reconcile(); } }, [unsure, online, started, reconcile]);
+  const ready = online && phoneOnline && !act.busy && !!picked && !!chosen && !!modelChoice && prompt.trim().length > 0 && prompt.length <= 4000;
+  const send = () => {
+    const sig = signatureOf({ cid, project: picked, agent: chosen, model: modelChoice, policy, prompt });
+    const idemKey = keyFor(sessionStorage, sig);
+    setUnsure(false); setStatus(null);
+    void act.run(async () => {
+      try {
+        const r = await be.call<any>(cid, 'session.new', { v: 1, idemKey, project: picked, agent: chosen, model: modelChoice, policy, prompt }, 60_000);
+        forgetKey(sessionStorage); setStarted(r); setPrompt(''); return r;
+      } catch (e) {
+        // "In doubt" is the computer saying an earlier attempt may have started something: not a definite answer, so the key stays and its status is asked.
+        if (e instanceof RemoteError && e.code === 'in-doubt') { markUnsure(sessionStorage, cid); setUnsure(true); askedOnce.current = true; void reconcile(); throw new RemoteError('in-doubt', 'An earlier attempt may have started a session. Checking with your computer…'); }
+        if (e instanceof RemoteError && e.code !== 'offline') { forgetKey(sessionStorage); throw new RemoteError(e.code, NEW_ERRORS[e.code] ?? e.message); }
+        // No answer: the computer may or may not have started it. The key is kept, so sending the same request again cannot start it twice.
+        markUnsure(sessionStorage, cid); setUnsure(true); askedOnce.current = true; void reconcile(); throw new RemoteError('unsure', 'No answer came back. Checking with your computer what happened to it…');
+      }
+    }, 'Started on your computer.');
+  };
+  return (
+    <Shell title="New session" back={() => go({ cid })}>
+      <Freshness online={online} last={last} snap={list} />
+      {started ? (
+        <section className="m-card stack" data-testid="m-new-started">
+          <h2>Started</h2>
+          <p>A new session <code className="m-code" data-testid="m-new-id">{started.sessionId}</code> is running in <b>{started.project.name}</b>{started.usedDefault ? ' (the default project)' : ''}.{started.deduped ? ' This was already started by an earlier attempt; nothing new was started.' : ''}</p>
+          <button className="btn primary m-btn" onClick={() => go({ cid, project: started.project.id, tab: 'activity' })} data-testid="m-new-watch">Watch it</button>
+        </section>
+      ) : (
+        <section className="m-card stack">
+          <h2>Start a new coding session</h2>
+          <p className="m-note">This starts a fresh session on your computer. It runs there, in the project you pick, with the same approvals and limits as always. You choose a project, never a folder.</p>
+          {!list ? <p className="m-note" role="status">Waiting for the computer&apos;s list of projects…</p> : items.length === 0 ? <p className="m-note" role="alert">No project is available on this computer.</p> : (
+            <label>Project
+              <select value={picked} onChange={(e) => { setProject(e.target.value); setAgent(''); setModel(''); }} name="m-new-project" data-testid="m-new-project">
+                {dflt ? <option value="default">Default project ({dflt.name})</option> : null}
+                {items.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </label>)}
+          {!dflt && list ? <p className="m-note" data-testid="m-new-nodefault">No default project is chosen on the computer. Pick one above.</p> : null}
+          <div className="row wrap">
+            <label>Agent
+              <select value={chosen} onChange={(e) => { setAgent(e.target.value); setModel(''); }} name="m-new-agent" data-testid="m-new-agent">
+                {(choices.agents ?? []).map((a) => <option key={a.id} value={a.id} disabled={!a.canStart}>{a.name} ({a.canStart ? 'ready' : STATUS_WORDS[a.status] ?? a.status})</option>)}
+              </select>
+            </label>
+            <label>Model
+              <select value={modelChoice} onChange={(e) => setModel(e.target.value)} name="m-new-model" data-testid="m-new-model" disabled={modelsFor.length === 0}>
+                {modelsFor.length === 0 ? <option value="haiku">haiku (small default, none found yet)</option> : modelsFor.map((m) => <option key={m.id} value={m.id}>{m.id}{m.entitlement === 'worked' ? ' (worked here)' : ' (found, not tried)'}</option>)}
+              </select>
+            </label>
+          </div>
+          <label>Mode
+            <p className="m-note">Standard lets the agent edit files, asking where your computer requires it. Read only lets it read and search, and nothing else.</p>
+            <select value={policy} onChange={(e) => setPolicy(e.target.value as 'standard' | 'read-only')} name="m-new-policy" data-testid="m-new-policy">
+              <option value="standard">Standard (can edit files)</option>
+              <option value="read-only">Read only (no writes, no commands)</option>
+            </select>
+          </label>
+          <label>What should the agent do?
+            <textarea rows={4} maxLength={4000} value={prompt} onChange={(e) => setPrompt(e.target.value)} name="m-new-prompt" data-testid="m-new-prompt" placeholder="Describe the task" />
+          </label>
+          <div className="row wrap"><DictationButton onText={(t) => setPrompt((p: string) => (p && !/\s$/.test(p) ? p + ' ' : p) + t)} /></div>
+          <p className="m-note">{prompt.length} / 4000. Files cannot be attached from a phone yet, and a spoken note is typed text only: raw audio is not sent.</p>
+          {choices.agents && startable.length === 0 ? <p className="m-note" role="alert" data-testid="m-new-noagent">No agent can be started in this project right now. {choices.agents.find((a) => a.reason)?.reason ?? ''}</p> : null}
+          <button className="btn primary m-btn" disabled={!ready} onClick={send} data-testid="m-new-send">Start session</button>
+          {!online || !phoneOnline ? <p className="m-note" data-testid="m-new-offline">{!phoneOnline ? 'This phone is offline.' : 'Your computer is not reachable.'} Nothing can be started until it is back.</p> : null}
+        </section>
+      )}
+      {unsure && !started ? (
+        <section className="m-card stack" role="status" data-testid="m-new-status">
+          <h2>What happened to your request</h2>
+          <p data-testid="m-new-status-text">{checking ? 'Checking with your computer…' : status?.state === 'refused-before-start' ? 'Your computer refused it before anything started. Nothing is running.' : status?.state === 'unknown-request' ? 'Your computer has no record of this request, so it started nothing. You can send the same request again; it cannot start twice.' : status?.state === 'starting-indeterminate' ? 'Your computer began this request but cannot prove a session started. It may or may not have. Look at Recent sessions in the Activity tab before doing anything else.' : checkFailed ? 'Could not reach your computer to check. The session may or may not have started.' : 'The session may or may not have started.'}</p>
+          <div className="row wrap">
+            <button className="btn m-btn" disabled={checking || !online || !phoneOnline} onClick={() => void reconcile()} data-testid="m-new-refresh">Refresh status</button>
+            {statusAdvice(status).canResend ? <button className="btn primary m-btn" disabled={!ready} onClick={send} data-testid="m-new-resend">Send the same request again</button> : null}
+          </div>
+        </section>
+      ) : null}
+      {act.msg && !started && !unsure ? <p role={act.ok ? 'status' : 'alert'} className={act.ok ? 'm-note' : 'alert bad'} data-testid="m-new-result">{act.msg}</p> : null}
     </Shell>
   );
 }

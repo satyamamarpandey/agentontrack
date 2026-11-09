@@ -200,7 +200,9 @@ test('integrations are searchable, and never call a blocked or MCP-only platform
   await expect(page.getByTestId('integration-gemini')).toBeVisible();
   await expect(page.getByTestId('integration-cursor')).toHaveCount(0);
   const models = page.getByTestId('model-table');
-  await expect(models.getByRole('row', { name: /OpenAI/ })).toContainText('Not tested');
+  // Codex was run for real on one Windows machine, so the row says that, and says where it was not run. It must never read as broadly verified.
+  await expect(models.getByRole('row', { name: /OpenAI/ })).toContainText('one Windows machine');
+  await expect(models.getByRole('row', { name: /OpenAI/ })).toContainText('Not run on Linux or macOS');
   await expect(models.getByRole('row', { name: /vLLM/ })).toContainText('Not tested');
 });
 
@@ -271,4 +273,28 @@ test('the dashboard page policy allows reCAPTCHA hosts only in a build that has 
   expect(html).toContain("default-src 'none'");
   expect(html).not.toContain("'unsafe-eval'");
   expect(html).not.toMatch(/script-src[^;]*'unsafe-inline'/);
+});
+
+test('a preview release is shown on its own, never as the stable download, and the changelog no longer says rc.4 is unpublished', async ({ page }) => {
+  const on = process.env.NEXT_PUBLIC_PREVIEW_PUBLISHED === '1' && !!process.env.NEXT_PUBLIC_PREVIEW_VERSION;
+  const version = process.env.NEXT_PUBLIC_PREVIEW_VERSION ?? '';
+  await page.goto(`${SITE}/install/`);
+  await expect(page.getByTestId('preview-release')).toHaveCount(on ? 1 : 0);
+  if (on) {
+    const sec = page.getByTestId('preview-release');
+    await expect(sec).toContainText('not the stable release');
+    await expect(sec).toContainText('Phone control is switched off');
+    await expect(sec).toContainText(`--version ${version}`);
+    await expect(sec).toContainText(`AOT_VERSION = '${version}'`);
+    await expect(page.getByTestId('preview-notes')).toHaveAttribute('href', `https://github.com/satyamamarpandey/agentontrack/releases/tag/v${version}`);
+    // The stable table and the plain installer text are not changed by a preview.
+    const hrefs = await page.getByTestId('download').evaluateAll((els) => els.map((e) => e.getAttribute('href') ?? ''));
+    for (const h of hrefs) expect(h, h).not.toContain(version);
+  }
+  await page.goto(`${SITE}/changelog/`);
+  await expect(page.locator('main')).not.toContainText('Not published yet. Downloads on this site are still');
+  await expect(page.locator('main')).toContainText('1.0.0-rc.4 (never published)');
+  await expect(page.getByTestId('changelog-state')).toContainText('pre-releases');
+  await page.goto(`${SITE}/integrations/`);
+  await expect(page.locator('main')).not.toContainText('Everything here is in release 1.0.0-rc.4');
 });

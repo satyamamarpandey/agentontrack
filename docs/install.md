@@ -22,6 +22,17 @@ Manual check: `sha256sum -c SHA256SUMS --ignore-missing`, or on Windows `Get-Fil
 
 Builds: Linux x64 and arm64 (glibc), macOS x64 and arm64, Windows x64.
 
+## Sign in to your agents (subscription, no API key)
+
+AgentOnTrack never asks for, stores or sends your agent sign-ins. You sign in with each agent yourself, and AgentOnTrack starts the agent with API-key variables removed from its environment, so a run uses your subscription and not a metered key.
+
+| Agent | Sign in | Check |
+|---|---|---|
+| Claude Code | `claude`, then `/login`, and choose your Claude subscription (Pro, Max or Team) | `claude auth status` shows `claude.ai` |
+| Codex | `codex login`, and choose Sign in with ChatGPT | `codex login status` says "Logged in using ChatGPT" |
+
+The Agents page shows the sign-in type it found. A sign-in that is billed by use (an API key) is refused unless you turn on paid API mode yourself. If the Agents page says Codex is not installed but you use the Codex desktop app, the app carries its own `codex` program: add its folder to PATH for the terminal you start AgentOnTrack from (see `docs/codex-setup.md`). A Codex run also needs the project to be a git repository; Codex refuses to run in a folder that is not one.
+
 ## First run
 
 ```sh

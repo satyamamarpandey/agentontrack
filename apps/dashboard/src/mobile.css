@@ -18,3 +18,10 @@
 .m-app textarea,.m-app input{font-size:16px}
 .m-app button:disabled{opacity:.5}
 .m-suggest{padding:10px;border:1px solid var(--line,#2a313c);border-radius:10px}.m-app select{min-height:44px;font-size:16px}
+
+.dictation { display: inline-flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.dictation-btn { min-height: 44px; padding: 0 1rem; border-radius: 8px; border: 1px solid currentColor; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.dictation-btn.on { background: #b3261e; color: #fff; border-color: #b3261e; }
+.dictation-status.err { color: #b3261e; }
+.dictation-interim { opacity: .7; font-style: italic; }
+.dictation-consent { display: block; padding: .75rem; border: 1px solid currentColor; border-radius: 8px; margin-top: .5rem; }

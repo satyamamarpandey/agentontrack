@@ -1,0 +1,297 @@
+{
+  "date": "2026-11-07",
+  "what": "Real Claude Code on the signed-in subscription. Script: scripts/bench-components.mjs",
+  "task": "Create a file named hello.txt containing exactly the text: hi. Then reply with the single word done.",
+  "trialsEach": 5,
+  "model": "haiku",
+  "trials": {
+    "native": [
+      {
+        "cpuBefore": 12,
+        "cpuAfter": 25,
+        "validCpu": true,
+        "seconds": 6.6,
+        "correct": true,
+        "input": 4,
+        "output": 271,
+        "cacheRead": 51636,
+        "cacheCreate": 18345,
+        "turns": 2
+      },
+      {
+        "cpuBefore": 2,
+        "cpuAfter": 5,
+        "validCpu": true,
+        "seconds": 4.6,
+        "correct": true,
+        "input": 4,
+        "output": 180,
+        "cacheRead": 44322,
+        "cacheCreate": 18272,
+        "turns": 2
+      },
+      {
+        "cpuBefore": 6,
+        "cpuAfter": 0,
+        "validCpu": true,
+        "seconds": 4.4,
+        "correct": true,
+        "input": 4,
+        "output": 165,
+        "cacheRead": 44322,
+        "cacheCreate": 16582,
+        "turns": 2
+      },
+      {
+        "cpuBefore": 17,
+        "cpuAfter": 27,
+        "validCpu": true,
+        "seconds": 4.5,
+        "correct": true,
+        "input": 4,
+        "output": 116,
+        "cacheRead": 44322,
+        "cacheCreate": 16582,
+        "turns": 2
+      },
+      {
+        "cpuBefore": 35,
+        "cpuAfter": 7,
+        "validCpu": true,
+        "seconds": 4.6,
+        "correct": true,
+        "input": 4,
+        "output": 155,
+        "cacheRead": 44322,
+        "cacheCreate": 18272,
+        "turns": 2
+      }
+    ],
+    "hooks-quiet": [
+      {
+        "cpuBefore": 56,
+        "cpuAfter": 26,
+        "validCpu": false,
+        "seconds": 7.7,
+        "correct": true,
+        "input": 4,
+        "output": 168,
+        "cacheRead": 41044,
+        "cacheCreate": 15038,
+        "turns": 2
+      },
+      {
+        "cpuBefore": 12,
+        "cpuAfter": 2,
+        "validCpu": true,
+        "seconds": 6.3,
+        "correct": true,
+        "input": 4,
+        "output": 201,
+        "cacheRead": 41044,
+        "cacheCreate": 15038,
+        "turns": 2
+      },
+      {
+        "cpuBefore": 11,
+        "cpuAfter": 5,
+        "validCpu": true,
+        "seconds": 8.4,
+        "correct": true,
+        "input": 4,
+        "output": 159,
+        "cacheRead": 41044,
+        "cacheCreate": 15038,
+        "turns": 2
+      },
+      {
+        "cpuBefore": 16,
+        "cpuAfter": 17,
+        "validCpu": true,
+        "seconds": 6.3,
+        "correct": true,
+        "input": 4,
+        "output": 120,
+        "cacheRead": 41044,
+        "cacheCreate": 15038,
+        "turns": 2
+      },
+      {
+        "cpuBefore": 21,
+        "cpuAfter": 14,
+        "validCpu": true,
+        "seconds": 6,
+        "correct": true,
+        "input": 4,
+        "output": 120,
+        "cacheRead": 41044,
+        "cacheCreate": 15038,
+        "turns": 2
+      }
+    ],
+    "hooks-brief-always": [
+      {
+        "cpuBefore": 11,
+        "cpuAfter": 19,
+        "validCpu": true,
+        "seconds": 7.9,
+        "correct": true,
+        "input": 4,
+        "output": 279,
+        "cacheRead": 48441,
+        "cacheCreate": 15197,
+        "turns": 2
+      },
+      {
+        "cpuBefore": 3,
+        "cpuAfter": 5,
+        "validCpu": true,
+        "seconds": 8,
+        "correct": true,
+        "input": 4,
+        "output": 197,
+        "cacheRead": 48441,
+        "cacheCreate": 15115,
+        "turns": 2
+      },
+      {
+        "cpuBefore": 7,
+        "cpuAfter": 7,
+        "validCpu": true,
+        "seconds": 7.7,
+        "correct": true,
+        "input": 4,
+        "output": 324,
+        "cacheRead": 48441,
+        "cacheCreate": 15246,
+        "turns": 2
+      },
+      {
+        "cpuBefore": 43,
+        "cpuAfter": 36,
+        "validCpu": false,
+        "seconds": 8.1,
+        "correct": true,
+        "input": 4,
+        "output": 212,
+        "cacheRead": 48441,
+        "cacheCreate": 15134,
+        "turns": 2
+      },
+      {
+        "cpuBefore": 33,
+        "cpuAfter": 35,
+        "validCpu": true,
+        "seconds": 15.9,
+        "correct": true,
+        "input": 4,
+        "output": 279,
+        "cacheRead": 48441,
+        "cacheCreate": 15180,
+        "turns": 2
+      }
+    ],
+    "hooks-default": [
+      {
+        "cpuBefore": 10,
+        "cpuAfter": 12,
+        "validCpu": true,
+        "seconds": 7.5,
+        "correct": true,
+        "input": 4,
+        "output": 118,
+        "cacheRead": 48350,
+        "cacheCreate": 14942,
+        "turns": 2
+      },
+      {
+        "cpuBefore": 9,
+        "cpuAfter": 6,
+        "validCpu": true,
+        "seconds": 7.8,
+        "correct": true,
+        "input": 4,
+        "output": 204,
+        "cacheRead": 48350,
+        "cacheCreate": 15028,
+        "turns": 2
+      },
+      {
+        "cpuBefore": 10,
+        "cpuAfter": 12,
+        "validCpu": true,
+        "seconds": 7.8,
+        "correct": true,
+        "input": 4,
+        "output": 268,
+        "cacheRead": 48350,
+        "cacheCreate": 15092,
+        "turns": 2
+      },
+      {
+        "cpuBefore": 9,
+        "cpuAfter": 35,
+        "validCpu": true,
+        "seconds": 7.6,
+        "correct": true,
+        "input": 4,
+        "output": 202,
+        "cacheRead": 48350,
+        "cacheCreate": 15030,
+        "turns": 2
+      },
+      {
+        "cpuBefore": 54,
+        "cpuAfter": 33,
+        "validCpu": false,
+        "seconds": 8.8,
+        "correct": true,
+        "input": 4,
+        "output": 269,
+        "cacheRead": 48350,
+        "cacheCreate": 15093,
+        "turns": 2
+      }
+    ]
+  },
+  "median": {
+    "native": {
+      "seconds": 4.6,
+      "input": 4,
+      "output": 165,
+      "cacheRead": 44322,
+      "cacheCreate": 18272,
+      "turns": 2
+    },
+    "hooks-quiet": {
+      "seconds": 6.3,
+      "input": 4,
+      "output": 159,
+      "cacheRead": 41044,
+      "cacheCreate": 15038,
+      "turns": 2
+    },
+    "hooks-brief-always": {
+      "seconds": 8,
+      "input": 4,
+      "output": 279,
+      "cacheRead": 48441,
+      "cacheCreate": 15180,
+      "turns": 2
+    },
+    "hooks-default": {
+      "seconds": 7.8,
+      "input": 4,
+      "output": 204,
+      "cacheRead": 48350,
+      "cacheCreate": 15030,
+      "turns": 2
+    }
+  },
+  "correct": {
+    "native": "5/5",
+    "hooks-quiet": "5/5",
+    "hooks-brief-always": "5/5",
+    "hooks-default": "5/5"
+  }
+}

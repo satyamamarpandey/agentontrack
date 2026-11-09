@@ -1,9 +1,10 @@
 // The phase plan in a real browser, against the real companion and engine. The agent is a small stand-in that prints what Claude Code prints
 // and writes a file (see `fakeAgent` in fixtures.ts). These tests are about planning, limits, approval and evidence, not about any model.
 // The real agent runs are in live-plan.spec.ts.
-import { existsSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { installHooks } from '../packages/adapters/dist/index.js';
+import { loadRegistry } from '../packages/core/dist/index.js';
 import { confirmDialog, expect, go, test, type Env } from './fixtures';
 
 test.use({ fakeAgent: true });
@@ -13,6 +14,14 @@ test.beforeEach(({ env }) => {
   env.project((p) => { p.human.setGoal({ statement: 'Fix the crash', scope: { include: ['**'] } }); });
   installHooks('claude-code', env.root, 'agentontrack');
 });
+
+/** Unattended runs are off by default; the bounded-mode tests turn them on the way the owner's own settings file would. */
+// The grant is for this project, limited and expiring, exactly what the terminal-code route would store. The fixture's companion reports an API-key sign-in under paid API mode
+// (the test-only options in fixtures.ts), because a chained run is refused for a subscription or unknown sign-in.
+const allowUnattended = (env: Env) => {
+  const now = Date.now();
+  writeFileSync(join(env.home, 'settings.json'), JSON.stringify({ unattendedGrant: { projectId: loadRegistry()[0]!.id, maxRuns: 10, remainingRuns: 10, maxPhasesPerSequence: 10, maxRounds: 5, createdAt: new Date(now).toISOString(), expiresAt: new Date(now + 4 * 3_600_000).toISOString() } }));
+};
 
 async function openPlan(page: import('@playwright/test').Page, env: Env) {
   await env.pair(page);
@@ -60,8 +69,9 @@ test('editing: titles, checks, budgets and order are changed, saved, and discard
   await first.getByRole('button', { name: 'Add a check' }).click();
   await page.getByTestId('plan-save').click();
   await expect(page.getByTestId('phases').locator('li').first()).toContainText('Read the date code first');
-  expect(env.project((p) => p.state().plan?.doc.phases[0].title)).toBe('Read the date code first');
-  expect(env.project((p) => p.state().plan?.version)).toBe(2);
+  // The editor shows the draft at once; the saved plan changes only when the companion has answered the save, so wait for that state.
+  await expect.poll(() => env.project((p) => p.state().plan?.doc.phases[0].title)).toBe('Read the date code first');
+  await expect.poll(() => env.project((p) => p.state().plan?.version)).toBe(2);
   // Move the second phase up, which keeps a linear plan linear.
   await page.getByRole('button', { name: /Move .* up/ }).nth(1).click();
   await page.getByTestId('plan-save').click();
@@ -75,13 +85,14 @@ test('approval is a person\'s decision on exactly this plan, and changing who ru
   await expect(page.getByRole('dialog')).toContainText('exactly these agents, models, checks and limits');
   await confirmDialog(page);
   await expect(page.getByTestId('plan-approval')).toHaveText('Approved');
-  expect(env.project((p) => p.state().plan?.approvedSha)).toBeTruthy();
+  await expect.poll(() => env.project((p) => p.state().plan?.approvedSha)).toBeTruthy();
   // Pausing and resuming change nothing that was approved.
   const second = page.getByTestId('phases').locator('li').nth(1);
   await second.getByRole('button', { name: 'Pause' }).click();
   await expect(second).toHaveAttribute('data-status', 'paused');
   await expect(page.getByTestId('plan-approval')).toHaveText('Approved');
   await second.getByRole('button', { name: 'Resume' }).click();
+  await expect(second).not.toHaveAttribute('data-status', 'paused');
   // Choosing another model does.
   await edit(second);
   await second.getByLabel('Model').fill('opus');
@@ -110,7 +121,7 @@ test('running phases in order: an agent that claims success is not believed unti
   await li('test').getByRole('button', { name: /^Start$/ }).click();
   await expect(li('test')).toHaveAttribute('data-status', 'needs-evidence', { timeout: 30_000 });
   await expect(page.locator('[data-status=verified]')).toHaveCount(0);
-  expect(existsSync(join(env.root, 'done.txt'))).toBe(true);
+  await expect.poll(() => existsSync(join(env.root, 'done.txt'))).toBe(true);
   await li('test').getByRole('button', { name: 'Run the checks' }).click();
   await expect(li('test')).toHaveAttribute('data-status', 'verified', { timeout: 30_000 });
   await expect(li('test')).toContainText('recorded as a receipt');
@@ -135,6 +146,7 @@ test('a phase assigned to an agent that cannot be started gives a prompt to copy
 });
 
 test('bounded autonomous: runs ready phases in turn, checks them itself, never approves, and stops before a release', async ({ page, env }) => {
+  allowUnattended(env);
   await openPlan(page, env);
   await create(page, 'Fix the crash and release it');
   const test = page.getByTestId('phases').locator('li[data-testid^="phase-test-"]');
@@ -145,15 +157,16 @@ test('bounded autonomous: runs ready phases in turn, checks them itself, never a
   await page.getByTestId('plan-approve').click();
   await confirmDialog(page);
   await page.getByTestId('plan-run').click();
-  await expect(page.getByTestId('plan-auto')).toContainText('release', { timeout: 90_000 });
-  await expect(page.getByTestId('plan-auto')).toContainText('always your decision');
+  // The start note also mentions a release, so wait for the FINAL message, which only appears once the sequence has stopped before the release phase.
+  await expect(page.getByTestId('plan-auto')).toContainText('always your decision', { timeout: 90_000 });
   await expect(page.getByTestId('phases').locator('li[data-testid^="phase-test-"]')).toHaveAttribute('data-status', 'verified');
   await expect(page.getByTestId('phases').locator('li[data-testid^="phase-release-"]')).toHaveAttribute('data-status', 'ready');
-  expect(env.project((p) => p.state().plan?.approvedSha)).toBeTruthy();
+  await expect.poll(() => env.project((p) => p.state().plan?.approvedSha)).toBeTruthy();
 });
 
 /** Approves a bounded plan and leaves it ready to run. */
-async function readyBounded(page: import('@playwright/test').Page, env: Env, goal = 'Fix the crash') {
+async function readyBounded(page: import('@playwright/test').Page, env: Env, goal = 'Fix the crash', on = true) {
+  if (on) allowUnattended(env);
   await openPlan(page, env);
   await create(page, goal);
   await page.getByLabel('Bounded autonomous').check();
@@ -192,4 +205,10 @@ test('a person can stop a running plan, and the agent that is running is stopped
     await expect(implement).not.toHaveAttribute('data-status', 'running');
     await expect(page.locator('[data-status=verified]')).toHaveCount(0);
   } finally { delete process.env.AOT_FAKE_DELAY_MS; }
+});
+
+test('bounded autonomous is off by default: the Run button is disabled with the reason, (the backend refusal is covered in packages/companion/test/autonomy.test.ts)', async ({ page, env }) => {
+  await readyBounded(page, env, 'Fix the crash', false);
+  await expect(page.getByTestId('plan-run')).toBeDisabled();
+  await expect(page.getByTestId('plan-run-off')).toContainText('Unattended runs');
 });

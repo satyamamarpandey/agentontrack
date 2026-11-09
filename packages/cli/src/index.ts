@@ -160,6 +160,9 @@ async function main(): Promise<void> {
       if (allowSite) print('The public AgentOnTrack site may now connect, but only with the pairing code below. Anything it changes also needs a code shown here, so a compromised page cannot act on its own. Without --allow-public-site, the local address below works with no outside origin at all.');
       print(`AgentOnTrack dashboard: ${c.url}\nPairing code (one use, 5 minutes): ${c.newPairingCode()}\nPress Enter for a new code. Press Ctrl+C to stop.`);
       createInterface({ input: process.stdin }).on('line', () => print(`New pairing code: ${c.newPairingCode()}`));
+      // Ctrl+C, a terminal closing or a service stop: end the agents this dashboard started (and what they started) before exiting, so none keeps working unseen.
+      let closing = false;
+      for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.on(sig, () => { if (closing) return; closing = true; void c.close().catch(() => undefined).finally(() => process.exit(0)); });
       return;
     }
     case 'init': {

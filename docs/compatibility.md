@@ -11,17 +11,31 @@ Labels: **live model** means the real agent with a real model. **Scripted model*
 | Capability | Claude Code | Codex | Hermes |
 |---|---|---|---|
 | Support level | **Supported** | Supported with limits | Supported with limits |
-| Tested with a normal hosted model | Yes, Haiku | **No** (needs a login not available here) | **No** (same) |
+| Tested with a normal hosted model | Yes, Haiku | **Yes, on one Windows machine** with a ChatGPT sign-in (codex-cli 0.167.0-alpha.3): app-server, `codex exec`, resume, attachments, worktree, handoff with Claude Code. Few trials; Linux and macOS not run with a real sign-in | **No** (same) |
 | Push held, denied, then allowed once after approval | Live model and scripted | Scripted. With `qwen2.5:3b`: held in each of two runs, and allowed after approval in one | Scripted. With `qwen2.5:3b`: never reached a push, since its tool call was malformed in one run and timed out in another |
 | Hook program missing | **Blocks** | **RUNS THE ACTION** | **Blocks**, with `fail_closed: true`. Its own default fails open |
 | Start refused if the hook is broken | `agentontrack run claude-code` | `agentontrack run codex`. Running `codex` directly skips this check | Not built |
 | OS containment of scripts | `install --sandbox`: **verified on macOS**. **Linux: could not start on the cloud runner, so not verified.** Native Windows: none | `agentontrack run codex`: verified on Linux. Windows and macOS not tested | None known |
 | MCP in the real host | Live model and scripted | Scripted | Scripted, with Hermes' optional `mcp` package installed. Without it the server silently does not load |
 | Compaction seen by hooks, gate holds after resume | Scripted | Not tested | Not tested |
-| Dashboard can start it | Yes | No: run it yourself, and its hooks report | No: run it yourself, and its hooks report |
-| Usage reported | Provider-reported | In its own output, not yet recorded by AgentOnTrack | Field names unverified |
+| Dashboard can start it | Yes | Yes, through the Codex app-server (approvals answered by a person) or `codex exec`; a metered sign-in is refused unless you allow it | No: run it yourself, and its hooks report |
+| Usage reported | Provider-reported | Recorded from Codex's own token counts; Codex reports no cost, so none is shown | Field names unverified |
 
 An approval given on one agent does not carry over to another unless you made it portable. This was tested between real Codex and real Hermes with a scripted model.
+
+## Which ways of starting an agent are allowed (1.0.0-rc.7)
+
+Enforced by the companion program itself, not only by the screen. Details and the reasons: [docs/provider-terms.md](provider-terms.md). Neither provider has confirmed that every way of starting its program is allowed.
+
+| Way of starting | Claude Code | Codex |
+|---|---|---|
+| One run, started by a person clicking Start | On, with the person's own login | On, with the person's own login |
+| Build, then a separate click to review it (`Review this run`) | On, two single runs | On, two single runs |
+| One-click build then review (cross-review), continue over several phases, retry loops, unattended runs | Refused on a subscription login. Allowed only with the person's own API key in paid API mode and a time-limited grant made with the terminal confirmation code | Same |
+| Started from a phone | Off in the releases; refused unless a separate setting is on | Same |
+| Hosted or commercial | Not offered | Not offered |
+
+Limits that apply to every run: a time limit in minutes (default 30), at most 4 agents at once, output kept in memory capped at 2000 lines. A dollar cap exists only for an API key in paid API mode; AgentOnTrack does not show or invent dollar figures for subscription use. When a provider says its usage limit is reached, the run is marked stopped (not failed), the session and its context are kept, and the note says to resume later or start the same task with another connected agent.
 
 ## What each sandbox does
 
@@ -66,8 +80,23 @@ What to know before combining them. **None of this has been tested** with ECC or
 
 ## Agents started from the product
 
-Only **Claude Code** can be started from the web workspace or the VS Code sidebar. Codex, Hermes and the other platforms run in their own terminal, and their hooks report to the same record. Assigning a role to an agent in the Team panel records the plan. It does not start that agent.
+**Claude Code** (verified) and **Codex** (app-server verified with a real Codex on 2026-11-07, one trial each; exec transport and attachments not) can be started from the web workspace. Hermes and the other platforms run in their own terminal, and their hooks report to the same record. Assigning a role to an agent in the Team panel records the plan. It does not start that agent.
 
 ## Browsers, for the public site
 
 Chromium, Edge, Firefox and WebKit pass pairing against a local copy of the site. The real https page has been run end to end with Chromium, the installed release and real Claude Code. Safari blocks requests from a public page to your machine, so use the local address the companion prints.
+
+## Starting agents from AgentOnTrack (updated 2026-11-06)
+
+| | Claude Code | Codex |
+|---|---|---|
+| Start, stream, stop | Verified with the real program | Verified with a real Codex 0.167.0-alpha.3 on a ChatGPT sign-in, 1 trial (the maintainers' record "live-codex-appserver.json" (not published)) |
+| Approval at the moment of the action | Hook holds the action until a person approves (real agent) | The app-server asks before running; AgentOnTrack answers from the same approval records. One-time accepts only. Real Codex asked, a decline kept a file from being deleted (`live-codex-resume.json`); an approve-then-run was seen in a real cross-review (1 trial) |
+| Runs inside an isolated worktree | Verified with the real program, 1 trial | Verified with a real Codex, 1 trial (the maintainers' record "live-worktree-codex.json" (not published)): file only in the worktree, project folder unchanged, a push held for a person, clean merge preview |
+| Resume, attachments, usage | Resume and a text attachment verified (1 trial each) | Resume and usage verified with a real Codex (1 trial); attachments fixture only |
+| Claude ↔ Codex handoff (cross-review, both orders) | Real agents, 1 trial per order, 6 of 6 checks (`live-handoff.json`) | same |
+| Sign-in | Your Claude subscription; API-key variables removed from the agent's environment | Your ChatGPT subscription through `codex login`; nothing is read or copied |
+
+Steps to repeat the Codex checks yourself: `docs/codex-setup.md`.
+
+Windows: Claude Code's Bash tool runs in Git Bash. `/tmp/x` and `/d/x` there mean the Windows temp folder and drive D, and AgentOnTrack reads them that way for the Bash tool only. WSL's bash is not covered by this.

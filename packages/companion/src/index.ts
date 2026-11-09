@@ -1,19 +1,22 @@
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { homedir, hostname } from 'node:os';
 import { basename, dirname, extname, relative, sep, isAbsolute, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { failoverOptions, runtimeFacts, coverageFor, PROVIDERS, providerInstalled, hooksInstalled, installHooks, probeLocalModel, uninstallHooks, discoverModels, describeAgents, type InitReport, type Seen } from '@agentontrack/adapters';
+import { failoverOptions, runtimeFacts, coverageFor, PROVIDERS, providerInstalled, hooksInstalled, hookSelfTest, agentEnv, killTree, apiKeyVarsPresent, classifyClaudeMethod, classifyCodexStatus, mayStartUnder, type AuthMode, buildCodexExecArgs, mirrorHooksToWorktree, CodexAppServer, mapCodexTool, parseCodexLine, LineSplitter, codexUsageRecord, installHooks, probeLocalModel, uninstallHooks, discoverModels, describeAgents, type InitReport, type Seen } from '@agentontrack/adapters';
+import { isProviderSessionId, newSessionId, projectSessions, searchSessions, type SessionView } from '@agentontrack/core';
 import { planFacts as planFactsOf, planView as planViewOf } from './plan-view.js';
-import { makeExecutor, snapshotOf } from './remote-actions.js';
+import { makeExecutor, snapshotOf, stillTheSameFolder } from './remote-actions.js';
+import { terminate, type Killable } from './terminate.js';
+import { IdempotencyStore } from './idempotency.js';
 import { loadRemote, newRemoteFile, Refusal, saveRemote, type RemoteFile } from './remote-host.js';
 import { RemoteService } from './remote-service.js';
 import { fingerprint as fingerprintOf } from '@agentontrack/remote';
 import { FirestoreTransport, type Emulators, type FirebaseConfig } from './remote-transport.js';
-import { renderHandoffMarkdown, checkSlashCommand, CommandRefused, orchestrate, acceptHandoff2, buildHandoff, listHandoffs, loadHandoff, planWorkflow, checkSpec, decompose, phasePrompt, PhasePlanSchema, planSha, startBlock, saveHandoff, validateHandoff, hashText, listDir, WorkspaceError, updateRegistered, approvalView, agentontrackHome, computeAnalytics, isPendingLive, loadRegistry, Project, registerProject, saveRegistry, stateDirFor, type Registered } from '@agentontrack/core';
+import { loadEnvFile, findEnvFile, askRecord, saveAttachment, findAttachment, attachmentNote, attachmentDir, AttachmentError, MAX_ATTACHMENT_BYTES, renderHandoffMarkdown, checkSlashCommand, CommandRefused, orchestrate, acceptHandoff2, buildHandoff, listHandoffs, loadHandoff, planWorkflow, checkSpec, decompose, phasePrompt, PhasePlanSchema, planSha, startBlock, saveHandoff, validateHandoff, hashText, listDir, WorkspaceError, updateRegistered, approvalView, agentontrackHome, computeAnalytics, isPendingLive, loadRegistry, Project, registerProject, saveRegistry, stateDirFor, type Registered } from '@agentontrack/core';
 import * as z from 'zod/v4';
 
 const SESSION_TTL_MS = 8 * 3_600_000;
@@ -25,6 +28,7 @@ const MAX_SHOWN_REQUEST = 4000;
 const CODE_TTL_MS = 5 * 60_000;
 const MAX_PAIR_FAILURES = 5;
 const MAX_BODY = 256 * 1024;
+const MAX_FEEDBACK_FILE = 1024 * 1024;
 const COOKIE = 'bl_session';
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -39,6 +43,16 @@ export interface CompanionOptions {
   home?: string;
   /** Overrides the agent command. Used by tests that must not spend inference; they label results as such. */
   claudeCommand?: string[];
+  /** Same, for Codex. */
+  codexCommand?: string[];
+  /** `app-server` (default): approvals are answered by AgentOnTrack at the moment Codex asks. `exec`: the older non-interactive mode, gated by hooks only. */
+  codexMode?: 'app-server' | 'exec';
+  /** Test seams for how long an approval is waited for. */
+  codexApprovalWaitMs?: number; codexApprovalPollMs?: number; /** How many times to tell Codex its last command failed, after a turn that ended on a failure. Default 1. */ codexRecoveryTurns?: number;
+  /** Off unless the person turns it on. While off, API-key variables are removed from the environment of every agent this companion starts, and an agent signed in with a metered account is not started. */
+  allowPaidApi?: boolean;
+  /** The e.env to read, or null for none. Default: found automatically (see findEnvFile). */
+  envFile?: string | null;
   benchmarksDir?: string;
   /** Exact origins allowed to call the API. Empty by default. They still need a pairing code. */
   allowedOrigins?: string[];
@@ -46,6 +60,10 @@ export interface CompanionOptions {
   remote?: { emulators?: Emulators; snapshotEveryMs?: number; heartbeatEveryMs?: number };
   /** Hook command for this install. Without it, the dev build's own path is used. */
   selfCommand?: string;
+  /** Test-only: the sign-in kind this runtime would use. Production reads it from the agent's own status command (never from credentials). */
+  detectedAuthMode?: (runtime: string) => AuthMode;
+  /** Test-only: how many milliseconds one minute of a run's time limit lasts (60000 in production). */
+  minuteMsForTests?: number;
   /** Shows a code to the person at the terminal. A session from an outside origin changes nothing without one. */
   onTerminalChallenge?: (code: string, action: string) => void;
 }
@@ -59,18 +77,85 @@ export interface Companion {
 }
 
 interface Session { tokenHash: string; csrf: string; createdAt: number; expiresAt: number; userAgent: string; origin?: string; surface?: 'editor'; terminalFailures?: number; fileGrant?: { project: string; until: number } }
-interface Run { id: string; project: string; child: ChildProcess; started: number; events: string[]; status: string }
+interface Run { limitReached?: boolean; id: string; project: string; child: { kill: () => unknown; pid?: number | undefined }; started: number; events: string[]; status: string; runtime?: string; sessionId?: string; linkedProvider?: string }
 
+/** Ends an agent and the programs it started. A bare kill() leaves those running. */
+/** At most this many agent processes run at once across every way of starting one (dashboard, sessions, phone, plan phases, cross-review). */
+export const MAX_CONCURRENT_RUNS = 4;
+/** The in-memory lines kept per run; older lines are dropped. The project record is separate. */
+export const MAX_RUN_EVENT_LINES = 2000;
+/** The first line once older lines have been dropped, so a reader knows the output is not complete. */
+export const RUN_LINES_DROPPED_MARKER = '[earlier output dropped]';
+class RunLines extends Array<string> {
+  static override get [Symbol.species]() { return Array; }
+  override push(...items: string[]): number {
+    const n = super.push(...items);
+    if (n > MAX_RUN_EVENT_LINES) {
+      const body = this.slice(this[0] === RUN_LINES_DROPPED_MARKER ? 1 : 0);
+      this.length = 0;
+      super.push(RUN_LINES_DROPPED_MARKER, ...body.slice(body.length - (MAX_RUN_EVENT_LINES - 1)));
+    }
+    return this.length;
+  }
+}
+export const newRunLines = (): string[] => new RunLines();
+/** What the person sees when an agent cannot start or fails: a plain sentence, with no folder paths or token-like strings from the program's own output. */
+/** A provider saying a usage, rate or quota limit was reached. Matched on the agent's own error text. */
+export const isUsageLimitText = (raw: string): boolean => /usage limit|rate[ -]?limit|limit (?:has been )?reached|reached (?:your|the|its) (?:\w+ )?limit|try again (?:at|in|after)|\b429\b|quota|too many requests/i.test(raw);
+export const usageLimitMessage = (agent: string): string => `${agent === 'codex' ? 'Codex' : 'Claude Code'} says its usage limit was reached. Your session and context are kept: resume it later, or start the same task with another connected agent.`;
+export function agentFailureText(agent: string, raw: string): string {
+  const name = agent === 'codex' ? 'Codex' : 'Claude Code';
+  if (isUsageLimitText(raw)) return usageLimitMessage(agent);
+  if (/ENOENT|not found|not recognized|cannot find/i.test(raw) && /ENOENT|spawn|command|program/i.test(raw)) return `${name} was not found on this computer. Install it, sign in with its own login command in a terminal, then try again.`;
+  if (/log ?in|logged out|not signed|sign in|unauthori[sz]ed|authenticat|expired|invalid api key|\b401\b/i.test(raw)) return `${name} is not signed in, or its sign-in expired. Sign in with its own login command in a terminal, then try again.`;
+  return raw.replace(/\s+/g, ' ').replace(/[A-Za-z]:[\\/][^\s'"]*|(?:\/[\w.@-]+){2,}/g, '[path]').replace(/[A-Za-z0-9_-]{24,}/g, '[redacted]').trim().slice(0, 200);
+}
+const DRAFT_PER_MINUTE = 20;
+const MAX_DRAFT_BYTES = 100 * 1024;
+const UNATTENDED_OFF = 'Unattended runs are off, so more than one phase or round in a row is refused: no person would be acting between the runs. Turn them on in Settings, under Unattended runs (it needs the terminal code and gives a limited, expiring grant for this project), or run one phase at a time.';
+const CHAIN_AUTH_REFUSAL = 'Chained runs (several phases or rounds in a row with nobody acting between them) are refused for this agent: it would use a subscription sign-in or a sign-in AgentOnTrack cannot identify, and provider permission for unattended subscription automation is unresolved. They are allowed only when the agent is signed in with your own API key and paid API mode is on for this companion. Use your own API key in paid API mode, or start each phase yourself.';
+const CROSS_REVIEW_REFUSAL = 'Cross-review runs a builder and then a reviewer with nobody acting in between, so it is off by default. It is allowed only with an unattended-runs grant for this project and an agent signed in with your own API key while paid API mode is on. Compliant paths: use your own API key in paid API mode with a grant, or start the build and then the review yourself as two separate runs (Review this run).';
+/** Idempotency-Key on the routes that start an agent: 22 to 64 characters of letters, digits, underscore and hyphen. Entries are kept this long, and no more than this many. */
+const START_KEY_RE = /^[A-Za-z0-9_-]{22,64}$/;
+const START_KEY_TTL_MS = 10 * 60_000;
+const START_KEY_MAX = 500;
+
+const killChild = (c: { kill: () => unknown; pid?: number | undefined }): void => { killTree(c.pid); c.kill(); };
 const hash = (s: string) => createHash('sha256').update(s).digest('hex');
 const safeEq = (a: string, b: string) => { const x = Buffer.from(a); const y = Buffer.from(b); return x.length === y.length && timingSafeEqual(x, y); };
 const settingsPath = () => join(agentontrackHome(), 'settings.json');
-export const DEFAULT_SETTINGS = { telemetry: false, diagnostics: false, theme: 'dark', environment: { show: true, userGridGCo2PerKwh: null as number | null } };
+/**
+ * A person-issued, limited, expiring permission for runs that follow one another with nobody acting between them. Scope is one project.
+ * `remainingRuns` is persisted and falls by one for every run a chained sequence starts.
+ */
+export interface UnattendedGrant { projectId: string; maxRuns: number; remainingRuns: number; maxPhasesPerSequence: number; maxRounds: number; expiresAt: string; createdAt: string }
+export const GRANT_DEFAULT_HOURS = 4;
+export const GRANT_MAX_HOURS = 24;
+export const DEFAULT_SETTINGS = { telemetry: false, diagnostics: false, keepTranscripts: false, unattendedGrant: null as UnattendedGrant | null, allowMobileExecution: false, theme: 'dark', environment: { show: true, userGridGCo2PerKwh: null as number | null } };
 type Settings = typeof DEFAULT_SETTINGS;
 const loadSettings = (): Settings => { try { return { ...DEFAULT_SETTINGS, ...JSON.parse(readFileSync(settingsPath(), 'utf8')) }; } catch { return structuredClone(DEFAULT_SETTINGS); } };
 const saveSettings = (s: Settings) => { mkdirSync(dirname(settingsPath()), { recursive: true }); writeFileSync(settingsPath(), JSON.stringify(s, null, 2)); };
 
 const TaskInput = z.object({ title: z.string().min(1).max(300), criteria: z.array(z.unknown()).max(50).default([]), limits: z.unknown().optional() });
-const RunInput = z.object({ runtime: z.enum(['claude-code', 'codex', 'hermes']), prompt: z.string().min(1).max(20_000).regex(/^[^-]/, 'A prompt cannot start with a hyphen'), model: z.string().regex(/^\w[\w.:-]{0,79}$/).default('haiku'), maxBudgetUsd: z.number().positive().max(5).default(0.5) });
+/** What the working tree looks like, per changed or untracked file, or null outside a git repository. Used to say what an agent changed. */
+function snapshotChanges(root: string): Map<string, string> | null {
+  const r = spawnSync('git', ['status', '--porcelain', '-uall'], { cwd: root, encoding: 'utf8', timeout: 20_000, maxBuffer: 1 << 24 });
+  if (r.status !== 0) return null;
+  const m = new Map<string, string>();
+  for (const line of r.stdout.split(/\r?\n/).filter(Boolean)) {
+    const f = line.slice(3).replace(/^"|"$/g, '');
+    try { const st = statSync(join(root, f)); m.set(f, `${st.size}:${st.mtimeMs}`); } catch { m.set(f, 'gone'); }
+  }
+  return m;
+}
+const changedBetween = (before: Map<string, string>, after: Map<string, string>): string[] =>
+  [...new Set([...before.keys(), ...after.keys()])].filter((f) => before.get(f) !== after.get(f)).sort();
+
+/** The tools and permission mode for a Claude run. Read-only takes the write tools away and stops asking for edits to be accepted; it never adds a tool the standard run does not have. */
+const claudeToolArgs = (policy: 'standard' | 'read-only'): string[] => policy === 'read-only'
+  ? ['--tools', 'Read,Grep,Glob', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--allowedTools', 'Read,Grep,Glob', '--disallowedTools', 'Bash,PowerShell,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch', '--permission-mode', 'default']
+  : ['--allowedTools', 'Bash,Write,Edit,Read,Grep,Glob', '--permission-mode', 'acceptEdits'];
+const RunInput = z.object({ runtime: z.enum(['claude-code', 'codex', 'hermes']), prompt: z.string().min(1).max(20_000).regex(/^[^-]/, 'A prompt cannot start with a hyphen').refine((s) => !s.includes('\0'), 'A prompt cannot contain a NUL character'), model: z.string().regex(/^\w[\w.:-]{0,79}$/).default('haiku'), maxBudgetUsd: z.number().positive().max(5).default(0.5), /** Provider-independent time limit; the companion stops the run's process tree when it is reached. */ maxMinutes: z.number().int().min(1).max(240).default(30), resumeRunId: z.string().regex(/^run_[a-z0-9]{1,40}$/).optional(), attachments: z.array(z.string().regex(/^[a-f0-9]{64}$/)).max(5).default([]), /** Run inside this worktree instead of the project folder. */ worktreeId: z.string().regex(/^wt_[a-z0-9]{1,40}$/).optional(), /** Continue this AgentOnTrack session (it resumes the provider session behind it). */ sessionId: z.string().regex(/^ses_[a-f0-9]{8,32}$/).optional(), /** A title for a NEW session. */ title: z.string().trim().max(120).optional(), /** What the agent may do. A policy can only NARROW the default: it never widens it. */ policy: z.enum(['standard', 'read-only']).default('standard') });
 const HumanFields = { confirm: z.string(), passphrase: z.string().optional() };
 
 /** Only github.com over https, as owner/repo with an optional .git. Anything else, such as a local path or another scheme, is refused. */
@@ -133,21 +218,33 @@ function cachedVersion(key: string, probe: () => string | null): string | null {
 }
 
 /** Every agent this computer knows about, and whether the product can really start it. With no project given, nothing is claimed startable. */
-function runtimeList(root: string | undefined, claudeOverride = false): { id: string; name: string; installed: boolean; authenticated: boolean | null; canStart: boolean; how: string | null; reason: string | null }[] {
+function runtimeList(root: string | undefined, claudeOverride = false, codexOverride = false): { id: string; name: string; installed: boolean; authenticated: boolean | null; canStart: boolean; authMode: AuthMode; apiKeyVarsInEnvironment: string[]; how: string | null; reason: string | null }[] {
   const terminal = (name: string) => `Starting ${name} from AgentOnTrack is not built yet. Start it in its own terminal: its hooks still report to this project.`;
   // A configured command (tests, or a person pointing at a wrapper) is what will actually be run, so it counts as installed.
   const claudeInstalled = claudeOverride || !!cachedVersion('claude', () => detectVersion('claude'));
   const claudeHooked = root ? hooksInstalled('claude-code', root) : false;
   const claudeAuthed = claudeOverride ? null : claudeInstalled ? cachedVersion('claude-auth', () => (claudeAuth().authenticated ? 'yes' : null)) === 'yes' : null;
+  const claudeMode: AuthMode = claudeOverride || !claudeInstalled ? 'unknown' : classifyClaudeMethod(cachedVersion('claude-auth-method', () => claudeAuth().method));
+  const keyVars = apiKeyVarsPresent(process.env);
+  const codexInstalled = codexOverride || !!cachedVersion('codex', () => detectVersion('codex'));
+  const codexHooked = root ? hooksInstalled('codex', root) : false;
+  const codexText = codexOverride || !codexInstalled ? null : cachedVersion('codex-login', codexLoginText);
+  const codexMode: AuthMode = classifyCodexStatus(codexText);
   return [
-    { id: 'claude-code', name: 'Claude Code', installed: claudeInstalled, authenticated: claudeAuthed, canStart: claudeInstalled && claudeHooked, how: 'claude -p, started by AgentOnTrack in this project, with its hooks reporting here', reason: !claudeInstalled ? 'Claude Code is not installed on this computer.' : !root ? 'Open a project to see whether it can start there.' : !claudeHooked ? 'Connect Claude Code to this project first, so its hooks are in place.' : null },
-    { id: 'codex', name: 'Codex', installed: !!cachedVersion('codex', () => detectVersion('codex')), authenticated: null, canStart: false, how: null, reason: terminal('Codex') },
-    { id: 'hermes', name: 'Hermes', installed: !!cachedVersion('hermes', () => detectVersion('hermes')), authenticated: null, canStart: false, how: null, reason: terminal('Hermes') },
-    ...Object.values(PROVIDERS).map((a) => ({ id: a.id, name: a.name, installed: !!cachedVersion(a.bin, () => detectVersionArgs(a.bin, a.versionArgs)), authenticated: null, canStart: false, how: null, reason: terminal(a.name) })),
+    { id: 'claude-code', name: 'Claude Code', installed: claudeInstalled, authenticated: claudeAuthed, authMode: claudeMode, apiKeyVarsInEnvironment: keyVars, canStart: claudeInstalled && claudeHooked, how: 'claude -p, started by AgentOnTrack in this project, with its hooks reporting here', reason: !claudeInstalled ? 'Claude Code is not installed on this computer.' : !root ? 'Open a project to see whether it can start there.' : !claudeHooked ? 'Connect Claude Code to this project first, so its hooks are in place.' : null },
+    { id: 'codex', name: 'Codex', installed: codexInstalled, authenticated: codexOverride || !codexInstalled ? null : codexText !== null, authMode: codexMode, apiKeyVarsInEnvironment: keyVars, canStart: codexInstalled && codexHooked, how: 'codex exec --json, started by AgentOnTrack in this project. It starts only after its hook program refuses a test request, because Codex runs actions if the hook is missing', reason: !codexInstalled ? 'Codex is not installed on this computer.' : !root ? 'Open a project to see whether it can start there.' : !codexHooked ? 'Connect Codex to this project first, so its hooks are in place.' : null },
+    { id: 'hermes', name: 'Hermes', installed: !!cachedVersion('hermes', () => detectVersion('hermes')), authenticated: null, authMode: 'unknown' as AuthMode, apiKeyVarsInEnvironment: keyVars, canStart: false, how: null, reason: terminal('Hermes') },
+    ...Object.values(PROVIDERS).map((a) => ({ id: a.id, name: a.name, installed: !!cachedVersion(a.bin, () => detectVersionArgs(a.bin, a.versionArgs)), authenticated: null, authMode: 'unknown' as AuthMode, apiKeyVarsInEnvironment: keyVars, canStart: false, how: null, reason: terminal(a.name) })),
   ];
 }
 
 /** Reports login state without ever reading credentials: only the official CLI's own status command. */
+/** Asks Codex itself (`codex login status`); never reads its login files. Wording seen on a real login: 'Logged in using ChatGPT'. */
+function codexLoginText(): string | null {
+  const r = spawnSync('codex', ['login', 'status'], { encoding: 'utf8', timeout: 10_000, shell: process.platform === 'win32' });
+  return r.status === 0 ? `${r.stdout}${r.stderr}`.trim().slice(0, 200) : null;
+}
+
 function claudeAuth(): { authenticated: boolean; method: string | null; subscription: string | null } {
   const r = spawnSync('claude', ['auth', 'status'], { encoding: 'utf8', timeout: 10_000, shell: process.platform === 'win32' });
   try {
@@ -157,6 +254,9 @@ function claudeAuth(): { authenticated: boolean; method: string | null; subscrip
 }
 
 export async function startCompanion(opts: CompanionOptions = {}): Promise<Companion> {
+  // Optional settings. Values stay in this object: they are never put in process.env, logged or returned by an API. See packages/core/src/envfile.ts.
+  const envCfg = loadEnvFile(opts.envFile === undefined ? findEnvFile() : opts.envFile);
+  const paidApi = opts.allowPaidApi ?? envCfg.allowPaidApi;
   if (opts.home) process.env.AGENTONTRACK_HOME = opts.home;
   const uiDir = opts.uiDir ?? resolve(here, '..', 'ui');
   const benchmarksDir = opts.benchmarksDir ?? resolve(here, '..', '..', '..', 'benchmarks', 'results');
@@ -205,41 +305,153 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
     return startRun(entry, p, RunInput.parse({ runtime: 'claude-code', prompt: phasePrompt(view.plan, phase, extra), model: phase.model ?? pick?.model ?? 'haiku', maxBudgetUsd: Math.max(0.01, Math.min(phase.budget.maxUsd ?? 1, remainingUsd, 5)) }), { planId: view.plan.id, phaseId: phase.id, ...(source ? { source } : {}) });
   };
 
-  /** Bounded continuation of an approved plan, run here and not in a browser, so it goes on while a phone is the only thing watching. */
-  const continuing = new Map<string, { cancel: boolean }>();
+  /*
+   * WHO MAY START AN AGENT, route by route. Authority is decided here on the companion, never by a flag the caller sends.
+   *
+   *   single, user-initiated (allowed):      POST /api/runs, POST /api/agent-sessions, POST /api/agent-sessions/:id/resume, POST /api/plan/phases/start,
+   *                                          POST /api/plan/continue and /api/plan/loop with one phase or one round.
+   *   cross-review (CHAINED, gated):         POST /api/workflows/cross-review: two runs with nobody acting between them. Needs a grant for the project (it spends
+   *                                          both runs) AND an API-key sign-in under paid API mode for both agents; otherwise 409. Off by default.
+   *   manual review (allowed):               POST /api/workflows/review: a person picks a finished run and starts exactly ONE reviewer run from a handoff. No grant.
+   *   bounded multi-phase / retry loop:      POST /api/plan/continue with maxPhases > 1, POST /api/plan/loop with rounds > 1, and their phone twins.
+   *                                          Need an unattended GRANT (a person's terminal-code proof; one project; limited runs; expires) AND an agent
+   *                                          signed in with an API key while paid API mode is on. A subscription or unknown sign-in is refused even with a grant.
+   *   mobile-originated:                     phone run.start, session.new, plan.continue, plan.loop need the separate allowMobileExecution setting
+   *                                          (terminal-code proof), then their own route's rules above.
+   *   automatic retry inside one run:        the Codex failed-command recovery turn (see startCodexAppServerRun) is one bounded extra turn of the SAME run,
+   *                                          not a new run, so it needs no grant. Nothing else retries by itself.
+   *
+   * TRUST BOUNDARY of POST /api/plan/phases/start: it starts exactly one run per request. Separate manually authorized requests from a paired session are
+   * indistinguishable from a person clicking Start each time, so a client that sends N requests is not a chain this companion can see or refuse; the
+   * grant covers only sequences this companion itself runs (continue and loop).
+   */
+  interface Sequence { cancel: boolean; kind: 'sequence' | 'cross-review'; /** needs a grant: more than one phase or round */ chained: boolean }
+  const continuing = new Map<string, Sequence>();
+  /** How the last sequence in a project ended, so a page that only polls the plan can say why it stopped. */
+  const sequenceEnded = new Map<string, { reason: string; message: string; at: number }>();
+  const sequenceView = (projectId: string) => ({ active: continuing.get(projectId)?.kind === 'sequence', ended: sequenceEnded.get(projectId) ?? null });
+  const runningCount = () => { let n = 0; for (const r of runs.values()) if (r.status === 'running') n++; return n; };
+
+  /** Why this project has no usable grant right now, or null. Read at use time from the settings file: cancelling or expiry takes effect on the next run. */
+  const grantOf = (projectId: string, now = Date.now()): { grant: UnattendedGrant } | { problem: string } => {
+    const g = loadSettings().unattendedGrant as UnattendedGrant | null;
+    if (!g || typeof g !== 'object') return { problem: UNATTENDED_OFF };
+    const exp = Date.parse(g.expiresAt); const made = Date.parse(g.createdAt);
+    if (!(exp > made) || exp - made > GRANT_MAX_HOURS * 3_600_000 + 1000 || !Number.isInteger(g.remainingRuns) || !Number.isInteger(g.maxRuns) || g.maxRuns < 1 || g.maxRuns > 10 || g.remainingRuns > g.maxRuns || !Number.isInteger(g.maxPhasesPerSequence) || g.maxPhasesPerSequence < 1 || g.maxPhasesPerSequence > 10 || !Number.isInteger(g.maxRounds) || g.maxRounds < 1 || g.maxRounds > 5 || typeof g.projectId !== 'string' || !g.projectId) return { problem: 'The unattended-runs grant on this computer is not valid. Create a new one in Settings, under Unattended runs.' };
+    if (g.projectId !== projectId) return { problem: 'The unattended-runs grant on this computer is for a different project. Create one for this project in Settings, under Unattended runs.' };
+    if (!(exp > now)) return { problem: 'The unattended-runs grant has expired. Create a new one in Settings, under Unattended runs, or run one phase at a time.' };
+    if (!(g.remainingRuns > 0)) return { problem: 'The unattended-runs grant has no runs left. Create a new one in Settings, under Unattended runs, or run one phase at a time.' };
+    return { grant: g };
+  };
+  const grantProblem = (projectId: string): string | null => { const g = grantOf(projectId); return 'problem' in g ? g.problem : null; };
+  /** Spends one run of the grant (persisted). Call right after a chained run really started. */
+  const spendGrantRun = (projectId: string) => {
+    const st = loadSettings(); const g = grantOf(projectId);
+    if ('problem' in g || !st.unattendedGrant) return;
+    saveSettings({ ...st, unattendedGrant: { ...st.unattendedGrant, remainingRuns: Math.max(0, st.unattendedGrant.remainingRuns - 1) } });
+  };
+  /** The sign-in kind the agent would use. Read from the agent's own status command; credentials are never read. Tests inject it. */
+  const authModeOf = (runtime: string): AuthMode => opts.detectedAuthMode ? opts.detectedAuthMode(runtime) : (runtimeList(undefined, !!opts.claudeCommand, !!opts.codexCommand).find((r) => r.id === runtime)?.authMode ?? 'unknown');
+  /** Provider permission for unattended SUBSCRIPTION automation is unresolved (docs/product/PROVIDER_COMPLIANCE.md rows 3 and 4), so a chained run needs an API-key sign-in and paid API mode. */
+  const chainAuthProblem = (runtime: string): string | null => (authModeOf(runtime) === 'api-key' && paidApi ? null : CHAIN_AUTH_REFUSAL);
+  const runtimeOfPhase = (plan: { defaults: Record<string, { agent?: string } | undefined> }, phase: { agent?: string | undefined; role: string }): string => phase.agent ?? plan.defaults[phase.role]?.agent ?? 'claude-code';
+  /** Everything a chained run (the 2nd, 3rd... in a row, or the first of a sequence that will chain) must pass. */
+  const chainProblem = (projectId: string, runtime: string): string | null => grantProblem(projectId) ?? chainAuthProblem(runtime);
+
+  /** A dollar cap is a spend limit on paid API use. A subscription or unknown sign-in has no dollar figure, so none is passed or recorded for it. */
+  const dollarCapAllowed = (runtime: string): boolean => authModeOf(runtime) === 'api-key' && paidApi;
+  /** Stops the run's process tree when its time limit is reached. */
+  const armTimeLimit = (run: Run, minutes: number) => {
+    const t = setTimeout(() => {
+      if (run.status !== 'running') return;
+      run.status = 'stopped';
+      run.events.push(`Stopped: the time limit of ${minutes} minutes was reached`);
+      killChild(run.child);
+    }, minutes * (opts.minuteMsForTests ?? 60_000));
+    t.unref();
+  };
+
+  /** Same Idempotency-Key and same request returns the original answer and starts nothing; the same key for a different request is a 409; no key, or a new key, is an ordinary start. */
+  const startKeys = new Map<string, { sha: string; status: number; body: unknown; at: number }>();
+  const startOnce = (req: IncomingMessage, sessionKey: string, scope: string, request: unknown, start: () => { status: number; body: unknown }): { status: number; body: unknown; replay: boolean } => {
+    const raw = req.headers['idempotency-key'];
+    if (raw === undefined) return { ...start(), replay: false };
+    if (typeof raw !== 'string' || !START_KEY_RE.test(raw)) throw new HttpError(400, 'Idempotency-Key must be 22 to 64 letters, digits, underscores or hyphens.');
+    const now = Date.now();
+    for (const [k, e] of startKeys) { if (now - e.at > START_KEY_TTL_MS || startKeys.size >= START_KEY_MAX) startKeys.delete(k); else break; }
+    const mk = `${sessionKey}:${raw}`;
+    const sha = hash(JSON.stringify([scope, request]));
+    const hit = startKeys.get(mk);
+    if (hit) {
+      if (hit.sha !== sha) throw new HttpError(409, 'That Idempotency-Key was already used for a different request. Nothing was started.');
+      return { status: hit.status, body: hit.body, replay: true };
+    }
+    // Everything from the lookup to the record is synchronous, so two simultaneous requests with one key cannot both start. A start that throws records nothing.
+    const out = start();
+    startKeys.set(mk, { sha, status: out.status, body: out.body, at: now });
+    return { ...out, replay: false };
+  };
+  const draftHits = new Map<string, number[]>();
   /** What this companion has seen runtimes report in this session. Nothing here is guessed or built in. */
   const inits: InitReport[] = [];
   const seenModels: Seen[] = [];
   const reportedCommands = (agent: string): string[] | null => { const last = inits.filter((x) => x.agent === agent).at(-1); return last ? last.commands : null; };
+  const waitFor = async (run: Run, me: Sequence, pollMs: number) => {
+    const until = Date.now() + 30 * 60_000;
+    while (run.status === 'running' && Date.now() < until) {
+      await new Promise((ok) => setTimeout(ok, pollMs));
+      if (me.cancel && run.status === 'running') { run.status = 'stopped'; killChild(run.child); }
+    }
+  };
+  const holdsApproval = (p: Project) => [...p.state().approvals.values()].some((a) => approvalView(a, new Date()) === 'pending');
+
+  /**
+   * Bounded continuation of an approved plan, run here and not in a browser, so it goes on while a phone (or a page that only polls) is watching.
+   * With maxPhases of 1 it is a single start and needs nothing more. With more, it is a chained sequence: it needs a valid grant for this project and an API-key
+   * sign-in under paid API mode, spends one run of the grant per phase it starts, and stops the moment the grant is spent, expired or cancelled.
+   */
   const continuePlan = (entry: Registered, p: Project, maxPhases: number, source: string) => {
+    const chained = maxPhases > 1;
+    if (chained) {
+      const g = grantOf(entry.id);
+      if ('problem' in g) throw new PhaseBlocked(409, g.problem);
+      if (maxPhases > g.grant.maxPhasesPerSequence) throw new PhaseBlocked(409, `The grant allows up to ${g.grant.maxPhasesPerSequence} phases in one sequence.`);
+      const v0 = planViewOf(entry, p, (id) => runs.get(id)?.status === 'running');
+      const next = v0.views?.find((x) => x.status === 'ready'); const ph = next && v0.plan?.phases.find((x) => x.id === next.id);
+      const why = chainAuthProblem(v0.plan && ph ? runtimeOfPhase(v0.plan as never, ph) : 'claude-code');
+      if (why) throw new PhaseBlocked(409, why);
+    }
     if (continuing.has(entry.id)) return { started: false, note: 'It is already continuing.' };
-    const me = { cancel: false };
+    const me: Sequence = { cancel: false, kind: 'sequence', chained };
     continuing.set(entry.id, me);
+    sequenceEnded.delete(entry.id);
     const running = (id: string) => runs.get(id)?.status === 'running';
+    let ended: { reason: string; message: string } | null = null;
+    const end = (reason: string, message: string) => { ended ??= { reason, message }; };
     void (async () => {
       try {
         for (let i = 0; i < maxPhases && !me.cancel; i++) {
           // A held approval always stops it. It never decides anything itself.
-          if ([...p.state().approvals.values()].some((a) => approvalView(a, new Date()) === 'pending')) break;
+          if (holdsApproval(p)) { end('approval', 'Paused: an action is waiting for your approval. Decide it, then run again.'); break; }
           let v = planViewOf(entry, p, running);
-          if (!v.views || !v.plan) break;
+          if (!v.views || !v.plan) { end('no-plan', 'Stopped: there is no plan.'); break; }
           const needs = v.views.find((x) => ['needs-evidence', 'stale'].includes(x.status));
           if (needs && v.plan.phases.find((x) => x.id === needs.id)?.taskId) { p.verifyTask(v.plan.phases.find((x) => x.id === needs.id)!.taskId!); v = planViewOf(entry, p, running); }
-          if (v.views!.some((x) => x.status === 'failed')) break;
+          if (v.views!.some((x) => x.status === 'failed')) { end('failed', 'Stopped: a check failed. Look at it before going on.'); break; }
           const ready = v.views!.find((x) => x.status === 'ready');
           const phase = ready && v.plan!.phases.find((x) => x.id === ready.id);
-          if (!phase || phase.kind === 'release') break;
+          if (!phase) { end('nothing-ready', v.views!.every((x) => ['verified', 'done-unchecked', 'skipped'].includes(x.status)) ? 'Nothing left to run.' : 'Stopped: nothing is ready to run.'); break; }
+          if (phase.kind === 'release') { end('release', 'Stopped before the release phase. A release is always your decision.'); break; }
+          if (chained) { const why = chainProblem(entry.id, runtimeOfPhase(v.plan as never, phase)); if (why) { end('grant', `Stopped: ${why}`); break; } }
           const run = startPhaseRun(entry, p, phase.id, '', source);
-          const until = Date.now() + 30 * 60_000;
-          while (run.status === 'running' && Date.now() < until) {
-            await new Promise((ok) => setTimeout(ok, 400));
-            if (me.cancel && run.status === 'running') { run.status = 'stopped'; run.child.kill(); }
-          }
+          if (chained) spendGrantRun(entry.id);
+          await waitFor(run, me, 400);
           const after = planViewOf(entry, p, running);
           const done = after.plan?.phases.find((x) => x.id === phase.id);
           if (done?.taskId && done.acceptance.some((a) => a.kind === 'command') && !me.cancel) p.verifyTask(done.taskId);
         }
-      } catch { /* a phase that cannot start ends the continuation; the plan view says why */ } finally { continuing.delete(entry.id); }
+        if (me.cancel) end('cancelled', 'Stopped.'); else end('limit', `Stopped after ${maxPhases} phase${maxPhases === 1 ? '' : 's'}, the number asked for.`);
+      } catch (err) { end('error', `Stopped: ${(err as Error).message}`); /* a phase that cannot start ends the continuation; the plan view says why */ } finally { continuing.delete(entry.id); sequenceEnded.set(entry.id, { ...(ended ?? { reason: 'done', message: 'Stopped.' }), at: Date.now() }); }
     })();
     return { started: true, note: `Running up to ${maxPhases} phase${maxPhases === 1 ? '' : 's'}, and stopping at any failure, held approval or release.` };
   };
@@ -248,43 +460,179 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
    * A managed loop: run one phase, run its own checks, and if they fail run it again with what failed, up to a number of rounds the person set.
    * It stops at the first pass, at a held approval, at the phase's or plan's own limits (which startPhaseRun enforces), or when cancelled.
    * It needs a command check, because that is the only way it can know when to stop.
+   * With more than one round it is a retry loop with nobody acting between the runs, so it is gated exactly like a chained continuation (grant, API-key sign-in under paid API mode).
    */
   const loopPhase = (entry: Registered, p: Project, phaseId: string, rounds: number, source: string) => {
-    if (continuing.has(entry.id)) return { started: false, note: 'A sequence is already running for this project. Stop it first.' };
+    const chained = rounds > 1;
     const running = (id: string) => runs.get(id)?.status === 'running';
     const v0 = planViewOf(entry, p, running);
     const phase0 = v0.plan?.phases.find((x) => x.id === phaseId);
+    if (chained) {
+      const g = grantOf(entry.id);
+      if ('problem' in g) throw new PhaseBlocked(409, g.problem);
+      if (rounds > g.grant.maxRounds) throw new PhaseBlocked(409, `The grant allows up to ${g.grant.maxRounds} rounds.`);
+      const why = chainAuthProblem(v0.plan && phase0 ? runtimeOfPhase(v0.plan as never, phase0) : 'claude-code');
+      if (why) throw new PhaseBlocked(409, why);
+    }
+    if (continuing.has(entry.id)) return { started: false, note: 'A sequence is already running for this project. Stop it first.' };
     if (!phase0) throw new PhaseBlocked(404, 'No such phase');
     if (!phase0.taskId || !phase0.acceptance.some((a) => a.kind === 'command')) throw new PhaseBlocked(409, 'A loop needs a command check on this phase, because the check is how it knows when to stop.');
-    const me = { cancel: false };
+    const me: Sequence = { cancel: false, kind: 'sequence', chained };
     continuing.set(entry.id, me);
+    sequenceEnded.delete(entry.id);
+    let ended: { reason: string; message: string } | null = null;
+    const end = (reason: string, message: string) => { ended ??= { reason, message }; };
     void (async () => {
       try {
         let extra = '';
         for (let round = 1; round <= rounds && !me.cancel; round++) {
-          if ([...p.state().approvals.values()].some((a) => approvalView(a, new Date()) === 'pending')) break;
+          if (holdsApproval(p)) { end('approval', 'Paused: an action is waiting for your approval. Decide it, then run again.'); break; }
+          if (chained) { const why = chainProblem(entry.id, runtimeOfPhase(planViewOf(entry, p, running).plan as never, phase0)); if (why) { end('grant', `Stopped: ${why}`); break; } }
           const run = startPhaseRun(entry, p, phaseId, extra, source);
-          const until = Date.now() + 30 * 60_000;
-          while (run.status === 'running' && Date.now() < until) {
-            await new Promise((ok) => setTimeout(ok, 300));
-            if (me.cancel && run.status === 'running') { run.status = 'stopped'; run.child.kill(); }
-          }
+          if (chained) spendGrantRun(entry.id);
+          await waitFor(run, me, 300);
           if (me.cancel) break;
           p.verifyTask(phase0.taskId!);
           const st = planViewOf(entry, p, running).views?.find((x) => x.id === phaseId)?.status;
-          if (st === 'verified') break;
+          if (st === 'verified') { end('passed', 'The checks passed.'); break; }
           const bad = p.state().receipts.filter((r) => r.taskId === phase0.taskId && !r.passed).at(-1);
           extra = `Round ${round} did not pass the phase's checks.${bad ? ` The check printed: ${String(bad.observed ?? '').slice(0, 600)}` : ''} Find the cause and fix it in the code. Do not change or weaken the checks.`;
         }
-      } catch { /* a round that cannot start (a limit, an approval) ends the loop; the plan view says why */ } finally { continuing.delete(entry.id); }
+        if (me.cancel) end('cancelled', 'Stopped.'); else end('limit', `Stopped after ${rounds} round${rounds === 1 ? '' : 's'}, the number asked for.`);
+      } catch (err) { end('error', `Stopped: ${(err as Error).message}`); /* a round that cannot start (a limit, an approval) ends the loop; the plan view says why */ } finally { continuing.delete(entry.id); sequenceEnded.set(entry.id, { ...(ended ?? { reason: 'done', message: 'Stopped.' }), at: Date.now() }); }
     })();
     return { started: true, note: `Running this phase up to ${rounds} time${rounds === 1 ? '' : 's'}, stopping as soon as its checks pass, at any held approval or limit, or when you stop it.` };
+  };
+
+  /**
+   * One agent builds, a different agent reviews, the project's own checks run, and every step is recorded.
+   * The reviewer gets a validated handoff (goal, decisions, changed source, evidence, limits) and no approval from the builder.
+   * The review is read-only by instruction; what the reviewer is allowed to do is still decided by its own hooks.
+   * Swap builder and reviewer to reverse the roles.
+   */
+  const crossReview = (entry: Registered, p: Project, o: { builder: 'claude-code' | 'codex'; reviewer: 'claude-code' | 'codex'; prompt: string; builderModel: string; reviewerModel: string; taskId?: string; maxUsd: number }) => {
+    // Nobody acts between the two runs, so it is a chained sequence: a grant for this project (both runs are spent from it) and an API-key sign-in under paid API mode for both agents.
+    const gate = grantProblem(entry.id) ?? chainAuthProblem(o.builder) ?? chainAuthProblem(o.reviewer);
+    if (gate) throw new HttpError(409, `${CROSS_REVIEW_REFUSAL} (${gate})`.slice(0, 1500));
+    const grantNow = grantOf(entry.id);
+    if ('grant' in grantNow && grantNow.grant.remainingRuns < 2) throw new HttpError(409, `${CROSS_REVIEW_REFUSAL} (The unattended-runs grant has fewer than the two runs a cross-review needs.)`);
+    if (o.builder === o.reviewer) throw new HttpError(409, 'Pick two different agents. A review by the author is a weaker check.');
+    if (continuing.has(entry.id)) throw new HttpError(409, 'A sequence is already running for this project. Stop it first.');
+    // The reviewer starts after the builder has finished, so one free slot is what the click needs now.
+    if (runningCount() >= MAX_CONCURRENT_RUNS) throw new HttpError(409, `The computer is busy: ${MAX_CONCURRENT_RUNS} agents are already running. Wait for one to finish or stop one, then try again.`);
+    for (const id of [o.builder, o.reviewer]) if (!runtimeList(entry.root, !!opts.claudeCommand, !!opts.codexCommand).find((r) => r.id === id)?.canStart) throw new HttpError(409, `${id} cannot be started in this project. Connect it first.`);
+    // Both agents are proven startable before the first one runs, so work is never built and then left without a reviewer.
+    if ([o.builder, o.reviewer].includes('codex')) { const st = hookSelfTest('codex', entry.root); if (!st.ok) throw new HttpError(409, `Codex was not started: ${st.detail}. ${st.fix ?? ''}`.trim()); }
+    const wf = `wf_${randomBytes(5).toString('hex')}`;
+    const me: Sequence = { cancel: false, kind: 'cross-review', chained: false };
+    continuing.set(entry.id, me);
+    const note = (type: string, payload: Record<string, unknown>) => p.store.append({ type, actor: { kind: 'system', runtime: 'agentontrack' }, payload: { workflow: wf, kind: 'cross-review', ...payload } });
+    const wait = (run: Run) => waitFor(run, me, 300);
+    const before = snapshotChanges(entry.root);
+    note('workflow.started', { builder: o.builder, reviewer: o.reviewer, taskId: o.taskId ?? null, gitRepository: before !== null });
+    void (async () => {
+      let ended = 'unknown';
+      try {
+        const b = startRun(entry, p, RunInput.parse({ runtime: o.builder, prompt: o.prompt, model: o.builderModel, maxBudgetUsd: o.maxUsd }), { source: `cross-review:${wf}` });
+        spendGrantRun(entry.id);
+        note('workflow.step', { step: 'build', runId: b.id });
+        await wait(b);
+        if (b.status !== 'finished') { ended = `builder-${b.status}`; return; }
+        const after = before ? snapshotChanges(entry.root) : null;
+        const changed = before && after ? changedBetween(before, after) : null;
+        note('workflow.step', { step: 'changes', files: changed ? changed.slice(0, 200) : null, count: changed?.length ?? null, note: changed ? 'By comparing the working tree before and after the builder ran.' : 'Not a git repository, so changes were not recorded.', ...(changed?.length === 0 ? { warning: 'The builder changed nothing. Its run ending as finished does not mean the work was done; check what its last command did.' } : {}) });
+        // A project the builder left unchanged is not an implemented task. Seen in real runs: Codex gave up after one failed command and the run still said finished.
+        if (changed?.length === 0) { ended = 'builder-changed-nothing'; return; }
+        let brief: string; let handoffId: string;
+        try {
+          const h = buildHandoff(p, { from: o.builder, to: o.reviewer, ...(o.taskId ? { taskId: o.taskId } : {}), reason: { kind: 'review' }, limits: ['Nothing the builder was approved to do carries over to the reviewer.'] });
+          saveHandoff(p, h);
+          const acc = acceptHandoff2(p, h, o.reviewer);
+          if (!acc.accepted || !acc.brief) { ended = `handoff-refused: ${acc.problems.map((x) => x.code).join(',')}`; return; }
+          brief = acc.brief; handoffId = h.id;
+        } catch (err) { ended = `no-handoff: ${(err as Error).message.slice(0, 200)}`; return; }
+        note('workflow.step', { step: 'handoff', handoffId, approvalsCarried: 0 });
+        if (me.cancel) { ended = 'cancelled'; return; }
+        const stop = chainProblem(entry.id, o.reviewer);
+        if (stop) { ended = `grant: ${stop.slice(0, 160)}`; return; }
+        const r = startRun(entry, p, RunInput.parse({ runtime: o.reviewer, prompt: `Review the work described below. Report problems with file and line. Do not edit files and do not weaken any check.${changed ? `
+
+Files the builder changed (${changed.length}): ${changed.slice(0, 40).join(', ')}${changed.length > 40 ? ', ...' : ''}` : ''}
+
+${brief}`.slice(0, 19_900), model: o.reviewerModel, maxBudgetUsd: o.maxUsd }), { source: `cross-review:${wf}` });
+        spendGrantRun(entry.id);
+        note('workflow.step', { step: 'review', runId: r.id });
+        await wait(r);
+        if (r.status !== 'finished') { ended = `reviewer-${r.status}`; return; }
+        let checks: string | null = null;
+        if (o.taskId && !me.cancel) { p.verifyTask(o.taskId); checks = 'ran'; }
+        note('workflow.step', { step: 'checks', ran: checks === 'ran', taskId: o.taskId ?? null });
+        ended = me.cancel ? 'cancelled' : 'finished';
+      } catch (err) { ended = `failed: ${(err as Error).message.slice(0, 200)}`; } finally { continuing.delete(entry.id); try { note('workflow.ended', { status: ended }); } catch { /* project closed */ } }
+    })();
+    return { started: true, workflow: wf, note: `${o.builder} builds, then ${o.reviewer} reviews from a handoff that carries no approvals, then the project's checks run.` };
+  };
+
+  /**
+   * Manual second step of a review: a person chose a finished run and asks a different agent to review it. Exactly one reviewer run, started now, from a validated
+   * handoff that carries no approvals. Because a person starts each run, it needs no unattended grant and works with a subscription sign-in.
+   */
+  const reviewRun = (entry: Registered, p: Project, o: { runId: string; reviewer: 'claude-code' | 'codex'; model: string; taskId?: string; maxUsd: number }) => {
+    const live = runs.get(o.runId);
+    if (live && live.project !== entry.id) throw new HttpError(404, 'No such run in this project.');
+    if (live?.status === 'running') throw new HttpError(409, 'That run is still going. Wait for it to finish, then start the review.');
+    const started = p.store.byType(['run.started']).find((e) => e.payload?.id === o.runId);
+    if (!started) throw new HttpError(404, 'No such run in this project.');
+    const finished = p.store.byType(['run.finished']).find((e) => e.payload?.id === o.runId);
+    if (!finished && !live) throw new HttpError(409, 'That run did not record an end, so there is nothing finished to review.');
+    const from = String(started.payload.runtime ?? '');
+    if (!['claude-code', 'codex'].includes(from)) throw new HttpError(409, 'Only a Claude Code or Codex run can be reviewed this way.');
+    if (from === o.reviewer) throw new HttpError(409, 'Pick a different agent from the one that did the work. A review by the author is a weaker check.');
+    if (!runtimeList(entry.root, !!opts.claudeCommand, !!opts.codexCommand).find((r) => r.id === o.reviewer)?.canStart) throw new HttpError(409, `${o.reviewer} cannot be started in this project. Connect it first.`);
+    if (o.reviewer === 'codex') { const st = hookSelfTest('codex', entry.root); if (!st.ok) throw new HttpError(409, `Codex was not started: ${st.detail}. ${st.fix ?? ''}`.trim()); }
+    let brief: string; let handoffId: string;
+    try {
+      const h = buildHandoff(p, { from, to: o.reviewer, ...(o.taskId ? { taskId: o.taskId } : {}), reason: { kind: 'review' }, limits: ['Nothing the builder was approved to do carries over to the reviewer.'] });
+      saveHandoff(p, h);
+      const acc = acceptHandoff2(p, h, o.reviewer);
+      if (!acc.accepted || !acc.brief) throw new HttpError(409, `The handoff was refused: ${acc.problems.map((x) => x.code).join(', ')}`);
+      brief = acc.brief; handoffId = h.id;
+    } catch (err) { if (err instanceof HttpError) throw err; throw new HttpError(409, `No handoff could be made from that run: ${(err as Error).message.slice(0, 200)}`); }
+    const r = startRun(entry, p, RunInput.parse({ runtime: o.reviewer, prompt: `Review the work described below. Report problems with file and line. Do not edit files and do not weaken any check.\n\n${brief}`.slice(0, 19_900), model: o.model, maxBudgetUsd: o.maxUsd }), { source: `review:${o.runId}` });
+    return { started: true, runId: r.id, handoffId, note: `${o.reviewer} is reviewing run ${o.runId} from a handoff that carries no approvals. This is one run; nothing follows it.` };
   };
 
   /* ---------- The phone link ---------- */
   let remote: RemoteService | null = null;
   const remoteFileNow = (): RemoteFile | null => loadRemote();
-  const stopRunOf = (projectId: string, runId: string) => { const r = runs.get(runId); if (!r || r.project !== projectId || r.status !== 'running') return false; r.status = 'stopped'; r.child.kill(); return true; };
+  /** For the desktop only: the name and the resolved folder, and whether the folder is still the one that was chosen. */
+  const defaultProjectView = (d: RemoteFile['defaultProject'] | null) => {
+    if (!d) return null;
+    const r = loadRegistry().find((x) => x.id === d.projectId);
+    let valid = false; try { valid = !!r && !r.archived && realpathSync.native(r.root) === d.realRoot; } catch { valid = false; }
+    return { projectId: d.projectId, name: r?.name ?? null, path: d.realRoot, valid, setAt: d.setAt };
+  };
+  /**
+   * Stops a run and says truthfully whether it stopped. The status becomes "stopped" first, so the process's own end is recorded as a stop; if the process cannot be
+   * ended (a signal that could not be delivered, or a process that survives a hard kill) the status goes back to "running" and the failure is returned, not hidden.
+   */
+  const stopRunNow = async (run: Run): Promise<{ ok: true } | { ok: false; kind: 'not-running' | 'failed'; reason: string }> => {
+    if (run.status !== 'running') return { ok: false, kind: 'not-running', reason: run.status === 'stopped' ? 'That run was already stopped.' : 'That run is not running.' };
+    run.status = 'stopped';
+    const out = await terminate(run.child as Killable);
+    if (out.ok) return { ok: true };
+    if (run.status === 'stopped') run.status = 'running';
+    run.events.push(`[stop failed] ${out.reason}`.slice(0, 400));
+    return { ok: false, kind: 'failed', reason: out.reason };
+  };
+  const stopRunOf = async (projectId: string, runId: string): Promise<boolean> => {
+    const r = runs.get(runId);
+    if (!r || r.project !== projectId || r.status !== 'running') return false;
+    const out = await stopRunNow(r);
+    if (out.ok) return true;
+    if (out.kind === 'not-running') return false;
+    throw new Refusal('stop-failed', out.reason);
+  };
   const asRefusal = <T,>(fn: () => T): T => {
     try { return fn(); } catch (e) {
       if (e instanceof PhaseBlocked || e instanceof HttpError) throw new Refusal('blocked', (e as Error).message);
@@ -305,19 +653,34 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
         const r = startRun(entry, p, RunInput.parse({ runtime: 'claude-code', prompt: o.prompt, model: o.model, maxBudgetUsd: o.maxUsd }), { source });
         return { id: r.id, status: r.status };
       }),
+      allowUnattended: (projectId) => grantProblem(projectId) === null,
+      allowMobileExecution: () => loadSettings().allowMobileExecution === true,
       continuePlan: (entry, p, n, source) => asRefusal(() => continuePlan(entry, p, n, source)),
       loopPhase: (entry, p, phaseId, n, source) => asRefusal(() => loopPhase(entry, p, phaseId, n, source)),
-      cancelContinue: (pid) => { const c = continuing.get(pid); if (!c) return false; c.cancel = true; for (const r of runs.values()) if (r.project === pid && r.status === 'running') { r.status = 'stopped'; r.child.kill(); } return true; },
+      cancelContinue: (pid) => { const c = continuing.get(pid); if (!c) return false; c.cancel = true; for (const r of runs.values()) if (r.project === pid && r.status === 'running') { r.status = 'stopped'; killChild(r.child); } return true; },
       models: async () => ({ models: await discoverModels({ seen: seenModels, inits }) }),
-      agents: async (root) => describeAgents(runtimeList(root, !!opts.claudeCommand), inits),
+      agents: async (root) => describeAgents(runtimeList(root, !!opts.claudeCommand, !!opts.codexCommand), inits),
       maxUsdPerRun: () => remoteFileNow()?.maxUsdPerRun ?? 1,
       version: 'companion',
+      // Phone-started sessions. The default project is the owner's, set on this computer; the phone only ever says "default".
+      defaultProject: () => { const d = remoteFileNow()?.defaultProject; return d ? { projectId: d.projectId, realRoot: d.realRoot } : null; },
+      defaultStillValid: (entry, realRoot) => stillTheSameFolder(entry.root, realRoot),
+      runningCount: () => [...runs.values()].filter((r) => r.status === 'running').length,
+      startSession: (entry, p, o, source) => asRefusal(() => {
+        const r = startRun(entry, p, RunInput.parse({ runtime: o.agent, prompt: o.prompt, model: o.model, maxBudgetUsd: o.maxUsd, policy: o.policy }), { source });
+        return { runId: r.id, sessionId: r.sessionId!, status: r.status };
+      }),
+      sessionDetail: (p, sid) => {
+        const sv = sessionViews(p).find((v) => v.id === sid);
+        return sv ? { id: sv.id, status: sv.status, title: sv.title, runtime: sv.runtime, canResume: sv.canResume, linked: !!sv.providerSessionId, runs: sv.runIds.map((id) => { const r = runs.get(id); return { id, status: r?.status ?? null, events: r?.events ?? [] }; }) } : null;
+      },
+      idem: new IdempotencyStore(join(agentontrackHome(), 'remote-idem.json')),
     });
     const svc = new RemoteService({
       file, save: (f2) => saveRemote(f2), executor: exec, version: 'companion',
       transport: new FirestoreTransport({ firebase: link.firebase as FirebaseConfig, uid: link.uid, cid: file.computerId, email: link.computer.email, password: link.computer.password, ...(opts.remote?.emulators ? { emulators: opts.remote.emulators } : {}) }),
-      list: () => loadRegistry().filter((r) => existsSync(r.root)).map((r) => { try { const { p } = projectFor(r.id); const st = p.state(); const t = st.activeTaskId ? st.tasks.get(st.activeTaskId) : null; return { id: r.id, name: r.name, archived: !!r.archived, goal: st.goal?.statement ?? null, activeTask: t ? { title: t.title, status: p.evaluate(t.id).status } : null, pendingApprovals: [...st.approvals.values()].filter((x) => approvalView(x, new Date()) === 'pending').length }; } catch { return { id: r.id, name: r.name, archived: !!r.archived, missing: true }; } }),
-      projects: () => loadRegistry().filter((r) => existsSync(r.root) && !r.archived).map((r) => ({ id: r.id, snapshot: () => { const { entry, p } = projectFor(r.id); return snapshotOf(entry, p, { isRunning: (id) => runs.get(id)?.status === 'running', recentRuns: (pid) => [...runs.values()].filter((x) => x.project === pid).map((x) => ({ id: x.id, status: x.status, started: x.started, events: x.events })) }, runtimeList(entry.root, !!opts.claudeCommand).map((r) => ({ id: r.id, name: r.name, canStart: r.canStart }))); } })),
+      list: () => loadRegistry().filter((r) => existsSync(r.root)).map((r) => { try { const { p } = projectFor(r.id); const st = p.state(); const t = st.activeTaskId ? st.tasks.get(st.activeTaskId) : null; return { id: r.id, name: r.name, archived: !!r.archived, isDefault: remoteFileNow()?.defaultProject?.projectId === r.id, goal: st.goal?.statement ?? null, activeTask: t ? { title: t.title, status: p.evaluate(t.id).status } : null, pendingApprovals: [...st.approvals.values()].filter((x) => approvalView(x, new Date()) === 'pending').length }; } catch { return { id: r.id, name: r.name, archived: !!r.archived, missing: true }; } }),
+      projects: () => loadRegistry().filter((r) => existsSync(r.root) && !r.archived).map((r) => ({ id: r.id, snapshot: () => { const { entry, p } = projectFor(r.id); return snapshotOf(entry, p, { isRunning: (id) => runs.get(id)?.status === 'running', recentRuns: (pid) => [...runs.values()].filter((x) => x.project === pid).map((x) => ({ id: x.id, status: x.status, started: x.started, events: x.events })) }, runtimeList(entry.root, !!opts.claudeCommand, !!opts.codexCommand).map((r) => ({ id: r.id, name: r.name, canStart: r.canStart }))); } })),
       ...(opts.remote?.snapshotEveryMs ? { snapshotEveryMs: opts.remote.snapshotEveryMs } : {}),
       ...(opts.remote?.heartbeatEveryMs ? { heartbeatEveryMs: opts.remote.heartbeatEveryMs } : {}),
     });
@@ -431,28 +794,268 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
   const finishRun = (run: Run, p: Project, result: any, exitCode: number | null) => {
     const wallClockMs = Date.now() - run.started;
     run.status = exitCode === 0 ? 'finished' : run.status === 'stopped' ? 'stopped' : 'failed';
+    if (run.limitReached && run.status === 'failed') run.status = 'stopped';
     if (result?.modelUsage) {
       for (const [model, u] of Object.entries<any>(result.modelUsage)) {
         if (exitCode === 0) seenModels.push({ agent: 'claude-code', model, worked: true });
         p.recordUsage({
           runtime: 'claude-code', model, source: 'provider-reported', sessionId: result.session_id, runId: run.id, inputTokens: u.inputTokens ?? 0, outputTokens: u.outputTokens ?? 0,
-          cacheReadTokens: u.cacheReadInputTokens ?? 0, cacheCreationTokens: u.cacheCreationInputTokens ?? 0, costUsd: u.costUSD, costBasis: u.costBasis ?? 'unknown', durationMs: result.duration_ms,
+          cacheReadTokens: u.cacheReadInputTokens ?? 0, cacheCreationTokens: u.cacheCreationInputTokens ?? 0, ...(dollarCapAllowed('claude-code') ? { costUsd: u.costUSD, costBasis: u.costBasis ?? 'unknown' } : { costBasis: 'unknown' }), // a subscription run has no dollar figure of its own, so none is recorded and plan dollar limits do not count it
+          durationMs: result.duration_ms,
         });
       }
     }
-    p.store.append({ type: 'run.finished', actor: { kind: 'system', runtime: 'claude-code' }, payload: { id: run.id, status: run.status, exitCode, wallClockMs, durationApiMs: result?.duration_api_ms ?? null, totalCostUsd: result?.total_cost_usd ?? null, numTurns: result?.num_turns ?? null, sessionId: result?.session_id ?? null, resultText: typeof result?.result === 'string' ? result.result.slice(0, 2000) : null } });
+    keepTranscript(p, run);
+    p.store.append({ type: 'run.finished', actor: { kind: 'system', runtime: 'claude-code' }, payload: { id: run.id, status: run.status, ...(run.limitReached ? { limitReached: true } : {}), exitCode, wallClockMs, durationApiMs: result?.duration_api_ms ?? null, totalCostUsd: result?.total_cost_usd ?? null, numTurns: result?.num_turns ?? null, sessionId: result?.session_id ?? null, resultText: keepTranscripts() && typeof result?.result === 'string' ? result.result.slice(0, 2000) : null, resultChars: typeof result?.result === 'string' ? result.result.length : null } });
   };
 
+  /** Attachments by id, from this project's own folder. An id that is not there is refused, never guessed. */
+  const attachmentsFor = (p: Project, ids: string[]) => ids.map((id) => { const a = findAttachment(p.stateDir, id); if (!a) throw new HttpError(404, 'An attached file is missing. Attach it again.'); return a; });
+
+  /**
+   * The session a finished run left behind, read from the project record and not from memory, so it survives a restart of the companion.
+   * A resume must be the same agent in the same project, and the earlier run must be over.
+   */
+  const resumeTarget = (p: Project, runtime: string, runId: string | undefined): string | null => {
+    if (!runId) return null;
+    if (runs.get(runId)?.status === 'running') throw new HttpError(409, 'That run is still going. Stop it or wait for it to finish before resuming.');
+    const ev = p.store.byType(['run.started', 'run.finished']).filter((e) => e.payload?.id === runId);
+    const started = ev.find((e) => e.type === 'run.started');
+    const finished = ev.find((e) => e.type === 'run.finished');
+    if (!started) throw new HttpError(404, 'No such run in this project.');
+    if (started.payload.runtime !== runtime) throw new HttpError(409, `That run was ${started.payload.runtime}, so it cannot be resumed with ${runtime}. Use a handoff to move work between agents.`);
+    // The provider names its session at the start of a run, and that is recorded as session.linked, so a run that was stopped (and never reported one at its end) can still be resumed.
+    const linked = p.store.byType(['session.linked']).filter((e) => e.payload?.runId === runId).at(-1)?.payload?.providerSessionId;
+    const sid = isProviderSessionId(finished?.payload?.sessionId) ? finished!.payload.sessionId : linked;
+    if (!isProviderSessionId(sid)) throw new HttpError(409, 'That run left no session to resume.');
+    return sid;
+  };
+
+  /* ---------- Sessions: a projection of the project record (packages/core/src/sessions.ts) ---------- */
+  const keepTranscripts = () => loadSettings().keepTranscripts === true;
+  const liveRunIds = () => new Set([...runs.values()].filter((r) => r.status === 'running').map((r) => r.id));
+  const SESSION_EVENTS = ['run.started', 'run.finished', 'session.created', 'session.run', 'session.linked', 'session.updated', 'session.prompt', 'session.message'];
+  const sessionViews = (p: Project): SessionView[] => projectSessions(p.store.byType(SESSION_EVENTS), { live: liveRunIds() });
+  /** Records which session a run belongs to, creating the session for a run that continues none. The text of the prompt is stored only if the owner turned that on. */
+  const noteSession = (p: Project, run: Run, input: { runtime: string; model: string; prompt: string; title?: string | undefined; worktreeId?: string | undefined; policy?: string | undefined }, existing: string | null): string => {
+    const id = existing ?? newSessionId();
+    if (!existing) p.store.append({ type: 'session.created', actor: { kind: 'human' }, payload: { sessionId: id, runtime: input.runtime, model: input.model, ...(input.policy && input.policy !== 'standard' ? { policy: input.policy } : {}), ...(input.title ? { title: input.title } : {}), ...(input.worktreeId ? { worktreeId: input.worktreeId } : {}) } });
+    p.store.append({ type: 'session.run', actor: { kind: 'system', runtime: input.runtime }, payload: { sessionId: id, runId: run.id } });
+    if (keepTranscripts()) p.store.append({ type: 'session.prompt', actor: { kind: 'human' }, payload: { sessionId: id, runId: run.id, text: input.prompt.slice(0, 4000) } });
+    run.sessionId = id; run.runtime = input.runtime;
+    return id;
+  };
+  /** Called when the provider names its own session, which is the moment it exists whether or not the run ever finishes cleanly. */
+  const linkSession = (p: Project, run: Run, providerSessionId: unknown) => {
+    if (!run.sessionId || !isProviderSessionId(providerSessionId) || run.linkedProvider === providerSessionId) return;
+    run.linkedProvider = providerSessionId;
+    try { p.store.append({ type: 'session.linked', actor: { kind: 'system', runtime: run.runtime ?? 'unknown' }, payload: { sessionId: run.sessionId, providerSessionId, runId: run.id } }); } catch { /* project closed during shutdown */ }
+  };
+  /** What the agent said, kept only if the owner turned transcript retention on. It is the lines the dashboard already shows, capped; it is not a full record. */
+  const keepTranscript = (p: Project, run: Run) => {
+    if (!run.sessionId || !keepTranscripts()) return;
+    const text = run.events.filter((e) => !e.startsWith('[tool')).join('\n').slice(0, 8000);
+    if (!text) return;
+    try { p.store.append({ type: 'session.message', actor: { kind: 'system', runtime: run.runtime ?? 'unknown' }, payload: { sessionId: run.sessionId, runId: run.id, text } }); } catch { /* project closed during shutdown */ }
+  };
+
+  /** Codex through `codex exec --json`. Refused unless its hook program is proven to refuse a test request, since Codex runs actions when the hook is missing. */
+  const startCodexRun = (entry: Registered, p: Project, input: z.infer<typeof RunInput>, meta?: { planId?: string; phaseId?: string; source?: string }, resumeSessionId?: string): Run => {
+    if (!opts.codexCommand) { const g = mayStartUnder(classifyCodexStatus(cachedVersion('codex-login', codexLoginText)), paidApi); if (!g.ok) throw new HttpError(409, g.reason); }
+    if (input.worktreeId) throw new HttpError(409, 'A Codex run in a worktree needs the app-server mode.');
+    if (input.policy === 'read-only' && resumeSessionId) throw new HttpError(409, 'A read-only policy cannot be enforced when resuming a Codex session through `codex exec`, which takes no sandbox flag on resume. Use the app-server mode, or start a new session.');
+    if (!hooksInstalled('codex', entry.root)) throw new HttpError(409, 'Connect Codex to this project first, so its hooks are in place');
+    const st = hookSelfTest('codex', entry.root);
+    if (!st.ok) throw new HttpError(409, `Codex was not started: ${st.detail}. ${st.fix ?? ''}`.trim());
+    try { checkSlashCommand(input.prompt, reportedCommands('codex')); } catch (err) { if (err instanceof CommandRefused) throw new HttpError(409, err.message); throw err; }
+    const [cmd, ...pre] = opts.codexCommand ?? ['codex'];
+    const att = attachmentsFor(p, input.attachments);
+    const args = [...pre, ...buildCodexExecArgs({ prompt: input.prompt + attachmentNote(att), model: input.model, images: att.filter((a) => a.kind === 'image').map((a) => a.path), ...(input.policy === 'read-only' ? { sandbox: 'read-only' } : {}), ...(resumeSessionId ? { resumeSessionId } : {}) })];
+    const child = spawn(cmd!, args, { cwd: entry.root, stdio: ['ignore', 'pipe', 'pipe'], env: { ...agentEnv(process.env, paidApi), ...envCfg.keysFor('codex') } });
+    const run: Run = { id: `run_${randomBytes(5).toString('hex')}`, project: entry.id, child, started: Date.now(), events: newRunLines(), status: 'running' };
+    runs.set(run.id, run);
+    p.store.append({ type: 'run.started', actor: { kind: 'human' }, payload: { id: run.id, runtime: 'codex', model: input.model, ...(resumeSessionId ? { resumedSession: resumeSessionId } : {}), ...(meta?.planId ? { planId: meta.planId, phaseId: meta.phaseId } : {}), ...(meta?.source ? { source: meta.source } : {}), promptSha256: hash(input.prompt), ...(input.policy !== 'standard' ? { policy: input.policy } : {}), costLimit: 'not enforceable: Codex has no spend cap flag, so only the time and turn of this one run bound it' } });
+    const split = new LineSplitter();
+    let sessionId: string | null = null; let failed = false; let usage: Parameters<typeof codexUsageRecord>[0] | null = null;
+    const onLine = (line: string) => {
+      const ev = parseCodexLine(line);
+      if (!ev) return;
+      if (ev.kind === 'session') { sessionId = ev.sessionId; linkSession(p, run, ev.sessionId); }
+      else if (ev.kind === 'message') run.events.push(ev.text.slice(0, 400));
+      else if (ev.kind === 'tool' && ev.phase === 'started') run.events.push(`[tool ${ev.tool}] ${ev.summary}`.slice(0, 400));
+      else if (ev.kind === 'usage') usage = ev;
+      else if (ev.kind === 'error') { failed = true; if (isUsageLimitText(ev.message)) run.limitReached = true; run.events.push(`error: ${run.limitReached ? usageLimitMessage('codex') : ev.message}`.slice(0, 400)); }
+      else if (ev.kind === 'turn' && ev.status === 'failed') failed = true;
+    };
+    child.stdout!.setEncoding('utf8').on('data', (d: string) => { for (const l of split.push(d)) onLine(l); });
+    let stderrTail = '';
+    child.stderr!.setEncoding('utf8').on('data', (d: string) => { stderrTail = (stderrTail + d).slice(-600); });
+    child.on('error', (err) => { run.events.push(`Could not start the agent. ${agentFailureText('codex', err.message)}`); run.status = 'failed'; });
+    child.on('close', (exit) => {
+      for (const l of split.flush()) onLine(l);
+      if (exit !== 0 && isUsageLimitText(stderrTail)) run.limitReached = true;
+      if (exit !== 0 && !run.events.some((e) => e.startsWith('error:')) && stderrTail.trim()) run.events.push(`Codex said: ${agentFailureText('codex', stderrTail.trim().slice(-300))}`);
+      try {
+        const wallClockMs = Date.now() - run.started;
+        run.status = exit === 0 && !failed ? 'finished' : run.status === 'stopped' ? 'stopped' : run.limitReached ? 'stopped' : 'failed';
+        if (usage) { if (run.status === 'finished') seenModels.push({ agent: 'codex', model: input.model, worked: true }); p.recordUsage({ ...codexUsageRecord(usage, input.model), sessionId: sessionId ?? undefined, runId: run.id, costBasis: 'unknown', durationMs: wallClockMs }); }
+        keepTranscript(p, run);
+        p.store.append({ type: 'run.finished', actor: { kind: 'system', runtime: 'codex' }, payload: { id: run.id, status: run.status, ...(run.limitReached ? { limitReached: true } : {}), exitCode: exit, wallClockMs, sessionId } });
+      } catch { /* project closed during shutdown */ }
+    });
+    return run;
+  };
+
+  /**
+   * Where a run happens. Inside a worktree only if it is this agent's own, still active, and the project's hooks have been copied there and proven to
+   * refuse a test request from that folder: a worktree is a different folder, so without that the agent would run with no gate at all.
+   */
+  const runCwd = (entry: Registered, p: Project, input: z.infer<typeof RunInput>): { cwd: string; worktree: boolean } => {
+    if (!input.worktreeId) return { cwd: entry.root, worktree: false };
+    const w = p.worktrees().find((x) => x.id === input.worktreeId);
+    if (!w) throw new HttpError(404, 'No such worktree in this project.');
+    if (w.status !== 'active') throw new HttpError(409, `That worktree is ${w.status}.`);
+    if (w.agent !== input.runtime) throw new HttpError(409, `That worktree belongs to ${w.agent}. Each agent works in its own folder.`);
+    if (input.runtime === 'claude-code') {
+      const st = mirrorHooksToWorktree(entry.root, w.path);
+      if (!st.ok) throw new HttpError(409, `Not started in the worktree: ${st.detail}. ${st.fix ?? ''}`.trim());
+    } else if (input.runtime === 'codex' && (opts.codexMode ?? 'app-server') !== 'app-server') throw new HttpError(409, 'A Codex run in a worktree needs the app-server mode, which answers each approval itself.');
+    return { cwd: w.path, worktree: true };
+  };
+
+  /**
+   * Codex through `codex app-server`: every action Codex asks to take waits for AgentOnTrack's answer, which comes from the same decision engine
+   * and approval records the hooks use. Codex's own sign-in is used; nothing is read or copied. NOT TESTED against a real Codex.
+   */
+  const startCodexAppServerRun = (entry: Registered, p: Project, input: z.infer<typeof RunInput>, meta?: { planId?: string; phaseId?: string; source?: string }, resumeSessionId?: string): Run => {
+    if (!opts.codexCommand) { const g = mayStartUnder(classifyCodexStatus(cachedVersion('codex-login', codexLoginText)), paidApi); if (!g.ok) throw new HttpError(409, g.reason); }
+    // Hooks stay a requirement: the approval channel is a second gate, and a Codex that reaches an unlisted tool must still meet the first.
+    if (!hooksInstalled('codex', entry.root)) throw new HttpError(409, 'Connect Codex to this project first, so its hooks are in place');
+    const st = hookSelfTest('codex', entry.root);
+    if (!st.ok) throw new HttpError(409, `Codex was not started: ${st.detail}. ${st.fix ?? ''}`.trim());
+    try { checkSlashCommand(input.prompt, reportedCommands('codex')); } catch (err) { if (err instanceof CommandRefused) throw new HttpError(409, err.message); throw err; }
+    const att = attachmentsFor(p, input.attachments);
+    const where = runCwd(entry, p, input);
+    const run: Run = { id: `run_${randomBytes(5).toString('hex')}`, project: entry.id, child: { kill: () => {} }, started: Date.now(), events: newRunLines(), status: 'running' };
+    runs.set(run.id, run);
+    p.store.append({ type: 'run.started', actor: { kind: 'human' }, payload: { id: run.id, runtime: 'codex', transport: 'app-server', ...(input.worktreeId ? { worktreeId: input.worktreeId } : {}), model: input.model, ...(resumeSessionId ? { resumedSession: resumeSessionId } : {}), ...(meta?.planId ? { planId: meta.planId, phaseId: meta.phaseId } : {}), ...(meta?.source ? { source: meta.source } : {}), promptSha256: hash(input.prompt), ...(input.policy !== 'standard' ? { policy: input.policy } : {}), costLimit: 'not enforceable: Codex has no spend cap flag, so only the time and turn of this one run bound it' } });
+    let sessionId: string | null = null; let failed = false; let usage: Parameters<typeof codexUsageRecord>[0] | null = null; let acceptedEffects: any[] = [];
+    // The exit code of the last command if it did not succeed and nothing has succeeded since; null otherwise.
+    let unresolvedFailure = null as { code: number | null } | null;
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    const adjudicate = async (r: { kind: 'command' | 'file'; command?: string; cwd?: string; paths?: string[] }): Promise<'accept' | 'decline'> => {
+      const mapped = r.kind === 'command' ? mapCodexTool('shell', { command: r.command }) : { effects: (r.paths ?? []).map((path) => ({ kind: 'fs.write' as const, target: path })), opaque: !(r.paths ?? []).length, coverage: 'enforced' as const };
+      const effects = mapped.effects.length ? mapped.effects : [{ kind: 'exec.opaque' as const, target: 'codex' }];
+      const what = (r.command ?? (r.paths ?? []).join(', ')).slice(0, 200);
+      const call = { runtime: 'codex', ...(sessionId ? { sessionId } : {}), cwd: r.cwd ?? where.cwd, tool: r.kind === 'command' ? 'shell' : 'apply_patch', effects, opaque: mapped.opaque || !mapped.effects.length, coverage: mapped.coverage, rawInput: { command: r.command, paths: r.paths } };
+      const first = p.preAction(call);
+      if (first.decision === 'deny') { run.events.push(`[declined] ${what}: ${first.reasons.join('; ').slice(0, 200)}`); return 'decline'; }
+      if (first.decision === 'allow') { acceptedEffects = effects; return 'accept'; }
+      run.events.push(`[waiting for your approval ${first.approvalIds.join(', ')}] ${what}`);
+      const deadline = Date.now() + (opts.codexApprovalWaitMs ?? 10 * 60_000);
+      while (run.status === 'running' && Date.now() < deadline) {
+        await sleep(opts.codexApprovalPollMs ?? 1000);
+        const views = first.approvalIds.map((id) => { const a = p.state().approvals.get(id); return a ? approvalView(a, new Date()) : 'expired'; });
+        if (views.some((v) => v === 'denied' || v === 'revoked' || v === 'expired' || v === 'consumed')) return 'decline';
+        if (views.every((v) => v === 'approved')) {
+          // With Codex's hooks in place the hook spends the approval when the action runs, so it is left unspent here; otherwise spending it is what allows the action.
+          if (!where.worktree && hooksInstalled('codex', entry.root)) { acceptedEffects = effects; return 'accept'; }
+          if (p.preAction(call).decision === 'allow') { acceptedEffects = effects; return 'accept'; }
+          return 'decline';
+        }
+      }
+      return 'decline';
+    };
+    const server = new CodexAppServer({
+      command: opts.codexCommand ?? ['codex'], cwd: where.cwd, model: input.model, ...(input.policy === 'read-only' ? { sandbox: 'read-only' as const } : {}), env: { ...agentEnv(process.env, paidApi), ...envCfg.keysFor('codex') },
+      onApproval: adjudicate,
+      onEvent: (ev) => {
+        if (ev.kind === 'session') { sessionId = ev.threadId; linkSession(p, run, ev.threadId); }
+        else if (ev.kind === 'message') run.events.push(ev.text.slice(0, 400));
+        else if (ev.kind === 'tool') {
+          if (ev.phase === 'started') run.events.push(`[tool ${ev.tool}] ${ev.summary}`.slice(0, 400));
+          else if (ev.outcome && (ev.outcome.status !== 'completed' || (ev.outcome.exitCode ?? 0) !== 0)) { unresolvedFailure = { code: ev.outcome.exitCode ?? null }; run.events.push(`[tool ${ev.tool} did not succeed: ${ev.outcome.status}${ev.outcome.exitCode !== undefined ? ', exit ' + ev.outcome.exitCode : ''}] ${(ev.outcome.output ?? '').replace(/\s+/g, ' ').trim()}`.slice(0, 400)); }
+          else if (ev.phase === 'completed' && (ev.tool === 'shell' || ev.tool === 'file')) unresolvedFailure = null;
+          if (ev.phase === 'completed' && acceptedEffects.length && (ev.tool === 'shell' || ev.tool === 'file')) {
+            // After an approved action, compare what changed with what was approved, as the hooks do.
+            try { const r = p.postAction({ runtime: 'codex', ...(sessionId ? { sessionId } : {}), tool: ev.tool, effects: acceptedEffects }); if (r.mismatches.length) run.events.push(`[unauthorized change] ${r.mismatches.map((m) => m.path).join(', ')}`.slice(0, 400)); } catch { /* project closed */ }
+            acceptedEffects = [];
+          }
+        } else if (ev.kind === 'usage') usage = ev;
+        else if (ev.kind === 'error') { failed = true; if (isUsageLimitText(ev.message)) run.limitReached = true; run.events.push(`error: ${run.limitReached ? usageLimitMessage('codex') : ev.message}`.slice(0, 400)); }
+        else if (ev.kind === 'turn' && ev.status === 'failed') failed = true;
+      },
+    });
+    run.child = { kill: () => { if (run.status === 'running') run.status = 'stopped'; void server.interrupt(); } };
+    void (async () => {
+      let outcome: 'completed' | 'interrupted' | 'failed' = 'failed';
+      try {
+        await server.start(resumeSessionId);
+        outcome = await server.turn({ prompt: input.prompt + attachmentNote(att), images: att.filter((a) => a.kind === 'image').map((a) => a.path) });
+        // AUTONOMY CLASSIFICATION: this extra turn is bounded (codexRecoveryTurns, default 1), happens inside the SAME run and the same cap/budget, and sends fixed text.
+        // It is not a new run and not a retry loop across runs, so it needs no unattended grant.
+        // Recovery: if the turn ended right after a failed command, say so once and let Codex try another way, in the same thread. The text is fixed and carries no command output.
+        for (let tries = 0; tries < (opts.codexRecoveryTurns ?? 1) && outcome === 'completed' && !failed && run.status === 'running' && unresolvedFailure; tries++) {
+          run.events.push(`[recovery] the last command failed${unresolvedFailure.code !== null ? ` (exit ${unresolvedFailure.code})` : ''} and nothing succeeded after it; asking Codex to try another way`);
+          const code = unresolvedFailure.code;
+          unresolvedFailure = null;
+          outcome = await server.turn({ prompt: `Your last command ended with an error${code !== null ? ` (exit code ${code})` : ''}, and nothing you ran after it succeeded. If the request is not finished, try a different way. If you cannot do it, say plainly what is blocking you.` });
+        }
+        if (unresolvedFailure) run.events.push('[unresolved] the last command failed and nothing succeeded after it; the request may not be done');
+      } catch (err) { if (isUsageLimitText((err as Error).message)) run.limitReached = true; run.events.push(`Could not run Codex. ${agentFailureText('codex', (err as Error).message)}`.slice(0, 400)); }
+      server.kill();
+      try {
+        const wallClockMs = Date.now() - run.started;
+        run.status = run.status === 'stopped' || outcome === 'interrupted' ? 'stopped' : outcome === 'completed' && !failed ? 'finished' : run.limitReached ? 'stopped' : 'failed';
+        if (usage) { if (run.status === 'finished') seenModels.push({ agent: 'codex', model: input.model, worked: true }); p.recordUsage({ ...codexUsageRecord(usage, input.model), sessionId: sessionId ?? undefined, runId: run.id, costBasis: 'unknown', durationMs: wallClockMs }); }
+        keepTranscript(p, run);
+        p.store.append({ type: 'run.finished', actor: { kind: 'system', runtime: 'codex' }, payload: { id: run.id, status: run.status, ...(run.limitReached ? { limitReached: true } : {}), exitCode: server.exitCode, wallClockMs, sessionId } });
+      } catch { /* project closed during shutdown */ }
+    })();
+    return run;
+  };
+
+  /** The one way a run starts. It works out which session the run continues (if any), starts it, and records the session. */
   const startRun = (entry: Registered, p: Project, input: z.infer<typeof RunInput>, meta?: { planId?: string; phaseId?: string; source?: string }): Run => {
+    let existing: string | null = null;
+    let effective = input;
+    // A session started read-only stays read-only however it is continued (by session id or by run id): a policy only ever narrows.
+    const wasReadOnly = (sid: string) => p.store.byType(['session.created']).some((e) => (e.payload as any)?.sessionId === sid && (e.payload as any)?.policy === 'read-only');
+    if (input.sessionId) {
+      const sv = sessionViews(p).find((v) => v.id === input.sessionId);
+      if (!sv) throw new HttpError(404, 'No such session in this project.');
+      if (sv.runtime !== input.runtime) throw new HttpError(409, `That session is ${sv.runtime}, so it cannot continue with ${input.runtime}. Use a handoff to move work between agents.`);
+      if (sv.status === 'running') throw new HttpError(409, 'That session still has a run going. Stop it or wait for it to finish before continuing.');
+      if (!sv.resumeRunId) throw new HttpError(409, 'That session left nothing to resume.');
+      existing = sv.id;
+      effective = { ...input, resumeRunId: sv.resumeRunId, ...(wasReadOnly(sv.id) ? { policy: 'read-only' as const } : {}) };
+    } else if (input.resumeRunId) {
+      existing = sessionViews(p).find((v) => v.runIds.includes(input.resumeRunId!))?.id ?? null;
+      if (existing && wasReadOnly(existing)) effective = { ...input, policy: 'read-only' as const };
+    }
+    const run = startRunCore(entry, p, effective, meta);
+    armTimeLimit(run, effective.maxMinutes);
+    noteSession(p, run, effective, existing);
+    return run;
+  };
+
+  const startRunCore = (entry: Registered, p: Project, input: z.infer<typeof RunInput>, meta?: { planId?: string; phaseId?: string; source?: string }): Run => {
+    if (runningCount() >= MAX_CONCURRENT_RUNS) throw new HttpError(409, `The computer is busy: ${MAX_CONCURRENT_RUNS} agents are already running. Wait for one to finish or stop one, then try again.`);
+    if (input.runtime === 'codex' && (opts.codexMode ?? 'app-server') === 'app-server') return startCodexAppServerRun(entry, p, input, meta, resumeTarget(p, 'codex', input.resumeRunId) ?? undefined);
+    if (input.runtime === 'codex') return startCodexRun(entry, p, input, meta, resumeTarget(p, 'codex', input.resumeRunId) ?? undefined);
+    const resumeSession = resumeTarget(p, input.runtime, input.resumeRunId);
+    const att = attachmentsFor(p, input.attachments);
     if (input.runtime !== 'claude-code') throw new HttpError(409, `Starting ${input.runtime} from the dashboard is not built yet. Run it yourself: its hooks still report here.`);
     if (!hooksInstalled('claude-code', entry.root)) throw new HttpError(409, 'Connect Claude Code to this project first, so its hooks are in place');
     try { checkSlashCommand(input.prompt, reportedCommands('claude-code')); } catch (err) { if (err instanceof CommandRefused) throw new HttpError(409, err.message); throw err; }
+    if (!opts.claudeCommand) { const g = mayStartUnder(classifyClaudeMethod(cachedVersion('claude-auth-method', () => claudeAuth().method)), paidApi); if (!g.ok) throw new HttpError(409, g.reason); }
     const [cmd, ...pre] = opts.claudeCommand ?? ['claude'];
-    const args = [...pre, '-p', input.prompt, '--model', input.model, '--max-budget-usd', String(input.maxBudgetUsd), '--output-format', 'stream-json', '--verbose', '--allowedTools', 'Bash,Write,Edit,Read,Grep,Glob', '--permission-mode', 'acceptEdits', '--setting-sources', 'project,local'];
-    const child = spawn(cmd!, args, { cwd: entry.root, stdio: ['ignore', 'pipe', 'pipe'], env: process.env });
-    const run: Run = { id: `run_${randomBytes(5).toString('hex')}`, project: entry.id, child, started: Date.now(), events: [], status: 'running' };
+    const args = [...pre, '-p', input.prompt + attachmentNote(att), ...(att.length ? ['--add-dir', attachmentDir(p.stateDir)] : []), ...(resumeSession ? ['--resume', resumeSession] : []), '--model', input.model, ...(dollarCapAllowed('claude-code') ? ['--max-budget-usd', String(input.maxBudgetUsd)] : []), '--output-format', 'stream-json', '--verbose', ...claudeToolArgs(input.policy), '--setting-sources', 'project,local'];
+    const where = runCwd(entry, p, input);
+    const child = spawn(cmd!, args, { cwd: where.cwd, stdio: ['ignore', 'pipe', 'pipe'], env: { ...agentEnv(process.env, paidApi), ...envCfg.keysFor('claude-code') } });
+    const run: Run = { id: `run_${randomBytes(5).toString('hex')}`, project: entry.id, child, started: Date.now(), events: newRunLines(), status: 'running' };
     runs.set(run.id, run);
-    p.store.append({ type: 'run.started', actor: { kind: 'human' }, payload: { id: run.id, runtime: input.runtime, model: input.model, maxBudgetUsd: input.maxBudgetUsd, ...(meta?.planId ? { planId: meta.planId, phaseId: meta.phaseId } : {}), ...(meta?.source ? { source: meta.source } : {}), promptSha256: hash(input.prompt) } });
+    p.store.append({ type: 'run.started', actor: { kind: 'human' }, payload: { id: run.id, runtime: input.runtime, ...(input.worktreeId ? { worktreeId: input.worktreeId } : {}), model: input.model, ...(dollarCapAllowed('claude-code') ? { maxBudgetUsd: input.maxBudgetUsd } : {}), maxMinutes: input.maxMinutes, ...(input.resumeRunId ? { resumedFrom: input.resumeRunId } : {}), ...(meta?.planId ? { planId: meta.planId, phaseId: meta.phaseId } : {}), ...(meta?.source ? { source: meta.source } : {}), promptSha256: hash(input.prompt), ...(input.policy !== 'standard' ? { policy: input.policy } : {}) } });
     let buf = '';
     let result: any = null;
     child.stdout!.setEncoding('utf8').on('data', (d: string) => {
@@ -463,17 +1066,18 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
         buf = buf.slice(i + 1);
         try {
           const o = JSON.parse(line);
-          if (o.type === 'result') result = o;
-          if (o.type === 'system' && o.subtype === 'init') { inits.push({ agent: 'claude-code', model: typeof o.model === 'string' ? o.model : null, commands: Array.isArray(o.slash_commands) ? o.slash_commands.filter((c: unknown): c is string => typeof c === 'string').slice(0, 300) : [], at: Date.now() }); if (inits.length > 20) inits.shift(); }
+          if (o.type === 'result') { result = o; linkSession(p, run, o.session_id); if (o.is_error === true && typeof o.result === 'string') { if (isUsageLimitText(o.result)) run.limitReached = true; run.events.push(`error: ${agentFailureText('claude-code', o.result)}`); } }
+          if (o.type === 'system' && o.subtype === 'init') { linkSession(p, run, o.session_id); inits.push({ agent: 'claude-code', model: typeof o.model === 'string' ? o.model : null, commands: Array.isArray(o.slash_commands) ? o.slash_commands.filter((c: unknown): c is string => typeof c === 'string').slice(0, 300) : [], at: Date.now() }); if (inits.length > 20) inits.shift(); }
           const content = o.message?.content;
           const summary = o.type === 'assistant' && Array.isArray(content) ? content.map((c: any) => (c.type === 'text' ? c.text : c.type === 'tool_use' ? `[tool ${c.name}]` : '')).filter(Boolean).join(' ').slice(0, 400) : o.type === 'result' ? `result: ${o.subtype}` : '';
           if (summary) run.events.push(summary);
         } catch { /* a non-JSON line is not an event */ }
       }
     });
-    child.stderr!.resume();
-    child.on('error', (err) => { run.events.push(`Could not start the agent: ${err.message}`); run.status = 'failed'; });
-    child.on('close', (exit) => { try { finishRun(run, p, result, exit); } catch { /* project closed during shutdown */ } });
+    let claudeErr = '';
+    child.stderr!.setEncoding('utf8').on('data', (d: string) => { claudeErr = (claudeErr + d).slice(-600); });
+    child.on('error', (err) => { run.events.push(`Could not start the agent. ${agentFailureText('claude-code', err.message)}`); run.status = 'failed'; });
+    child.on('close', (exit) => { try { if (exit !== 0 && isUsageLimitText(claudeErr)) run.limitReached = true; if (exit !== 0 && claudeErr.trim() && !run.events.some((e) => e.startsWith('error:'))) run.events.push(`Claude Code said: ${agentFailureText('claude-code', claudeErr.trim())}`); } catch { /* ignore */ } try { finishRun(run, p, result, exit); } catch { /* project closed during shutdown */ } });
     return run;
   };
 
@@ -632,18 +1236,18 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
     // Which agents this companion can really start, and why not for the rest. The interface shows a Run control only where canStart is true.
     if (path === '/api/runtimes' && method === 'GET') {
       const { entry } = projectFor(projectId);
-      return json(res, 200, runtimeList(entry.root, !!opts.claudeCommand));
+      return json(res, 200, runtimeList(entry.root, !!opts.claudeCommand, !!opts.codexCommand).map((r) => ({ ...r, dollarCap: dollarCapAllowed(r.id) })));
     }
     if (path === '/api/orchestrate' && method === 'POST') {
       const b = z.object({ text: z.string().max(4000), agent: z.string().max(40).default('claude-code') }).parse(await readBody(req));
       const { entry } = projectFor(projectId);
-      const rt = runtimeList(entry.root, !!opts.claudeCommand).find((r) => r.id === b.agent);
+      const rt = runtimeList(entry.root, !!opts.claudeCommand, !!opts.codexCommand).find((r) => r.id === b.agent);
       return json(res, 200, orchestrate(b.text, { agentCanStart: !!rt?.canStart, reportedCommands: reportedCommands(b.agent) }));
     }
     if (path === '/api/discovery' && method === 'GET') {
       const { entry, p } = projectFor(projectId);
       const used: Seen[] = p.store.byType(['usage.recorded']).map((e: any) => ({ agent: String(e.payload.runtime ?? 'claude-code'), model: String(e.payload.model ?? ''), worked: true }));
-      return json(res, 200, { agents: describeAgents(runtimeList(entry.root, !!opts.claudeCommand), inits), models: await discoverModels({ seen: [...used, ...seenModels], inits }), note: 'A model listed here exists on this computer or was used by a run. Whether your plan allows it is not checked until a run uses it.' });
+      return json(res, 200, { agents: describeAgents(runtimeList(entry.root, !!opts.claudeCommand, !!opts.codexCommand), inits), models: await discoverModels({ seen: [...used, ...seenModels], inits }), note: 'A model listed here exists on this computer or was used by a run. Whether your plan allows it is not checked until a run uses it.' });
     }
     const agentAction = /^\/api\/agents\/(claude-code|codex)\/(connect|disconnect)$/.exec(path);
     if (agentAction && method === 'POST') {
@@ -721,6 +1325,28 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
       const b = z.object({ id: z.string(), message: z.string().min(1).max(200).default('Work recorded by AgentOnTrack') }).parse(await readBody(req));
       try { return json(res, 200, p.commitWorktree(b.id, b.message)); } catch (err) { throw new HttpError(409, (err as Error).message); }
     }
+    if (path === '/api/attachments' && method === 'POST') {
+      // Raw bytes, so a file need not be wrapped in JSON. Only a local session may upload: a page on another origin cannot put files here.
+      const sess = sessionOf(req)?.[1];
+      if (!sess || sess.origin || sess.surface) throw new HttpError(403, 'Attachments can be added only from the local dashboard.');
+      if (!(req.headers['content-type'] ?? '').startsWith('application/octet-stream')) throw new HttpError(415, 'Send the file bytes as application/octet-stream.');
+      const chunks: Buffer[] = []; let size = 0;
+      for await (const c of req) { size += (c as Buffer).length; if (size > MAX_ATTACHMENT_BYTES) throw new HttpError(413, 'The file is too large.'); chunks.push(c as Buffer); }
+      let name = 'attachment';
+      try { name = decodeURIComponent(String(req.headers['x-attachment-name'] ?? 'attachment')); } catch { /* keep the default */ }
+      try { const a = saveAttachment(p.stateDir, { name, bytes: Buffer.concat(chunks) }); return json(res, 200, { id: a.id, kind: a.kind, bytes: a.bytes, name: a.name }); }
+      catch (err) { if (err instanceof AttachmentError) throw new HttpError(err.status, err.message); throw err; }
+    }
+    // Which optional settings are set. Names only, never a value.
+    if (path === '/api/env-status' && method === 'GET') return json(res, 200, { ...envCfg.describe(), paidApiMode: paidApi });
+    if (path === '/api/ask' && method === 'GET') {
+      const q = (url.searchParams.get('q') ?? '').slice(0, 500);
+      return json(res, 200, askRecord(p.state(), q, { owner: 'human' }));
+    }
+    if (path === '/api/notes' && method === 'POST') {
+      const b = z.object({ text: z.string().min(1).max(2000), scope: z.enum(['private', 'project']).default('private') }).parse(await readBody(req));
+      return json(res, 200, { id: p.addNote(b.text, b.scope, { kind: 'human' }) });
+    }
     if (path === '/api/handoffs' && method === 'GET') return json(res, 200, listHandoffs(p));
     if (path === '/api/handoffs/markdown' && method === 'GET') {
       try { return json(res, 200, { markdown: renderHandoffMarkdown(loadHandoff(p, url.searchParams.get('id') ?? '')) }); } catch (err) { throw new HttpError(404, (err as Error).message); }
@@ -774,16 +1400,72 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
 
     if (path === '/api/runs' && method === 'GET') return json(res, 200, [...runs.values()].filter((r) => r.project === entry.id).map(({ id, status, started, events }) => ({ id, status, started, events: events.slice(-40) })));
     if (path === '/api/runs' && method === 'POST') {
-      const run = startRun(entry, p, RunInput.parse(await readBody(req)));
-      return json(res, 200, { id: run.id, status: run.status });
+      const input = RunInput.parse(await readBody(req));
+      const o = startOnce(req, key, '/api/runs', [entry.id, input], () => { const run = startRun(entry, p, input); return { status: 200, body: { id: run.id, status: run.status } }; });
+      return json(res, o.status, o.body, o.replay ? { 'idempotent-replay': 'true' } : {});
+    }
+
+    // ----- Agent sessions (not the browser pairing sessions): list, read, start a NEW one, continue one, rename/pin/archive.
+    const publicSession = (sv: SessionView) => { const { providerSessionId, resumeRunId: _r, ...rest } = sv; return { ...rest, linked: !!providerSessionId }; };
+    if (path === '/api/agent-sessions' && method === 'GET') {
+      const q = (url.searchParams.get('q') ?? '').trim();
+      const showArchived = url.searchParams.get('archived') === '1';
+      const hits = q ? new Map(searchSessions(p.store.byType(SESSION_EVENTS), q, { live: liveRunIds() }).map((h) => [h.sessionId, h])) : null;
+      const list = sessionViews(p).filter((sv) => (showArchived || !sv.archived) && (!hits || hits.has(sv.id)));
+      return json(res, 200, { keepTranscripts: keepTranscripts(), sessions: list.map((sv) => ({ ...publicSession(sv), ...(hits?.get(sv.id) ? { match: hits.get(sv.id) } : {}) })) });
+    }
+    if (path === '/api/agent-sessions' && method === 'POST') {
+      const input = RunInput.omit({ resumeRunId: true, sessionId: true }).parse(await readBody(req));
+      const o = startOnce(req, key, '/api/agent-sessions', [entry.id, input], () => { const run = startRun(entry, p, input); return { status: 200, body: { sessionId: run.sessionId, runId: run.id, status: run.status } }; });
+      return json(res, o.status, o.body, o.replay ? { 'idempotent-replay': 'true' } : {});
+    }
+    const sessionRoute = /^\/api\/agent-sessions\/(ses_[a-f0-9]{8,32})(?:\/(resume|update))?$/.exec(path);
+    if (sessionRoute) {
+      const sid = sessionRoute[1]!;
+      const sv = sessionViews(p).find((v) => v.id === sid);
+      if (!sv) throw new HttpError(404, 'No such session in this project.');
+      if (!sessionRoute[2] && method === 'GET') {
+        const kept = keepTranscripts() ? p.store.byType(['session.prompt', 'session.message']).filter((e) => e.payload?.sessionId === sid).map((e) => ({ kind: e.type === 'session.prompt' ? 'prompt' : 'message', runId: e.payload.runId, text: e.payload.text, at: e.ts })) : [];
+        return json(res, 200, { ...publicSession(sv), runs: sv.runIds.map((id) => { const r = runs.get(id); return { id, status: r?.status ?? null, events: r ? r.events.slice(-40) : [] }; }), transcript: kept });
+      }
+      if (sessionRoute[2] === 'resume' && method === 'POST') {
+        const input = RunInput.omit({ runtime: true, resumeRunId: true, sessionId: true, title: true }).parse(await readBody(req));
+        const resumeInput = { ...input, runtime: sv.runtime as 'claude-code' | 'codex', sessionId: sid };
+        const o = startOnce(req, key, '/api/agent-sessions/resume', [entry.id, resumeInput], () => { const run = startRun(entry, p, resumeInput); return { status: 200, body: { sessionId: run.sessionId, runId: run.id, status: run.status } }; });
+        return json(res, o.status, o.body, o.replay ? { 'idempotent-replay': 'true' } : {});
+      }
+      if (sessionRoute[2] === 'update' && method === 'POST') {
+        const b = z.object({ title: z.string().trim().max(120).optional(), pinned: z.boolean().optional(), archived: z.boolean().optional() }).strict().refine((x) => Object.keys(x).length > 0, 'Nothing to change').parse(await readBody(req));
+        p.store.append({ type: 'session.updated', actor: { kind: 'human' }, payload: { sessionId: sid, ...b } });
+        return json(res, 200, publicSession(sessionViews(p).find((v) => v.id === sid)!));
+      }
+    }
+
+    if (path === '/api/workflows/cross-review' && method === 'POST') {
+      const A = z.enum(['claude-code', 'codex']);
+      const b = z.object({ builder: A, reviewer: A, prompt: RunInput.shape.prompt, builderModel: RunInput.shape.model, reviewerModel: RunInput.shape.model, taskId: z.string().optional(), maxUsd: z.number().positive().max(5).default(0.5), stop: z.boolean().default(false) }).parse(await readBody(req));
+      if (b.stop) return json(res, 200, { stopped: continuing.has(entry.id) && !!(continuing.get(entry.id)!.cancel = true) });
+      const o = startOnce(req, key, '/api/workflows/cross-review', [entry.id, b], () => ({ status: 200, body: crossReview(entry, p, b) }));
+      return json(res, o.status, o.body, o.replay ? { 'idempotent-replay': 'true' } : {});
+    }
+
+    if (path === '/api/workflows/review' && method === 'POST') {
+      const b = z.object({ runId: z.string().regex(/^run_[a-z0-9]{1,40}$/), reviewer: z.enum(['claude-code', 'codex']), model: RunInput.shape.model, taskId: z.string().optional(), maxUsd: z.number().positive().max(5).default(0.5) }).parse(await readBody(req));
+      const o = startOnce(req, key, '/api/workflows/review', [entry.id, b], () => ({ status: 200, body: reviewRun(entry, p, b) }));
+      return json(res, o.status, o.body, o.replay ? { 'idempotent-replay': 'true' } : {});
     }
 
     /* ---------- Phase plans ---------- */
     const planFacts = () => planFactsOf(entry, p);
     const planView = () => planViewOf(entry, p, (id) => runs.get(id)?.status === 'running');
-    if (path === '/api/plan' && method === 'GET') return json(res, 200, planView());
+    if (path === '/api/plan' && method === 'GET') return json(res, 200, { ...planView(), sequence: sequenceView(entry.id) });
     // Saving a draft changes nothing about what is allowed: it grants nothing until a person approves exactly this content.
     if (path === '/api/plan/draft' && method === 'POST') {
+      const now = Date.now();
+      const hits = (draftHits.get(key) ?? []).filter((t) => now - t < 60_000);
+      if (hits.length >= DRAFT_PER_MINUTE) throw new HttpError(429, 'Too many plan drafts in a minute. Wait a little and try again.');
+      hits.push(now); draftHits.set(key, hits);
+      if (JSON.stringify(await readBody(req)).length > MAX_DRAFT_BYTES) throw new HttpError(413, 'That plan draft is too large.');
       const b = z.object({ goal: z.string().min(1).max(2000).optional(), plan: z.unknown().optional(), expectVersion: z.number().int().min(0).optional(), agents: z.record(z.string(), z.object({ agent: z.string(), model: z.string().optional() })).optional() }).parse(await readBody(req));
       try {
         const doc = b.plan !== undefined ? b.plan : decompose(b.goal ?? '', planFacts(), { id: `plan-${(s().plan?.version ?? 0) + 1}`, ...(b.agents ? { agents: b.agents as never } : {}) });
@@ -793,13 +1475,25 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
     }
     if (path === '/api/plan/phases/start' && method === 'POST') {
       const b = z.object({ phaseId: z.string(), extra: z.string().max(2000).default('') }).parse(await readBody(req));
-      try { const run = startPhaseRun(entry, p, b.phaseId, b.extra); return json(res, 200, { id: run.id, status: run.status }); }
+      // Exactly one run per request, and no client-supplied flag changes that. TRUST BOUNDARY: separate manually authorized requests from a paired session are
+      // indistinguishable from a person clicking Start each time. Only sequences this companion runs itself (/api/plan/continue, /api/plan/loop) are chained, and those need a grant.
+      try {
+        const o = startOnce(req, key, '/api/plan/phases/start', [entry.id, b], () => { const run = startPhaseRun(entry, p, b.phaseId, b.extra); return { status: 200, body: { id: run.id, status: run.status } }; });
+        return json(res, o.status, o.body, o.replay ? { 'idempotent-replay': 'true' } : {});
+      }
       catch (err) { if (err instanceof PhaseBlocked) throw new HttpError(err.status, err.message); throw err; }
     }
     if (path === '/api/plan/loop' && method === 'POST') {
       const b = z.object({ phaseId: z.string(), rounds: z.number().int().min(1).max(5).default(3), stop: z.boolean().default(false) }).parse(await readBody(req));
       if (b.stop) return json(res, 200, { stopped: continuing.has(entry.id) && !!(continuing.get(entry.id)!.cancel = true) });
       try { return json(res, 200, loopPhase(entry, p, b.phaseId, b.rounds, 'desktop')); }
+      catch (err) { if (err instanceof PhaseBlocked) throw new HttpError(err.status, err.message); throw err; }
+    }
+    // The same function the phone action plan.continue calls. The page only starts it and then polls GET /api/plan (its `sequence` field) for progress.
+    if (path === '/api/plan/continue' && method === 'POST') {
+      const b = z.object({ maxPhases: z.number().int().min(1).max(10).default(1), stop: z.boolean().default(false) }).parse(await readBody(req));
+      if (b.stop) return json(res, 200, { stopped: continuing.get(entry.id)?.kind === 'sequence' && !!(continuing.get(entry.id)!.cancel = true) });
+      try { return json(res, 200, continuePlan(entry, p, b.maxPhases, 'desktop')); }
       catch (err) { if (err instanceof PhaseBlocked) throw new HttpError(err.status, err.message); throw err; }
     }
     if (path === '/api/plan/phases/prompt' && method === 'GET') {
@@ -828,8 +1522,8 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
       const file = remoteFileNow();
       if (!file) return json(res, 200, { exists: false });
       const fp = await fingerprintOf(file.identity.pub);
-      if (remote) return json(res, 200, { exists: true, linked: true, ...(await remote.status()) });
-      return json(res, 200, { exists: true, linked: !!file.link, running: false, online: false, lastError: file.link ? 'Starting, or not reachable yet' : '', degraded: null, computerId: file.computerId, name: file.name, fingerprint: fp, devices: [], pending: [], maxUsdPerRun: file.maxUsdPerRun });
+      if (remote) return json(res, 200, { exists: true, linked: true, ...(await remote.status()), defaultProject: defaultProjectView(file.defaultProject ?? null) });
+      return json(res, 200, { exists: true, linked: !!file.link, running: false, online: false, lastError: file.link ? 'Starting, or not reachable yet' : '', degraded: null, computerId: file.computerId, name: file.name, fingerprint: fp, devices: [], pending: [], maxUsdPerRun: file.maxUsdPerRun, defaultProject: defaultProjectView(file.defaultProject ?? null) });
     }
     if (path === '/api/remote/prepare' && method === 'POST') {
       let file = remoteFileNow();
@@ -866,8 +1560,25 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
         async (b) => { if (!remote?.host.setLevel(b.did, b.level)) throw new HttpError(404, 'No such phone'); return remote.status(); });
     }
     if (path === '/api/remote/settings' && method === 'POST') {
-      return humanThen(z.object({ maxUsdPerRun: z.number().min(0.05).max(5).optional(), name: z.string().min(1).max(50).optional(), ...RemoteHuman }), (b) => `change the phone link's settings: ${JSON.stringify({ maxUsdPerRun: b.maxUsdPerRun, name: b.name })}`,
-        async (b) => { const file = remoteFileNow(); if (!file) throw new HttpError(409, 'Nothing to change'); if (b.maxUsdPerRun) file.maxUsdPerRun = b.maxUsdPerRun; if (b.name) file.name = b.name; saveRemote(file); if (remote) { remote.host.state.maxUsdPerRun = file.maxUsdPerRun; remote.host.state.name = file.name; } return { ok: true }; });
+      return humanThen(z.object({ maxUsdPerRun: z.number().min(0.05).max(5).optional(), name: z.string().min(1).max(50).optional(), defaultProjectId: z.string().regex(/^[a-f0-9]{24}$/).nullable().optional(), ...RemoteHuman }), (b) => `change the phone link's settings: ${JSON.stringify({ maxUsdPerRun: b.maxUsdPerRun, name: b.name })}${b.defaultProjectId === undefined ? '' : b.defaultProjectId === null ? '; clear the default project for phone sessions' : (() => { const r = loadRegistry().find((x) => x.id === b.defaultProjectId); return r ? `; let a phone start new sessions in "${r.name}" (${r.root}) when it asks for the default project` : '; set a default project that is not registered (this will be refused)'; })()}`,
+        async (b) => {
+          const file = remoteFileNow(); if (!file) throw new HttpError(409, 'Nothing to change');
+          if (b.maxUsdPerRun) file.maxUsdPerRun = b.maxUsdPerRun;
+          if (b.name) file.name = b.name;
+          if (b.defaultProjectId !== undefined) {
+            if (b.defaultProjectId === null) file.defaultProject = null;
+            else {
+              // A registered, unarchived project whose folder exists. The path is recorded here, on this computer, resolved to its real location; a phone cannot supply one.
+              const r = loadRegistry().find((x) => x.id === b.defaultProjectId);
+              if (!r || r.archived) throw new HttpError(404, 'That project is not registered here, or is archived.');
+              let real: string; try { real = realpathSync.native(r.root); } catch { throw new HttpError(409, 'That project\'s folder cannot be found.'); }
+              file.defaultProject = { projectId: r.id, realRoot: real, setAt: new Date().toISOString() };
+            }
+          }
+          saveRemote(file);
+          if (remote) { remote.host.state.maxUsdPerRun = file.maxUsdPerRun; remote.host.state.name = file.name; remote.host.state.defaultProject = file.defaultProject ?? null; }
+          return { ok: true, defaultProject: defaultProjectView(file.defaultProject ?? null) };
+        });
     }
     // Taking access away needs no ceremony: it only ever does less.
     if (path === '/api/remote/devices/revoke' && method === 'POST') {
@@ -885,8 +1596,9 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
     if (stop && method === 'POST') {
       const run = runs.get(stop[1]!);
       if (!run || run.project !== entry.id) throw new HttpError(404, 'No such run');
-      run.status = 'stopped';
-      run.child.kill();
+      // The same rule as the phone's stop: only a running run can be stopped, and "stopped" is said only once the process has gone.
+      const out = await stopRunNow(run);
+      if (!out.ok) throw new HttpError(out.kind === 'not-running' ? 409 : 500, out.reason);
       return json(res, 200, { status: 'stopped' });
     }
 
@@ -946,12 +1658,36 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
 
     if (path === '/api/settings' && method === 'GET') {
       const st = loadSettings();
-      return json(res, 200, { ...st, sessions: [...sessions.entries()].map(([k, v]) => ({ id: k.slice(0, 8), current: k === key, createdAt: v.createdAt, expiresAt: v.expiresAt, userAgent: v.userAgent })) });
+      const g = grantOf(entry.id);
+      return json(res, 200, { ...st, unattended: { active: 'grant' in g, reason: 'problem' in g ? g.problem : null, grant: st.unattendedGrant ?? null }, sessions: [...sessions.entries()].map(([k, v]) => ({ id: k.slice(0, 8), current: k === key, createdAt: v.createdAt, expiresAt: v.expiresAt, userAgent: v.userAgent })) });
     }
     if (path === '/api/settings' && method === 'POST') {
-      const body = z.object({ telemetry: z.boolean().optional(), diagnostics: z.boolean().optional(), theme: z.enum(['dark', 'light']).optional(), environment: z.object({ show: z.boolean(), userGridGCo2PerKwh: z.number().nonnegative().nullable() }).optional() }).parse(await readBody(req));
+      const body = z.object({ telemetry: z.boolean().optional(), diagnostics: z.boolean().optional(), keepTranscripts: z.boolean().optional(), theme: z.enum(['dark', 'light']).optional(), environment: z.object({ show: z.boolean(), userGridGCo2PerKwh: z.number().nonnegative().nullable() }).optional() }).parse(await readBody(req));
       saveSettings({ ...loadSettings(), ...body } as Settings);
       return json(res, 200, { ok: true });
+    }
+    // Not part of /api/settings on purpose: this one needs the terminal-code proof, from every caller, local or outside.
+    if (path === '/api/settings/unattended' && method === 'POST') {
+      return humanThen(z.object({ allow: z.boolean(), hours: z.number().positive().max(GRANT_MAX_HOURS).optional(), maxRuns: z.number().int().min(1).max(10).optional(), maxPhasesPerSequence: z.number().int().min(1).max(10).optional(), maxRounds: z.number().int().min(1).max(5).optional(), ...RemoteHuman }),
+        (b) => b.allow ? `allow unattended runs for THIS project, for up to ${b.hours ?? GRANT_DEFAULT_HOURS} hours and ${b.maxRuns ?? 5} runs: plans may continue or retry for several phases or rounds with nobody acting between the runs. Even then they only run with an API-key sign-in and paid API mode; provider permission for unattended subscription automation is unresolved.` : 'cancel the unattended-runs grant and stop any sequence it is running',
+        async (b) => {
+          if (!b.allow) {
+            saveSettings({ ...loadSettings(), unattendedGrant: null });
+            // Cancelling aborts a running sequence (and the agent it is waiting on) at its next poll; a single-run start is not a sequence and is left alone.
+            for (const c of continuing.values()) if (c.kind === 'sequence' && c.chained) c.cancel = true;
+            return { ok: true, unattended: { active: false, grant: null } };
+          }
+          const now = Date.now(); const maxRuns = b.maxRuns ?? 5;
+          const unattendedGrant: UnattendedGrant = { projectId: entry.id, maxRuns, remainingRuns: maxRuns, maxPhasesPerSequence: Math.min(b.maxPhasesPerSequence ?? maxRuns, 10), maxRounds: b.maxRounds ?? 3, expiresAt: new Date(now + (b.hours ?? GRANT_DEFAULT_HOURS) * 3_600_000).toISOString(), createdAt: new Date(now).toISOString() };
+          saveSettings({ ...loadSettings(), unattendedGrant });
+          return { ok: true, unattended: { active: true, grant: unattendedGrant } };
+        });
+    }
+    // Phone-started agents are off until a person turns them on here, with the same proof. Viewing, stopping and approving from a phone do not depend on it.
+    if (path === '/api/settings/mobile-execution' && method === 'POST') {
+      return humanThen(z.object({ allow: z.boolean(), ...RemoteHuman }),
+        (b) => b.allow ? 'allow a paired phone to START agent runs and sessions on this computer (viewing, stopping and approving stay as they are)' : 'stop phones from starting agent runs and sessions',
+        async (b) => { saveSettings({ ...loadSettings(), allowMobileExecution: b.allow }); return { ok: true, allowMobileExecution: b.allow }; });
     }
     if (path === '/api/data/export' && method === 'GET') {
       res.writeHead(200, { 'content-type': 'application/json', 'content-disposition': `attachment; filename="agentontrack-${entry.id}.json"`, 'cache-control': 'no-store' });
@@ -961,6 +1697,9 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
     if (path === '/api/feedback' && method === 'POST') {
       const body = z.object({ rating: z.enum(['helpful', 'not-helpful']).nullable(), text: z.string().max(4000).default(''), contact: z.string().max(200).default(''), mayQuote: z.boolean().default(false) }).parse(await readBody(req));
       const file = join(agentontrackHome(), 'feedback.jsonl');
+      // An outside page may post feedback without a terminal code, so the file is bounded: it cannot be used to fill the disk.
+      try { if (statSync(file).size > MAX_FEEDBACK_FILE) throw new HttpError(429, 'The local feedback file is full. Delete or move feedback.jsonl in the AgentOnTrack data folder.'); } catch (err) { if (err instanceof HttpError) throw err; /* no file yet */ }
+      mkdirSync(agentontrackHome(), { recursive: true });
       writeFileSync(file, `${JSON.stringify({ ...body, at: new Date().toISOString() })}\n`, { flag: 'a' });
       return json(res, 200, { savedLocally: true, sent: false, note: 'Saved on this machine only. Nothing was sent anywhere.' });
     }
@@ -997,7 +1736,7 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
         res.setHeader('access-control-allow-origin', origin);
         res.setHeader('vary', 'origin');
         if (req.method === 'OPTIONS') {
-          res.writeHead(204, { 'access-control-allow-methods': 'GET, POST', 'access-control-allow-headers': 'authorization, content-type, x-agentontrack-csrf', 'access-control-allow-private-network': 'true', 'access-control-max-age': '600' });
+          res.writeHead(204, { 'access-control-allow-methods': 'GET, POST', 'access-control-allow-headers': 'authorization, content-type, idempotency-key, x-agentontrack-csrf', 'access-control-allow-private-network': 'true', 'access-control-max-age': '600' });
           res.end();
           return;
         }
@@ -1031,7 +1770,7 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
     async close() {
       for (const c of continuing.values()) c.cancel = true;
       try { await remote?.stop(); } catch { /* closing */ }
-      for (const r of runs.values()) { if (r.status === 'running') r.child.kill(); }
+      for (const r of runs.values()) { if (r.status === 'running') killChild(r.child); }
       for (const t of streams) clearInterval(t);
       server.closeAllConnections();
       await new Promise<void>((ok) => server.close(() => ok()));

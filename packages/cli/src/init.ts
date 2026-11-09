@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { approvalView, isPendingLive, type Project } from '@agentontrack/core';
+import { approvalView, findDrift, isPendingLive, type Project } from '@agentontrack/core';
 
 const BEGIN = '<!-- agentontrack:begin (generated view; the record is authoritative) -->';
 const END = '<!-- agentontrack:end -->';
@@ -21,7 +21,24 @@ function renderFromRecord(p: Project): Record<string, string> {
   if (s.goal) {
     out['GOAL.md'] = [`## Goal v${s.goal.version} (${s.goal.status})`, '', s.goal.statement, '', `- In scope: ${s.goal.scope.include.join(', ')}`, `- Excluded: ${s.goal.scope.exclude.join(', ') || 'none'}`, `- Prohibited: ${s.goal.prohibit.join(', ') || 'none'}`, ...s.goal.successCriteria.map((c) => `- Success: ${c}`)].join('\n');
   }
-  if (s.decisions.length) out['DECISIONS.md'] = s.decisions.map((d) => `- **${d.title}** (${d.ts.slice(0, 10)}): ${d.rationale}`).join('\n');
+  if (s.decisions.length) {
+    const title = (id: string | null) => s.decisions.find((x) => x.id === id)?.title ?? id ?? '';
+    const lines = s.decisions.map((d) => `- **${d.title}** (${d.ts.slice(0, 10)}): ${d.rationale}${d.supersededBy ? ` _(replaced by "${title(d.supersededBy)}")_` : ''}`);
+    const drift = findDrift(s);
+    if (drift.length) lines.push('', '### Still following a replaced decision', ...drift.map((d) => `- ${d.kind} ${d.ref}: follows "${d.stale.title}"; now "${d.current.title}"`));
+    out['DECISIONS.md'] = lines.join('\n');
+  }
+  if (s.plan) {
+    const doc = s.plan.doc;
+    const approved = s.plan.approvedSha === s.plan.sha;
+    const head = `## Plan v${s.plan.version} (${approved ? 'approved' : 'not approved: nothing runs until a person approves exactly this content'})`;
+    const phases = (doc.phases ?? []).flatMap((ph: any, n: number) => [
+      `${n + 1}. **${ph.title}** (${ph.kind}${ph.agent ? `, ${ph.agent}` : ''}${ph.state && ph.state !== 'draft' ? `, ${ph.state}` : ''})`,
+      ...(ph.dependsOn?.length ? [`   - waits for: ${ph.dependsOn.join(', ')}`] : []),
+      ...(ph.acceptance ?? []).map((a: any) => `   - check: ${a.description}`),
+    ]);
+    out['PLAN.md'] = [head, '', `Goal: ${doc.goal}`, `Mode: ${doc.mode}`, '', ...phases].join('\n');
+  }
   const tasks = [...s.tasks.values()];
   if (tasks.length) {
     out['EVALS.md'] = tasks.map((t) => {

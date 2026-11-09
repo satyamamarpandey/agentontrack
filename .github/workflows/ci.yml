@@ -3,9 +3,19 @@ name: ci
 # The public export adds push and pull_request triggers, since public repositories have free runners.
 on:
   workflow_call:
+    inputs:
+      repeat_phone:
+        description: Repeat the phone end-to-end spec this many times, each in a fresh Firebase emulator (0 = not at all)
+        type: number
+        default: 0
   workflow_dispatch:
   push:
   pull_request:
+    inputs:
+      repeat_phone:
+        description: Repeat the phone end-to-end spec this many times, each in a fresh Firebase emulator, to look for intermittent failures (0 = not at all)
+        type: number
+        default: 0
 permissions:
   contents: read
 env:
@@ -64,7 +74,7 @@ jobs:
 
   accounts:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     env:
       # A demo- project id never reaches a real Firebase project. The values only identify it to the emulators.
       NEXT_PUBLIC_FIREBASE_CONFIG: '{"apiKey":"demo-key","authDomain":"demo-agentontrack.firebaseapp.com","projectId":"demo-agentontrack","appId":"demo-app"}'
@@ -86,16 +96,23 @@ jobs:
       - run: pnpm build:pages
       - run: pnpm exec playwright install --with-deps chromium
       - name: Sign-in, saved data, feedback, delete and rules, against the Firebase emulators
-        run: pnpm dlx firebase-tools@15 emulators:exec --only auth,firestore --project demo-agentontrack "pnpm exec playwright test accounts.spec accounts-configured.spec rules.spec phone.spec --project=chromium --workers=1"
+        run: pnpm dlx firebase-tools@15 emulators:exec --only auth,firestore --project demo-agentontrack "pnpm exec playwright test accounts.spec accounts-configured.spec rules.spec phone.spec phone-new-session.spec --project=chromium --workers=1"
       - name: No emulator test may be silently skipped
         run: |
           node -e "const r=require('./test-results/e2e.json');const n=r.stats.skipped+r.stats.unexpected;console.log(JSON.stringify(r.stats));if(r.stats.skipped>0||r.stats.expected<20){console.error('skipped or too few tests ran');process.exit(1)}"
+      - name: Repeat the phone spec, each time in a fresh emulator, to look for intermittent failures (only when asked)
+        if: ${{ inputs.repeat_phone > 0 }}
+        env:
+          REPEATS: ${{ inputs.repeat_phone }}
+        run: node scripts/repeat-phone-spec.mjs "$REPEATS"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: playwright-accounts
-          path: test-results/
-          retention-days: 7
+          path: |
+            test-results/
+            test-results-repeat/
+          retention-days: 14
 
   vscode:
     # A real VS Code, downloaded on this disposable runner, runs the extension against a real companion.

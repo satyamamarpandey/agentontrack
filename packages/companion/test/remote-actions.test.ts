@@ -10,7 +10,7 @@ import { Refusal, type HostContext, type TrustedDevice } from '../src/remote-hos
 
 const facts: ProjectFacts = { testCommand: null, testCommandSource: null, protectedPaths: [], meanSecondsPerTask: null, tasksInHistory: 0 };
 let dir: string; let root: string; let p: Project; let entry: Registered;
-let calls: { fn: string; args: unknown[] }[]; let exec: ReturnType<typeof makeExecutor>; let maxUsd = 1;
+let calls: { fn: string; args: unknown[] }[]; let exec: ReturnType<typeof makeExecutor>; let maxUsd = 1; let unattended = false; let mobile = true;
 const device = { did: 'd1', name: 'Phone', fingerprint: 'AAAA-BBBB', level: 'control' } as TrustedDevice;
 const ctx: HostContext = { did: 'd1', device };
 const run = (action: string, params: unknown = {}) => exec(action, params, ctx);
@@ -34,9 +34,9 @@ beforeEach(() => {
   exec = makeExecutor({
     registry: () => [entry], projectFor: () => ({ entry, p }), isRunning: () => false, stopRun: (_p, id) => { calls.push({ fn: 'stopRun', args: [id] }); return id === 'run_live'; },
     recentRuns: () => [], startPhase: rec('startPhase', { id: 'run_a', status: 'running' }), startPrompt: rec('startPrompt', { id: 'run_b', status: 'running' }),
-    continuePlan: rec('continuePlan', { started: true, note: 'x' }), loopPhase: rec('loopPhase', { started: true, note: 'x' }), cancelContinue: () => true, models: async () => [], agents: async () => [], maxUsdPerRun: () => maxUsd, version: 'test',
+    continuePlan: rec('continuePlan', { started: true, note: 'x' }), loopPhase: rec('loopPhase', { started: true, note: 'x' }), cancelContinue: () => true, allowUnattended: () => unattended, models: async () => [], agents: async () => [], maxUsdPerRun: () => maxUsd, allowMobileExecution: () => mobile, version: 'test',
   } satisfies ExecDeps);
-  maxUsd = 1;
+  maxUsd = 1; unattended = false; mobile = true;
 });
 afterEach(() => { p.close(); rmSync(dir, { recursive: true, force: true, maxRetries: 5 }); });
 
@@ -46,6 +46,45 @@ const hold = (kind: 'push' | 'outside') => {
   else p.preAction({ runtime: 'claude-code', tool: 'Write', effects: [{ kind: 'fs.write', target: 'docs/outside.md' }], opaque: false, coverage: 'enforced', rawInput: 'write' });
   return pending().at(-1)!;
 };
+
+describe('starting an agent from a phone needs the owner to allow it at the computer', () => {
+  const STARTS: [string, () => Record<string, unknown>][] = [
+    ['run.start', () => ({ project: 'proj1', prompt: 'Fix it' })],
+    ['run.start', () => ({ project: 'proj1', prompt: 'x', phaseId: p.state().plan!.doc.phases[0].id })],
+    ['session.new', () => ({ v: 1, idemKey: 'k'.repeat(22), project: 'a'.repeat(24), agent: 'claude-code', prompt: 'Fix it' })],
+    ['plan.continue', () => ({ project: 'proj1', maxPhases: 1 })],
+    ['plan.loop', () => ({ project: 'proj1', phaseId: p.state().plan!.doc.phases[0].id, rounds: 1 })],
+  ];
+  it('refuses every action that starts an agent with mobile-execution-off when it is not allowed (the default), and starts nothing', async () => {
+    p.human.approvePlan(p.savePlan(decompose('Fix a bug', facts)).sha, 1);
+    mobile = false; unattended = true;
+    for (const [action, params] of STARTS) expect(await refused(action, params()), action).toBe('mobile-execution-off');
+    expect(calls.filter((c) => ['startPhase', 'startPrompt', 'continuePlan', 'loopPhase'].includes(c.fn))).toHaveLength(0);
+  });
+  it('the refusal comes before a grant or an idempotency record are looked at, even for the multi-run forms', async () => {
+    p.human.approvePlan(p.savePlan(decompose('Fix a bug', facts)).sha, 1);
+    mobile = false; unattended = false;
+    expect(await refused('plan.continue', { project: 'proj1', maxPhases: 3 })).toBe('mobile-execution-off');
+    expect(await refused('plan.loop', { project: 'proj1', phaseId: p.state().plan!.doc.phases[0].id, rounds: 3 })).toBe('mobile-execution-off');
+  });
+  it('viewing, stopping a run and stopping a sequence from the phone still work while it is off', async () => {
+    mobile = false;
+    expect(await refused('project.snapshot', { project: 'proj1' })).toBe('ran');
+    expect(await refused('run.stop', { project: 'proj1', runId: 'run_live' })).toBe('ran');
+    expect(await refused('plan.continue', { project: 'proj1', stop: true })).toBe('ran');
+  });
+  it('when allowed, the same actions reach the computer', async () => {
+    p.human.approvePlan(p.savePlan(decompose('Fix a bug', facts)).sha, 1);
+    mobile = true;
+    await run('run.start', { project: 'proj1', prompt: 'Fix it' });
+    await run('plan.continue', { project: 'proj1', maxPhases: 1 });
+    expect(calls.map((c) => c.fn)).toEqual(expect.arrayContaining(['startPrompt', 'continuePlan']));
+  });
+  it('an executor whose computer never says (no setting at all) is closed', async () => {
+    const bare = makeExecutor({ registry: () => [entry], projectFor: () => ({ entry, p }), isRunning: () => false, stopRun: () => false, recentRuns: () => [], startPhase: () => ({ id: 'x', status: 'r' }), startPrompt: () => ({ id: 'x', status: 'r' }), loopPhase: () => ({ started: true, note: '' }), continuePlan: () => ({ started: true, note: '' }), cancelContinue: () => true, models: async () => [], agents: async () => [], maxUsdPerRun: () => 1, version: 't' });
+    await expect(bare('run.start', { project: 'proj1', prompt: 'x' }, ctx)).rejects.toMatchObject({ code: 'mobile-execution-off' });
+  });
+});
 
 describe('reading', () => {
   it('lists projects by name and status, and never gives out a folder path', async () => {
@@ -104,7 +143,7 @@ describe('lists', () => {
 describe('what is refused', () => {
   it('an unregistered project, an unknown action, an extra parameter and a malformed one', async () => {
     p.close();
-    exec = makeExecutor({ registry: () => [entry], projectFor: () => ({ entry, p: new Project(root) }), isRunning: () => false, stopRun: () => false, recentRuns: () => [], startPhase: () => ({ id: '', status: '' }), startPrompt: () => ({ id: '', status: '' }), continuePlan: () => ({ started: false, note: '' }), loopPhase: () => ({ started: false, note: '' }), cancelContinue: () => false, models: async () => [], agents: async () => [], maxUsdPerRun: () => 1, version: 't' });
+    exec = makeExecutor({ registry: () => [entry], projectFor: () => ({ entry, p: new Project(root) }), isRunning: () => false, stopRun: () => false, recentRuns: () => [], startPhase: () => ({ id: '', status: '' }), startPrompt: () => ({ id: '', status: '' }), continuePlan: () => ({ started: false, note: '' }), loopPhase: () => ({ started: false, note: '' }), cancelContinue: () => false, models: async () => [], agents: async () => [], maxUsdPerRun: () => 1, allowMobileExecution: () => true, version: 't' });
     expect(await refused('project.snapshot', { project: 'someone-elses' })).toBe('no-project');
     expect(await refused('shell.exec', { project: 'proj1', cmd: 'ls' })).toBe('unknown-action');
     expect(await refused('project.snapshot', { project: 'proj1', also: 'this' })).toBe('bad-request');
@@ -133,6 +172,19 @@ describe('starting and stopping', () => {
     expect(calls.at(-1)).toMatchObject({ fn: 'startPhase', args: [entry, p, 'implement-3', 'be careful', 'phone:AAAA-BBBB'] });
   });
 
+  it('an asynchronous stop that succeeds is reported as stopped, and one that fails is refused with its reason, never as stopped', async () => {
+    const ex = makeExecutor({
+      registry: () => [entry], projectFor: () => ({ entry, p }), isRunning: () => false,
+      stopRun: async (_p, id) => { if (id === 'run_stuck') throw new Refusal('stop-failed', 'The agent did not exit after a stop and a forced kill, so it may still be running.'); return id === 'run_live'; },
+      recentRuns: () => [], startPhase: () => ({ id: 'x', status: 'running' }) as never, startPrompt: () => ({ id: 'x', status: 'running' }) as never,
+      continuePlan: () => ({ started: true, note: 'x' }) as never, loopPhase: () => ({ started: true, note: 'x' }) as never, cancelContinue: () => true, models: async () => [], agents: async () => [], maxUsdPerRun: () => 1, allowMobileExecution: () => true, version: 'test',
+    } satisfies ExecDeps);
+    const ctx = { device: { fingerprint: 'AAAA-BBBB' } } as never;
+    expect(await ex('run.stop', { project: 'proj1', runId: 'run_live' }, ctx)).toEqual({ stopped: true });
+    await expect(ex('run.stop', { project: 'proj1', runId: 'run_gone' }, ctx)).rejects.toMatchObject({ code: 'no-run' });
+    await expect(ex('run.stop', { project: 'proj1', runId: 'run_stuck' }, ctx)).rejects.toMatchObject({ code: 'stop-failed', message: expect.stringMatching(/may still be running/) });
+  });
+
   it('stopping a run that is not running here is said plainly', async () => {
     expect(await run('run.stop', { project: 'proj1', runId: 'run_live' })).toEqual({ stopped: true });
     expect(await refused('run.stop', { project: 'proj1', runId: 'run_gone' })).toBe('no-run');
@@ -147,8 +199,23 @@ describe('starting and stopping', () => {
     expect(p.state().plan!.approvedSha).toBe(p.state().plan!.sha);
     expect(await refused('plan.state', { project: 'proj1', phaseId: 'nope', state: 'paused' })).toBe('no-phase');
     expect(await refused('plan.continue', { project: 'proj1', maxPhases: 50 })).toBe('bad-request');
+    unattended = true;
     await run('plan.continue', { project: 'proj1', maxPhases: 2 });
     expect(calls.at(-1)!.args[2]).toBe(2);
+  });
+
+  it('with unattended runs off (the default), several phases or rounds in a row are refused from the phone, and one is not', async () => {
+    p.human.approvePlan(p.savePlan(decompose('Fix a bug', facts)).sha, 1);
+    const first = p.state().plan!.doc.phases[0].id;
+    expect(await refused('plan.continue', { project: 'proj1', maxPhases: 2 })).toBe('unattended-off');
+    expect(await refused('plan.loop', { project: 'proj1', phaseId: first, rounds: 3 })).toBe('unattended-off');
+    expect(calls.filter((c) => c.fn === 'continuePlan' || c.fn === 'loopPhase')).toHaveLength(0);
+    await run('plan.continue', { project: 'proj1', maxPhases: 1 });
+    await run('plan.loop', { project: 'proj1', phaseId: first, rounds: 1 });
+    expect(calls.filter((c) => c.fn === 'continuePlan' || c.fn === 'loopPhase')).toHaveLength(2);
+    unattended = true;
+    await run('plan.loop', { project: 'proj1', phaseId: first, rounds: 3 });
+    expect(calls.at(-1)!.fn).toBe('loopPhase');
   });
 
   it('checks run only for a phase that has a command and an approved plan', async () => {
@@ -182,6 +249,20 @@ describe('approvals from a phone', () => {
     const done = p.state().approvals.get(a.id)!;
     expect(done.status).toBe('granted');
     expect(JSON.stringify(done)).toContain('remote-device:AAAA-BBBB');
+  });
+
+  it('cannot approve a write to a protected file or outside the project: it waits for the desktop, and the snapshot does not offer it to the phone', async () => {
+    for (const target of ['.claude/settings.json', '.env', '../outside-the-project.txt']) {
+      p.preAction({ runtime: 'claude-code', tool: 'Write', effects: [{ kind: 'fs.write', target }], opaque: false, coverage: 'enforced', rawInput: 'write' });
+      const a = pending().at(-1)!;
+      expect(a.effect.kind, target).toBe('fs.write');
+      expect(await refused('approval.decide', { project: 'proj1', id: a.id, decision: 'approve' }), target).toBe('needs-desktop');
+      expect(p.state().approvals.get(a.id)!.status, target).toBe('pending');
+      const offered = ((await run('project.snapshot', { project: 'proj1' })) as any).approvals.find((x: any) => x.id === a.id);
+      expect(offered.fromPhone, target).toBe(false);
+      // Declining it from the phone is still allowed: that only ever does less.
+      expect(await run('approval.decide', { project: 'proj1', id: a.id, decision: 'deny' })).toEqual({ decision: 'denied' });
+    }
   });
 
   it('cannot decide something already decided, or something that does not exist', async () => {

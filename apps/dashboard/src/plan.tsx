@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ApiError, get, isDemo, post } from './api';
+import { ApiError, describeCancel, get, isDemo, post, postStart, stopRuns } from './api';
 import { useHuman } from './human';
 import { Icon } from './icons';
 import { Empty, Loading, useLoad } from './ui';
@@ -9,7 +9,8 @@ type Mode = 'manual' | 'guided' | 'bounded';
 interface Phase { id: string; title: string; kind: string; role: string; instructions: string; dependsOn: string[]; agent?: string; model?: string; acceptance: { id: string; description: string; kind: 'command' | 'manual'; command?: string }[]; budget: { maxUsd?: number; maxMinutes?: number; maxRuns?: number }; risks: string[]; effort?: { minutes: number; basis: string }; state: 'draft' | 'paused' | 'skipped'; taskId?: string }
 interface Plan { id: string; goal: string; mode: Mode; limits: { maxUsd: number; maxMinutes: number; maxRuns: number }; defaults: Record<string, { agent: string; model?: string }>; phases: Phase[] }
 interface View { id: string; status: string; why: string; runs: number; spentUsd: number }
-interface PlanData { plan: Plan | null; version?: number; sha?: string; approved?: boolean; views?: View[]; spent?: { usd: number; runs: number; minutes: number }; facts: { testCommand: string | null; testCommandSource: string | null } }
+interface PlanData { plan: Plan | null; version?: number; sha?: string; approved?: boolean; views?: View[]; spent?: { usd: number; runs: number; minutes: number }; facts: { testCommand: string | null; testCommandSource: string | null }; sequence?: { active: boolean; ended: { reason: string; message: string } | null } }
+interface Unattended { active: boolean; reason: string | null; grant: { remainingRuns: number; maxRuns: number; maxPhasesPerSequence: number; expiresAt: string } | null }
 
 const MODES: { id: Mode; label: string; help: string }[] = [
   { id: 'manual', label: 'Manual', help: 'You start every phase yourself, and check the result before the next.' },
@@ -32,11 +33,18 @@ export function PlanPanel({ tick, agents, onRunStarted, reloadShell }: { tick: n
   const [prompt, setPrompt] = useState<{ phase: string; text: string } | null>(null);
   const [auto, setAuto] = useState<null | { note: string; active: boolean }>(null);
   const cancel = useRef(false);
-  const { ask, dialog } = useHuman(() => data.reload());
+  const settings = useLoad<{ unattended?: Unattended; allowMobileExecution?: boolean }>(() => get('/api/settings'), [tick]);
+  const { ask, dialog } = useHuman(() => { data.reload(); settings.reload(); });
+  const unattended = settings.data?.unattended?.active === true;
+  const grant = settings.data?.unattended?.grant ?? null;
+  const mobileExec = settings.data?.allowMobileExecution === true;
 
   const server = data.data?.plan ?? null;
   const serverKey = JSON.stringify(server);
-  useEffect(() => { setDraft(server ? structuredClone(server) : null); }, [serverKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const lastServer = useRef<string>('null');
+  const adopt = useRef(false);
+  // A refresh from the server replaces the draft only when the person has no unsaved edits; otherwise their edits are kept.
+  useEffect(() => { const prev = lastServer.current; lastServer.current = serverKey; const take = adopt.current; adopt.current = false; setDraft((cur) => (!take && cur && prev !== 'null' && JSON.stringify(cur) !== prev ? cur : server ? structuredClone(server) : null)); }, [serverKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const dirty = !!draft && !!server && JSON.stringify(draft) !== JSON.stringify(server);
 
   const views = useMemo(() => new Map((data.data?.views ?? []).map((v) => [v.id, v])), [data.data]);
@@ -46,12 +54,12 @@ export function PlanPanel({ tick, agents, onRunStarted, reloadShell }: { tick: n
 
   const create = async (replace = false) => {
     setBusy('create'); setMsg('');
-    try { await post('/api/plan/draft', { goal, ...(replace && d.version ? { expectVersion: d.version } : {}) }); setGoal(''); data.reload(); } catch (e) { fail(e); } finally { setBusy(''); }
+    try { await post('/api/plan/draft', { goal, ...(replace && d.version ? { expectVersion: d.version } : {}) }); setGoal(''); adopt.current = true; data.reload(); } catch (e) { fail(e); } finally { setBusy(''); }
   };
   const save = async () => {
     if (!draft) return;
     setBusy('save'); setMsg('');
-    try { await post('/api/plan/draft', { plan: draft, expectVersion: d.version }); data.reload(); } catch (e) { fail(e); } finally { setBusy(''); }
+    try { await post('/api/plan/draft', { plan: draft, expectVersion: d.version }); adopt.current = true; data.reload(); } catch (e) { fail(e); } finally { setBusy(''); }
   };
   const patch = (fn: (p: Plan) => void) => setDraft((cur) => { if (!cur) return cur; const n = structuredClone(cur); fn(n); return n; });
   const patchPhase = (id: string, fn: (p: Phase) => void) => patch((pl) => { const ph = pl.phases.find((x) => x.id === id); if (ph) fn(ph); });
@@ -73,7 +81,7 @@ export function PlanPanel({ tick, agents, onRunStarted, reloadShell }: { tick: n
 
   const start = async (id: string): Promise<boolean> => {
     setBusy(`start-${id}`); setMsg('');
-    try { await post('/api/plan/phases/start', { phaseId: id }); onRunStarted(); data.reload(); return true; } catch (e) { fail(e); return false; } finally { setBusy(''); }
+    try { await postStart('/api/plan/phases/start', { phaseId: id }); onRunStarted(); data.reload(); return true; } catch (e) { fail(e); return false; } finally { setBusy(''); }
   };
   const verify = async (id: string) => {
     setBusy(`verify-${id}`); setMsg('');
@@ -88,34 +96,29 @@ export function PlanPanel({ tick, agents, onRunStarted, reloadShell }: { tick: n
     try { const r = await get<{ prompt: string }>(`/api/plan/phases/prompt?phaseId=${encodeURIComponent(id)}`); setPrompt({ phase: id, text: r.prompt }); } catch (e) { fail(e); }
   };
 
-  /** Bounded autonomous: one phase at a time, inside the plan's limits, until something needs a person. It cannot approve or release. */
+  /**
+   * Bounded autonomous. The companion runs the sequence (POST /api/plan/continue, the same function the phone uses) and enforces the grant, the sign-in rule and the plan's
+   * limits. This page only starts it and polls the plan for progress, so closing or reloading the page changes nothing about what is allowed.
+   */
   const runPlan = async () => {
     cancel.current = false; setAuto({ note: 'Starting…', active: true });
-    let started = 0;
     try {
+      const n = Math.max(1, Math.min(grant?.maxPhasesPerSequence ?? 1, d.plan?.limits.maxRuns ?? 10));
+      const r = await post<{ started: boolean; note: string }>('/api/plan/continue', { maxPhases: n });
+      setAuto({ note: r.note, active: true });
       for (;;) {
-        if (cancel.current) { setAuto({ note: 'Stopped by you.', active: false }); break; }
-        const cur = await get<PlanData>('/api/plan');
-        const st = await get<{ approvals: { view: string }[] }>('/api/state');
-        if (st.approvals.some((a) => a.view === 'pending')) { setAuto({ note: 'Paused: an action is waiting for your approval. Decide it, then run again.', active: false }); break; }
-        const ready = cur.views?.find((v) => v.status === 'ready');
-        const needs = cur.views?.find((v) => ['needs-evidence', 'stale'].includes(v.status));
-        if (needs && cur.plan?.phases.find((p) => p.id === needs.id)?.taskId) { setAuto({ note: `Checking ${needs.id}…`, active: true }); await post('/api/plan/phases/verify', { phaseId: needs.id }); continue; }
-        if (cur.views?.some((v) => v.status === 'failed')) { setAuto({ note: 'Stopped: a check failed. Look at it before going on.', active: false }); break; }
-        if (!ready) { setAuto({ note: cur.views?.every((v) => ['verified', 'done-unchecked', 'skipped'].includes(v.status)) ? 'Nothing left to run.' : 'Stopped: nothing is ready to run.', active: false }); break; }
-        const phase = cur.plan!.phases.find((p) => p.id === ready.id)!;
-        if (phase.kind === 'release') { setAuto({ note: 'Stopped before the release phase. A release is always your decision.', active: false }); break; }
-        if (!(phase.agent ? startable(phase.agent) : startable(cur.plan!.defaults[phase.role]?.agent))) { setAuto({ note: `Stopped: ${phase.title} is assigned to an agent that cannot be started from here. Run it in its own terminal.`, active: false }); break; }
-        if (++started > cur.plan!.limits.maxRuns) { setAuto({ note: 'Stopped at the plan\'s run limit.', active: false }); break; }
-        setAuto({ note: `Running: ${phase.title}`, active: true });
-        await post('/api/plan/phases/start', { phaseId: phase.id });
-        onRunStarted();
-        for (;;) {
-          await new Promise((ok) => setTimeout(ok, 1500));
-          if (cancel.current) { const runs = await get<{ id: string; status: string }[]>('/api/runs'); for (const r of runs.filter((x) => x.status === 'running')) await post(`/api/runs/${r.id}/stop`); setAuto({ note: 'Stopped by you, and the running agent was stopped.', active: false }); return; }
-          const now = await get<PlanData>('/api/plan');
-          if (now.views?.find((v) => v.id === phase.id)?.status !== 'running') break;
+        await new Promise((ok) => setTimeout(ok, 1500));
+        if (cancel.current) {
+          await post('/api/plan/continue', { stop: true });
+          const runs = await get<{ id: string; status: string }[]>('/api/runs');
+          const out = await stopRuns(runs.filter((x) => x.status === 'running').map((x) => x.id));
+          setAuto({ note: describeCancel(out), active: false }); break;
         }
+        const now = await get<PlanData>('/api/plan');
+        if (!now.sequence?.active) { setAuto({ note: now.sequence?.ended?.message ?? 'Nothing is running.', active: false }); break; }
+        const cur = now.views?.find((v) => v.status === 'running');
+        setAuto({ note: cur ? `Running: ${now.plan?.phases.find((p) => p.id === cur.id)?.title ?? cur.id}` : 'Working…', active: true });
+        onRunStarted();
       }
     } catch (e) { setAuto({ note: `Stopped: ${(e as ApiError).message}`, active: false }); }
     data.reload(); reloadShell();
@@ -158,6 +161,7 @@ export function PlanPanel({ tick, agents, onRunStarted, reloadShell }: { tick: n
           <label>Most time (minutes)<input type="number" min={1} value={draft.limits.maxMinutes} onChange={(e) => patch((p) => { p.limits.maxMinutes = Number(e.target.value); })} name="limit-minutes" style={{ width: 110 }} /></label>
           <label>Most agent runs<input type="number" min={1} max={40} value={draft.limits.maxRuns} onChange={(e) => patch((p) => { p.limits.maxRuns = Number(e.target.value); })} name="limit-runs" style={{ width: 110 }} /></label>
         </div>
+        <p className="small muted" data-testid="plan-usd-note">The dollar limit counts only runs on your own API key with paid API mode on. Runs on a subscription sign-in have no dollar figure and are not counted against it: use the minutes and runs limits for those.</p>
         {d.approved && d.spent ? <p className="small muted" data-testid="plan-spent">So far: ${d.spent.usd.toFixed(3)} of ${d.plan.limits.maxUsd}, {d.spent.runs} of {d.plan.limits.maxRuns} runs, {d.spent.minutes} of {d.plan.limits.maxMinutes} minutes.</p> : null}
       </fieldset>
 
@@ -210,7 +214,7 @@ export function PlanPanel({ tick, agents, onRunStarted, reloadShell }: { tick: n
               <p className="small muted">{mine ? `Agent: ${agents.find((a) => a.id === mine)?.name ?? mine}` : 'No agent chosen yet'}{ph.model ? `, model ${ph.model}` : ''}. {ph.acceptance.length ? `${ph.acceptance.filter((a) => a.kind === 'command').length} command check(s), ${ph.acceptance.filter((a) => a.kind === 'manual').length} by hand.` : 'No checks.'}</p>
               <div className="row wrap">
                 {canStart && startable(mine) ? <button className="btn small primary" disabled={!!busy || draft.mode === 'bounded' && !!auto?.active} onClick={() => void start(ph.id)} data-testid={`start-${ph.id}`}><Icon name="play" size={12} />Start</button> : null}
-                {canStart && startable(mine) && approvedNow && ph.taskId && ph.acceptance.some((a) => a.kind === 'command') && ['ready', 'failed', 'needs-evidence', 'stale'].includes(status) ? <button className="btn small" disabled={!!busy} title="Runs the agent, then the checks. If they fail it runs again with what failed, up to 3 times, and stops at the first pass." onClick={() => void loop(ph.id, 3)} data-testid={`loop-${ph.id}`}>Repeat until the checks pass (up to 3)</button> : null}
+                {canStart && startable(mine) && approvedNow && ph.taskId && ph.acceptance.some((a) => a.kind === 'command') && ['ready', 'failed', 'needs-evidence', 'stale'].includes(status) ? <button className="btn small" disabled={!!busy || !unattended} title={unattended ? 'Runs the agent, then the checks. If they fail it runs again with what failed, up to 3 times, and stops at the first pass.' : 'Off: unattended runs are not allowed. Turn them on below, or use Start to run this phase once.'} onClick={() => void loop(ph.id, 3)} data-testid={`loop-${ph.id}`}>Repeat until the checks pass (up to 3)</button> : null}
                 {status === 'running' ? <button className="btn small" onClick={() => void stopLoop(ph.id)} data-testid={`stoploop-${ph.id}`}>Stop</button> : null}
                 {canStart && !startable(mine) ? <button className="btn small" onClick={() => void showPrompt(ph.id)} data-testid={`prompt-${ph.id}`}>Copy the prompt for {agents.find((a) => a.id === mine)?.name ?? 'an agent'}</button> : null}
                 {approvedNow && ph.taskId && ['needs-evidence', 'stale', 'failed', 'ready', 'blocked'].includes(status) && (v?.runs ?? 0) > 0 ? <button className="btn small" disabled={!!busy} onClick={() => void verify(ph.id)} data-testid={`verify-${ph.id}`}>Run the checks</button> : null}
@@ -230,10 +234,22 @@ export function PlanPanel({ tick, agents, onRunStarted, reloadShell }: { tick: n
         {dirty ? <button className="btn primary" onClick={() => void save()} disabled={!!busy} data-testid="plan-save">Save changes</button> : null}
         {dirty ? <button className="btn" onClick={() => setDraft(structuredClone(server))}>Discard changes</button> : null}
         {!dirty && !d.approved ? <button className="btn primary" data-testid="plan-approve" onClick={() => ask({ title: 'Approve this plan', detail: <div className="stack small"><p>This allows the phases below to be started, with exactly these agents, models, checks and limits. Any change to them needs a new approval. Approving starts nothing, and releasing is never automatic.</p><ol>{server!.phases.map((p) => <li key={p.id}><b>{p.title}</b>, {p.agent ?? server!.defaults[p.role]?.agent ?? 'default agent'}{p.acceptance.filter((a) => a.kind === 'command').map((a) => <div key={a.id} className="mono">runs: {a.command}</div>)}</li>)}</ol><p>Limits: ${server!.limits.maxUsd}, {server!.limits.maxMinutes} minutes, {server!.limits.maxRuns} runs. Mode: {server!.mode}.</p></div>, path: '/api/plan/approve', body: { sha256: d.sha, expectVersion: d.version } })}>Approve the plan…</button> : null}
-        {!dirty && d.approved && draft.mode === 'bounded' ? (auto?.active ? <button className="btn" onClick={() => { cancel.current = true; }} data-testid="plan-stop">Stop</button> : <button className="btn primary" onClick={() => void runPlan()} data-testid="plan-run">Run the plan within its limits</button>) : null}
+        {!dirty && d.approved && draft.mode === 'bounded' ? (auto?.active ? <button className="btn" onClick={() => { cancel.current = true; }} data-testid="plan-stop">Stop</button> : <span className="row wrap"><button className="btn primary" disabled={!unattended} onClick={() => void runPlan()} data-testid="plan-run">Run the plan within its limits</button>{unattended ? null : <span className="muted small" data-testid="plan-run-off">Off: running phases back to back is an unattended run. Turn on "Unattended runs" below, or start each phase yourself.</span>}</span>) : null}
         <button className="btn small" onClick={() => { if (window.confirm('Replace this plan with a new one? The old plan stays in the record.')) { setGoal(draft.goal); void post('/api/plan/draft', { goal: draft.goal, expectVersion: d.version }).then(() => data.reload()).catch(fail); } }}>Draft again from the same goal</button>
       </div>
       {auto ? <p role="status" data-testid="plan-auto">{auto.note}</p> : null}
+      <div className="row wrap small" data-testid="unattended-row">
+        <span className="muted">Unattended runs (repeating a phase, or continuing several phases, with nobody acting between runs): <b>{unattended ? 'on' : 'off'}</b>{unattended && grant ? `, ${grant.remainingRuns} of ${grant.maxRuns} runs left, until ${new Date(grant.expiresAt).toLocaleString()}, this project only` : ''}. Even when on, they run only with an API-key sign-in under paid API mode.</span>
+        <button className="btn small" data-testid="unattended-toggle" onClick={() => ask(unattended
+          ? { title: 'Turn unattended runs off', path: '/api/settings/unattended', body: { allow: false } }
+          : { title: 'Allow unattended runs', detail: <p className="small">This gives THIS project a limited grant (up to 5 runs, for 4 hours), after which a plan can repeat a phase or continue through several phases without you pressing Start each time. Provider permission for unattended automation on a subscription sign-in is unresolved, so the companion refuses these runs unless the agent is signed in with your own API key and paid API mode is on; otherwise start each phase yourself. Each run is still bounded by the plan's limits, and nothing is approved for you.</p>, path: '/api/settings/unattended', body: { allow: true } })}>{unattended ? 'Turn off…' : 'Allow unattended runs…'}</button>
+      </div>
+      <div className="row wrap small" data-testid="mobile-exec-row">
+        <span className="muted">Starting agents from a paired phone: <b>{mobileExec ? 'on' : 'off'}</b>. Viewing, stopping and approving from a phone do not depend on this.</span>
+        <button className="btn small" data-testid="mobile-exec-toggle" onClick={() => ask(mobileExec
+          ? { title: 'Stop phones from starting agents', path: '/api/settings/mobile-execution', body: { allow: false } }
+          : { title: 'Let a paired phone start agents', detail: <p className="small">A paired phone will be able to start agent runs and sessions on this computer, inside the same limits. Turn this off again at any time.</p>, path: '/api/settings/mobile-execution', body: { allow: true } })}>{mobileExec ? 'Turn off…' : 'Allow phone starts…'}</button>
+      </div>
       {d.approved && !dirty ? null : <p className="muted small">{dirty ? 'You have unsaved changes.' : 'Nothing can start until you approve the plan.'}</p>}
       {!d.plan.phases.length ? <Empty>No phases.</Empty> : null}
     </div>

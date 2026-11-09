@@ -1,0 +1,165 @@
+{
+  "date": "2026-11-05",
+  "what": "Real Claude Code on the signed-in subscription. Script: scripts/bench-components.mjs",
+  "task": "Create a file named hello.txt containing exactly the text: hi. Then reply with the single word done.",
+  "trialsEach": 3,
+  "model": "haiku",
+  "trials": {
+    "native": [
+      {
+        "seconds": 8.7,
+        "correct": true,
+        "input": 4,
+        "output": 115,
+        "cacheRead": 44324,
+        "cacheCreate": 18127,
+        "turns": 2
+      },
+      {
+        "seconds": 8.5,
+        "correct": true,
+        "input": 4,
+        "output": 162,
+        "cacheRead": 44324,
+        "cacheCreate": 13349,
+        "turns": 2
+      },
+      {
+        "seconds": 5.6,
+        "correct": true,
+        "input": 4,
+        "output": 115,
+        "cacheRead": 44324,
+        "cacheCreate": 13349,
+        "turns": 2
+      }
+    ],
+    "hooks-quiet": [
+      {
+        "seconds": 8.9,
+        "correct": true,
+        "input": 4,
+        "output": 283,
+        "cacheRead": 41046,
+        "cacheCreate": 14934,
+        "turns": 2
+      },
+      {
+        "seconds": 9.7,
+        "correct": true,
+        "input": 4,
+        "output": 297,
+        "cacheRead": 41046,
+        "cacheCreate": 14934,
+        "turns": 2
+      },
+      {
+        "seconds": 10.8,
+        "correct": true,
+        "input": 4,
+        "output": 265,
+        "cacheRead": 41046,
+        "cacheCreate": 14934,
+        "turns": 2
+      }
+    ],
+    "hooks-brief-always": [
+      {
+        "seconds": 10.8,
+        "correct": true,
+        "input": 4,
+        "output": 429,
+        "cacheRead": 48294,
+        "cacheCreate": 15089,
+        "turns": 2
+      },
+      {
+        "seconds": 14.2,
+        "correct": true,
+        "input": 4,
+        "output": 507,
+        "cacheRead": 48294,
+        "cacheCreate": 15117,
+        "turns": 2
+      },
+      {
+        "seconds": 11.9,
+        "correct": true,
+        "input": 4,
+        "output": 347,
+        "cacheRead": 48294,
+        "cacheCreate": 15075,
+        "turns": 2
+      }
+    ],
+    "hooks-default": [
+      {
+        "seconds": 10.8,
+        "correct": true,
+        "input": 4,
+        "output": 278,
+        "cacheRead": 48203,
+        "cacheCreate": 14838,
+        "turns": 2
+      },
+      {
+        "seconds": 14.2,
+        "correct": true,
+        "input": 4,
+        "output": 425,
+        "cacheRead": 48203,
+        "cacheCreate": 14914,
+        "turns": 2
+      },
+      {
+        "seconds": 10.5,
+        "correct": true,
+        "input": 4,
+        "output": 271,
+        "cacheRead": 41042,
+        "cacheCreate": 14926,
+        "turns": 2
+      }
+    ]
+  },
+  "median": {
+    "native": {
+      "seconds": 8.5,
+      "input": 4,
+      "output": 115,
+      "cacheRead": 44324,
+      "cacheCreate": 13349,
+      "turns": 2
+    },
+    "hooks-quiet": {
+      "seconds": 9.7,
+      "input": 4,
+      "output": 283,
+      "cacheRead": 41046,
+      "cacheCreate": 14934,
+      "turns": 2
+    },
+    "hooks-brief-always": {
+      "seconds": 11.9,
+      "input": 4,
+      "output": 429,
+      "cacheRead": 48294,
+      "cacheCreate": 15089,
+      "turns": 2
+    },
+    "hooks-default": {
+      "seconds": 10.8,
+      "input": 4,
+      "output": 278,
+      "cacheRead": 48203,
+      "cacheCreate": 14914,
+      "turns": 2
+    }
+  },
+  "correct": {
+    "native": "3/3",
+    "hooks-quiet": "3/3",
+    "hooks-brief-always": "3/3",
+    "hooks-default": "3/3"
+  }
+}

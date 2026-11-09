@@ -2,7 +2,7 @@
   "name": "agentontrack-vscode",
   "displayName": "AgentOnTrack",
   "description": "Goals, approvals, evidence and handoffs for your AI coding agents, from the editor. Local-first: it talks only to the AgentOnTrack companion on this machine.",
-  "version": "1.0.0-rc.3",
+  "version": "1.0.0-rc.7",
   "private": true,
   "publisher": "satyamamarpandey",
   "license": "Apache-2.0",

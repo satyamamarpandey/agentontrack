@@ -1,9 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { get, post } from './api';
+import { get, post, postStart, stopRun, uploadAttachment, type UploadedFile } from './api';
 import { Modal, useHuman } from './human';
 import { Icon } from './icons';
 import { Badge, Empty, useLoad } from './ui';
 import { ModelField, useDiscovery } from './model-field';
+import { DEFAULT_LIMITS, LimitFields, limitsBody, type RunLimits } from './limits';
 
 const ROLES = ['implement', 'review', 'debug', 'test', 'research', 'analyze', 'classify', 'verify'] as const;
 const WORKFLOWS = ['implement-review-verify', 'parallel-then-compare', 'review-only', 'spec-review'] as const;
@@ -17,8 +18,11 @@ export function AgentTab({ tick }: { tick: number }) {
   const [prompt, setPrompt] = useState('');
   const [runtime, setRuntime] = useState('claude-code');
   const [model, setModel] = useState('haiku');
-  const [budget, setBudget] = useState(0.25);
+  const [limits, setLimits] = useState<RunLimits>(DEFAULT_LIMITS);
   const [msg, setMsg] = useState('');
+  const [files, setFiles] = useState<UploadedFile[]>([]);
+  const [resumeFrom, setResumeFrom] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
   const [sent, setSent] = useState<Record<string, string>>({});
   useEffect(() => { const t = setInterval(runs.reload, 1500); return () => clearInterval(t); }, [runs.reload]);
   // What can really be started is decided by the companion, per runtime. A Run control exists only for one that can.
@@ -29,12 +33,24 @@ export function AgentTab({ tick }: { tick: number }) {
   const chosen = options.find((r) => r.id === runtime);
   const canStart = !!chosen?.canStart;
   useEffect(() => { if (runtimes.data && !runtimes.data.find((r) => r.id === runtime)?.canStart && startable[0]) setRuntime(startable[0].id); }, [runtimes.data]); // eslint-disable-line react-hooks/exhaustive-deps
+  const MAX_FILES = 5;
+  const addFiles = async (list: File[]) => {
+    setMsg('');
+    for (const f of list) {
+      if (files.length >= MAX_FILES) { setMsg(`At most ${MAX_FILES} files per prompt.`); break; }
+      if (f.size > 5 * 1024 * 1024) { setMsg(`${f.name || 'That file'} is larger than 5 MB.`); continue; }
+      try { const up = await uploadAttachment(f); setFiles((cur) => (cur.some((x) => x.id === up.id) || cur.length >= MAX_FILES ? cur : [...cur, up])); }
+      catch (e) { setMsg((e as Error).message); }
+    }
+  };
   const submit = async () => {
     setMsg('');
     try {
-      const r = await post<{ id: string }>('/api/runs', { runtime, prompt, model, maxBudgetUsd: budget });
+      const r = await postStart<{ id: string }>('/api/runs', { runtime, prompt, model, ...limitsBody(limits, !!chosen?.dollarCap), ...(files.length ? { attachments: files.map((f) => f.id) } : {}), ...(resumeFrom ? { resumeRunId: resumeFrom } : {}) });
       setSent((s) => ({ ...s, [r.id]: prompt }));
       setPrompt('');
+      setFiles([]);
+      setResumeFrom(null);
       runs.reload();
     } catch (e) { setMsg((e as Error).message); }
   };
@@ -44,17 +60,26 @@ export function AgentTab({ tick }: { tick: number }) {
         {runs.data?.length ? [...runs.data].reverse().map((r) => (
           <article className="msg" key={r.id} data-testid="ws-run-item" data-status={r.status}>
             <header><b className="mono">{r.id}</b><Badge value={r.status} /><span>started {ago(r.started)}</span>
-              {r.status === 'running' ? <button className="btn small" style={{ marginLeft: 'auto' }} onClick={async () => { await post(`/api/runs/${r.id}/stop`); runs.reload(); }}><Icon name="stop" size={12} />Stop</button> : null}
+              {r.status !== 'running' ? <button className="btn small" style={{ marginLeft: 'auto' }} type="button" onClick={() => setResumeFrom(r.id)} data-testid="ws-continue" title="Send the next prompt into this run's session, if the agent left one">Continue</button> : null}
+              {r.status === 'running' ? <button className="btn small" style={{ marginLeft: 'auto' }} onClick={async () => { setMsg(''); try { const out = await stopRun(r.id); if (!out.stopped && out.message) setMsg(out.message); } catch (e) { setMsg((e as Error).message); } finally { runs.reload(); } }}><Icon name="stop" size={12} />Stop</button> : null}
             </header>
             {sent[r.id] ? <p className="small"><span className="muted">You: </span>{sent[r.id]}</p> : <p className="small muted">The prompt is not stored, only its hash.</p>}
             <pre tabIndex={0}>{r.events.join('\n') || 'Waiting for output…'}</pre>
           </article>
         )) : <Empty>No runs since the companion started. Write a prompt below to start one on Claude Code.</Empty>}
       </div>
-      <form className="composer" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
+      <form className={`composer${dragging ? ' dragging' : ''}`} onSubmit={(e) => { e.preventDefault(); void submit(); }}
+        onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDragging(true); } }} onDragLeave={() => setDragging(false)}
+        onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); setDragging(false); void addFiles([...e.dataTransfer.files]); } }}>
         {msg ? <div className="alert bad" role="alert">{msg}</div> : null}
-        <label>Prompt<textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} name="prompt" required placeholder="What should the agent do? It works inside the goal you approved."
+        <label>Prompt<textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} name="prompt" required onPaste={(e) => { const fl = [...e.clipboardData.files]; if (fl.length) { e.preventDefault(); void addFiles(fl); } }} placeholder="What should the agent do? It works inside the goal you approved."
           onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); if (prompt.trim() && canStart) void submit(); } }} /></label>
+        {resumeFrom ? <p className="small" data-testid="ws-resume-chip">Continuing <b className="mono">{resumeFrom}</b> <button type="button" className="btn small" onClick={() => setResumeFrom(null)}>Start fresh instead</button></p> : null}
+        <div className="row wrap" data-testid="ws-attachments">
+          <label className="btn small">Attach files<input type="file" multiple hidden accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,.md,.txt,.json,.csv" onChange={(e) => { void addFiles([...(e.target.files ?? [])]); e.target.value = ''; }} /></label>
+          {files.map((f) => <span key={f.id} className="chip" data-testid="ws-attachment">{f.name} <span className="muted">({f.kind}, {Math.max(1, Math.round(f.bytes / 1024))} KB)</span> <button type="button" aria-label={`Remove ${f.name}`} onClick={() => setFiles((cur) => cur.filter((x) => x.id !== f.id))}>×</button></span>)}
+          <span className="muted small" data-testid="ws-attach-note">{runtime === 'codex' ? 'Images or text, up to 5 MB. Codex has no PDF input here: a PDF is only named by its path, and Codex may not read it. Sent as data to read, not instructions.' : 'Images, PDF or text, up to 5 MB. Sent to the agent as data to read, not instructions.'}</span>
+        </div>
         <div className="row wrap">
           <label>Agent
             <select value={runtime} onChange={(e) => setRuntime(e.target.value)} name="runtime">
@@ -64,9 +89,10 @@ export function AgentTab({ tick }: { tick: number }) {
             </select>
           </label>
           <ModelField agent={runtime} value={model} onChange={setModel} name="model" models={disc.data?.models} width={150} placeholder="haiku" />
-          <label>Budget cap (USD)<input type="number" min={0.01} max={5} step={0.01} value={budget} onChange={(e) => setBudget(Number(e.target.value))} name="budget" style={{ width: 110 }} /></label>
+          <LimitFields value={limits} onChange={setLimits} dollarCap={!!chosen?.dollarCap} name="limit" width={110} />
           <button className="btn primary end-self" type="submit" disabled={!canStart || !prompt.trim()} data-testid="ws-run"><Icon name="play" size={12} />Run <kbd>Ctrl ↵</kbd></button>
         </div>
+        {chosen?.authMode === 'subscription' ? <p className="muted small" data-testid="auth-mode">Signed in with your subscription. No API key is passed to the agent.</p> : chosen?.authMode === 'api-key' ? <p className="alert bad small" data-testid="auth-mode">This agent is signed in with an API key or cloud account, which bills by use. It will not start unless paid API mode is turned on.</p> : null}
         <p className="muted small" data-testid="run-note">{canStart ? 'This starts your own logged-in agent, uses your usage, and is capped per run. Others start in their own terminal and report here.' : (chosen?.reason ?? startable.length ? chosen?.reason : 'No agent can be started from here yet. Connect Claude Code in the Agents tab, or start an agent in its own terminal: it reports here.')}</p>
       </form>
     </>

@@ -22,7 +22,7 @@ const PROJECT_VIEW = [
 // What each agent really is here. "Live-tested" is only ever Claude Code. The integrations page has the evidence for the rest.
 const AGENTS: [string, string, string][] = [
   ['Claude Code', 'Anthropic', 'Live-tested. Start runs from the workspace.'],
-  ['Codex', 'OpenAI models', 'Hooks tested against the real program with a scripted model. Starts in its own terminal.'],
+  ['Codex', 'OpenAI models', 'Hooks tested against the real program; also run for real, logged in through ChatGPT, on one Windows machine. Can be started from AgentOnTrack.'],
   ['Hermes', 'Nous Research', 'Real program, scripted model. Starts in its own terminal.'],
   ['Gemini CLI, Cursor, Copilot, Devin, OpenCode, Kiro, Cline', 'Several vendors', "Adapters written from each tool's documented hooks. Not yet run on the real programs."],
 ];

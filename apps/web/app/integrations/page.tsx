@@ -9,7 +9,7 @@ export default function Integrations() {
   return (
     <Article title="Integrations" intro="An agent runtime and a model API are different things. A runtime has tools, hooks and sessions, and is what AgentOnTrack gates. A model API only answers. Each row says exactly what was run. All of it is self-run.">
       <h2 id="runtimes">Platforms</h2>
-      <p>Everything here is in release 1.0.0-rc.4, including adapters that have never run on the real programs. Check a platform's status before relying on it.</p>
+      <p>This table describes the current source, which includes adapters that have never run on the real programs. The stable download is 1.0.0-rc.3 and may differ from it; a newer preview is described on the install page. Check a platform's status before relying on it.</p>
       <p>Only what was seen on the real program counts. A scripted model means the real program, hooks and shell, with planned tool calls, which tests the host and the gate, not how a model behaves. Blocked means it needs an account or paid plan we do not have, so it has <b>not</b> been shown to work. Connection status for your own machine is on the <a href="../dashboard/">dashboard</a>, in Agents. Names are shown as text, since these products' logos belong to their owners, and this project is not affiliated with any of them.</p>
       {data ? <Catalog entries={data.entries} /> : <p>Unavailable</p>}
 
@@ -19,7 +19,7 @@ export default function Integrations() {
         <thead><tr><th scope="col">Model source</th><th scope="col">Reached through</th><th scope="col">What was run</th></tr></thead>
         <tbody>
           <tr><th scope="row">Anthropic, Claude Haiku</th><td>Claude Code's own login</td><td>Real runs and the matched benchmark. No other Claude model was benchmarked</td></tr>
-          <tr><th scope="row">OpenAI hosted models</th><td>Codex</td><td>Not tested: needs a login the owner has not provided</td></tr>
+          <tr><th scope="row">OpenAI hosted models</th><td>Codex</td><td>Run for real, logged in through ChatGPT, on one Windows machine, in a few trials. Not run on Linux or macOS</td></tr>
           <tr><th scope="row">Hermes hosted models</th><td>Hermes</td><td>Not tested: needs a login the owner has not provided</td></tr>
           {(data?.models ?? []).map((m: any) => <tr key={m.name}><th scope="row">{m.name}</th><td>{m.through}</td><td>{m.result}</td></tr>)}
         </tbody>

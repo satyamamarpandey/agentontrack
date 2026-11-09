@@ -22,3 +22,18 @@ packages/vscode/out
 packages/vscode/.vscode-test
 packages/vscode/LICENSE
 *.vsix
+
+# Optional local settings and keys. Never commit. e.env.example is the documented template.
+e.env
+e.env.*
+!e.env.example
+
+# Local test and tool leftovers that were committed by mistake once. The clean-install report is written to the working directory on purpose (the release
+# workflow uploads it from there), and it records local paths, so it must never be committed.
+/clean-install-*.json
+/Microsoft/
+test-results-repeat/
+
+firebase-debug.log
+firestore-debug.log
+ui-debug.log

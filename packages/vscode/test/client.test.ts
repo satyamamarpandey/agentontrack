@@ -107,7 +107,7 @@ describe('confirming', () => {
     await client.pair(c.newPairingCode());
     await expect(client.post('/api/runs', { runtime: 'claude-code', prompt: 'do something', model: 'haiku', maxBudgetUsd: 0.1 })).rejects.toBeInstanceOf(NeedsCode);
     await expect(client.postConfirmed('/api/runs', { runtime: 'claude-code', prompt: 'do something', model: 'haiku', maxBudgetUsd: 0.1 }, async () => codes.at(-1)!.code)).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/Connect Claude Code/) });
-    await expect(client.postConfirmed('/api/runs', { runtime: 'codex', prompt: 'x', model: 'haiku', maxBudgetUsd: 0.1 }, async () => codes.at(-1)!.code)).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/not built/) });
+    await expect(client.postConfirmed('/api/runs', { runtime: 'codex', prompt: 'x', model: 'haiku', maxBudgetUsd: 0.1 }, async () => codes.at(-1)!.code)).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/Connect Codex/) });
   });
 });
 

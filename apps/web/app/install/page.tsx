@@ -1,6 +1,6 @@
 import { Article, ReleaseNotice, Term } from '../content';
 import Link from '../link';
-import { assetName, assetUrl, ISSUES, INSTALL_PS1, INSTALL_SH, NOTICE, PLATFORMS, RELEASE_PUBLISHED, RELEASE_VERSION, RELEASES } from '../../lib/release';
+import { assetName, assetUrl, ISSUES, INSTALL_PS1, INSTALL_SH, NOTICE, PLATFORMS, PREVIEW_PUBLISHED, PREVIEW_VERSION, RELEASE_PUBLISHED, RELEASE_VERSION, RELEASES } from '../../lib/release';
 
 export const metadata = { title: 'Install' };
 
@@ -11,6 +11,23 @@ export default function Install() {
   return (
     <Article title="Install AgentOnTrack" intro="For one user, with no administrator rights and nothing else required: the download includes its own runtime. The installer checks each file against the published checksum, and installs nothing if they differ.">
       <ReleaseNotice />
+
+      {PREVIEW_PUBLISHED ? (
+        <section id="preview" aria-labelledby="preview-h" data-testid="preview-release">
+          <h2 id="preview-h">Preview: {PREVIEW_VERSION} (a pre-release, not the stable release)</h2>
+          <p>A desktop preview for people who want to try newer work. It is published as a GitHub pre-release, so the plain installer above does not install it; spell the version out:</p>
+          <Term label="Install the preview on Linux and macOS">{`curl -fsSL https://pandeysatyam.com/agentontrack/install.sh | sh -s -- --version ${PREVIEW_VERSION}`}</Term>
+          <Term label="Install the preview on Windows PowerShell">{`$env:AOT_VERSION = '${PREVIEW_VERSION}'; irm https://pandeysatyam.com/agentontrack/install.ps1 | iex`}</Term>
+          <ul>
+            <li>Desktop only. Phone control is switched off in this preview.</li>
+            <li>Running several phases in a row, repeating a phase until its checks pass, and phone-started runs are refused for agents signed in with a subscription. They need your own API key in paid API mode and a time-limited grant you create with the terminal confirmation code.</li>
+            <li>Whether the providers' terms allow every way a tool like this can start Claude Code and Codex has not been confirmed by either provider. A single run you start yourself uses your own login on your own computer.</li>
+            <li>Not equal to Claude Code or Codex: there is no fork, reasoning-effort choice, mid-run steering or queueing, native audio, or subagent management. Voice dictation has not been verified with a real microphone.</li>
+            <li>Not code-signed, and tested by the project itself only.</li>
+          </ul>
+          <p><a data-testid="preview-notes" href={`${RELEASES}/tag/v${PREVIEW_VERSION}`}>Release notes, checksums and downloads for {PREVIEW_VERSION}</a>. The stable download below is unchanged.</p>
+        </section>
+      ) : null}
 
       <h2 id="linux-macos">Linux and macOS</h2>
       <Term label="Install command for Linux and macOS">{INSTALL_SH}</Term>

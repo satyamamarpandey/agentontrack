@@ -2,9 +2,9 @@
 
 **Set the goal. Approve what matters. Let independent checks decide when the work is done.**
 
-A free, open-source, local-first control layer for AI coding agents. It uses your agent's own hooks and your own login, with no account and no upload.
+A free, open-source, local-first control layer for AI coding agents. It uses your agent's own hooks and your own login, with no AgentOnTrack account required for local use. AgentOnTrack does not upload local project records by default; Claude Code and Codex still send what they process to their own providers, and optional cloud features are separately disclosed and experimental.
 
-> **Status: 1.0.0-rc.3, a release candidate, published.** Website: https://pandeysatyam.com/agentontrack/. Best tested on Claude Code, the only agent the product can start. Codex and Hermes have been run only with small local or scripted models, and Cursor, Devin, Kiro and Antigravity have not run on the real programs. See [compatibility](docs/compatibility.md). All testing is by the project itself, and nobody independent has evaluated it.
+> **Status: the stable download is 1.0.0-rc.3, a release candidate. 1.0.0-rc.5, 1.0.0-rc.6 and any later 1.0.0-rc versions are pre-releases (desktop previews), which the plain one-line installer does not install: give the version, as docs/release/NOTES.md shows.** Website: https://pandeysatyam.com/agentontrack/. Best tested on Claude Code, which the product can start (also inside an isolated git worktree; one real run each). Codex can be started through its app-server and was run once against a real Codex, including a Claude Code ↔ Codex cross-review in both orders (one trial each, before the rc.7 gate that now requires an API-key grant for the automatic version; see [docs/codex-setup.md](docs/codex-setup.md)). Hermes has been run only with small local or scripted models, and Cursor, Devin, Kiro and Antigravity have not run on the real programs. See [compatibility](docs/compatibility.md). All testing is by the project itself, and nobody independent has evaluated it.
 
 ## What it does
 
@@ -64,6 +64,6 @@ From [benchmark v4](benchmarks/README.md): self-run, small fixtures we wrote, on
 
 ## Docs
 
-[Install and troubleshooting](docs/install.md) · [Phone remote control](docs/workspace/PHONE.md) · [Compatibility](docs/compatibility.md) · [Security limits](SECURITY.md) · [Integrity trust model](docs/security/integrity.md) · [Benchmarks](benchmarks/README.md) · [Evaluate it yourself](docs/evaluation/INDEPENDENT.md) · [Changelog](CHANGELOG.md)
+[User guide](docs/GUIDE.md) · [Install and troubleshooting](docs/install.md) · [Phone remote control](docs/workspace/PHONE.md) · [Compatibility](docs/compatibility.md) · [Security limits](SECURITY.md) · [Integrity trust model](docs/security/integrity.md) · [Benchmarks](benchmarks/README.md) · [Evaluate it yourself](docs/evaluation/INDEPENDENT.md) · [Changelog](CHANGELOG.md)
 
 Not affiliated with or endorsed by Anthropic, OpenAI or Nous Research. Licensed under Apache-2.0.

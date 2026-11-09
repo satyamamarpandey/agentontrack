@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { classifyCommand, type Coverage, type Effect, type Project } from '@agentontrack/core';
 import * as z from 'zod/v4';
@@ -10,10 +11,25 @@ export interface MappedAction { effects: Effect[]; opaque: boolean; coverage: Co
 
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell', 'shell']);
 
+/**
+ * Claude Code's Bash tool on Windows runs Git Bash, where "/tmp/x" is the Windows temp folder and "/d/x" is drive D. Read as plain Windows paths those
+ * point at C:/tmp and C:/d, so a write inside the project was judged to be outside it and held for approval (seen with a real agent:
+ * benchmarks/results/live-loop.json). Only the Bash tool is translated; PowerShell paths mean what they say. A path not in this form is unchanged.
+ */
+export function msysToWindows(target: string, tmp: string = tmpdir()): string {
+  const drive = /^\/(?:cygdrive\/)?([a-zA-Z])(?=\/|$)(.*)$/.exec(target);
+  if (drive) return `${drive[1]!.toUpperCase()}:${drive[2] || '/'}`;
+  const t = /^\/tmp(?=\/|$)(.*)$/.exec(target);
+  if (t) return `${tmp.split('\\').join('/')}${t[1]}`;
+  return target;
+}
+const shellEffects = (tool: string, effects: Effect[]): Effect[] =>
+  tool === 'Bash' && process.platform === 'win32' ? effects.map((e) => (e.kind.startsWith('fs.') ? { ...e, target: msysToWindows(e.target) } : e)) : effects;
+
 export function mapClaudeTool(tool: string, input: any): MappedAction {
   if (SHELL_TOOLS.has(tool)) {
     const c = classifyCommand(String(input?.command ?? ''));
-    return { effects: c.effects, opaque: c.opaque, coverage: 'enforced' };
+    return { effects: shellEffects(tool, c.effects), opaque: c.opaque, coverage: 'enforced' };
   }
   switch (tool) {
     case 'Write': case 'Edit': case 'MultiEdit':
@@ -130,6 +146,9 @@ const context = (event: string, text: string): HookOutput => ({
 });
 
 /** Same flow for both runtimes. Codex's `ask` fails open, so neither uses it: approval means deny and retry after a human grants it. */
+/** Warnings that are recorded but not shown to the agent, because it can do nothing about them. */
+const NOT_ACTIONABLE = /^No active task/;
+
 export function handleHook(project: Project, runtime: RuntimeId, rawStdin: string): HookOutput {
   if (runtime === 'hermes') return handleHermesHook(project, rawStdin);
   const p = HookPayload.parse(JSON.parse(rawStdin));
@@ -145,7 +164,7 @@ export function handleHook(project: Project, runtime: RuntimeId, rawStdin: strin
       if (sessionId) project.bindSession(sessionId);
       if (p.source === 'compact' || event === 'PostCompact') project.resetContext();
       if (event === 'PostCompact') return { exitCode: 0 };
-      return context(event, project.rehydrate(sessionId));
+      { const brief = project.rehydrateIfUseful(sessionId, { always: process.env.AGENTONTRACK_BRIEF === 'always' }); return brief ? context(event, brief) : { exitCode: 0 }; }
     case 'UserPromptSubmit':
       return { exitCode: 0 };
     case 'PreToolUse': {
@@ -159,7 +178,10 @@ export function handleHook(project: Project, runtime: RuntimeId, rawStdin: strin
       if (r.decision === 'request_approval') {
         return deny(event, `AgentOnTrack needs human approval: ${r.reasons.join('; ')}. Do not retry or work around this. Tell the user to run ${r.approvalIds.map((i) => `agentontrack approve ${i}`).join(' && ')} in their own terminal, then carry on with anything else.`);
       }
-      return r.warnings.length ? context(event, `AgentOnTrack: ${r.warnings.join('; ')}`) : { exitCode: 0 };
+      // A warning the agent cannot act on (only a person creates a task) stays in the record and is not sent to the model: it cost output tokens
+      // and time on every tool call (benchmarks/results/bench-components.json).
+      const forModel = r.warnings.filter((w) => !NOT_ACTIONABLE.test(w));
+      return forModel.length ? context(event, `AgentOnTrack: ${forModel.join('; ')}`) : { exitCode: 0 };
     }
     case 'PostToolUse': {
       const tool = p.tool_name ?? '';
@@ -299,7 +321,7 @@ export function coverageFor(runtime: RuntimeId): CoverageReport {
     observedOnly: ['file effects of opaque scripts inside the project root'],
     unsupported: ['hosted tools such as WebSearch', 'specialized tool paths that opt out of hooks', 'network and process effects of opaque scripts'],
     evidence: 'live-local-model',
-    notes: ['Codex 0.166.0 was run for real in a cloud runner with a small local model: a push was held, then allowed after approval. Not tested with OpenAI models.', 'Codex skips a hook until its definition hash is trusted, so installing it does not by itself enforce anything.', 'If the hook program is missing, Codex runs the action anyway: FAIL-OPEN, observed on the real host, so the gate cannot be a hard boundary on Codex. Start it with `agentontrack run codex`, which refuses to launch unless the hook answers, and uses the Codex OS sandbox with the network off. Files changed with no gate firing are caught at verify. A push made that way is not.'],
+    notes: ['Codex 0.166.0 was run for real in a cloud runner with a small local model: a push was held, then allowed after approval. Later, 0.167.0-alpha.3 was also run logged in through ChatGPT on one Windows machine (see docs/PRODUCT_READINESS.md).', 'Codex skips a hook until its definition hash is trusted, so installing it does not by itself enforce anything.', 'If the hook program is missing, Codex runs the action anyway: FAIL-OPEN, observed on the real host, so the gate cannot be a hard boundary on Codex. Start it with `agentontrack run codex`, which refuses to launch unless the hook answers, and uses the Codex OS sandbox with the network off. Files changed with no gate firing are caught at verify. A push made that way is not.'],
   };
 }
 
@@ -467,3 +489,40 @@ export async function probeLocalModel(baseUrl: string, model?: string, fetchImpl
 
 export * from './providers.js';
 export * from './discovery.js';
+export * from './runtime-capabilities.js';
+export * from './codex-exec.js';
+export * from './codex-appserver.js';
+export * from './auth-mode.js';
+export * from './proctree.js';
+
+/**
+ * A worktree is a separate folder, so an agent started there does not see the project's untracked hook settings. This copies the project's AgentOnTrack
+ * hooks into the worktree's local settings file (`.claude/settings.local.json`, which the diff and commit helpers leave out) and runs the same refusal
+ * test from the worktree folder. The hook command names the main project, so the worktree's actions are judged and recorded there.
+ */
+export const WORKTREE_HOOK_FILE = '.claude/settings.local.json';
+export function mirrorHooksToWorktree(mainRoot: string, wtPath: string): HookSelfTest {
+  const fix = 'Connect Claude Code to this project first, then retry';
+  const src = configPath('claude-code', mainRoot);
+  let hooks: any; let command: string | undefined;
+  try {
+    const cfg = JSON.parse(readFileSync(src, 'utf8'));
+    hooks = cfg.hooks;
+    command = (hooks?.PreToolUse ?? []).flatMap((g: any) => g.hooks ?? []).find(isOurs)?.command;
+  } catch { return { ok: false, detail: `No readable hook file at ${src}`, fix }; }
+  if (!command) return { ok: false, detail: 'The project has no AgentOnTrack hooks to copy', fix };
+  // The agent's own project folder is the worktree, so the command must say which project's record to use.
+  const flag = ` --root "${mainRoot.split('\\').join('/')}"`;
+  for (const g of Object.values<any>(hooks)) for (const grp of g as any[]) for (const h of grp.hooks ?? []) if (isOurs(h) && typeof h.command === 'string' && !h.command.includes(' --root ')) h.command += flag;
+  command += flag;
+  const dst = join(wtPath, WORKTREE_HOOK_FILE);
+  let cur: any = {};
+  try { if (existsSync(dst)) cur = JSON.parse(readFileSync(dst, 'utf8')); } catch { cur = {}; }
+  cur.hooks = hooks;
+  mkdirSync(dirname(dst), { recursive: true });
+  writeFileSync(dst, `${JSON.stringify(cur, null, 2)}\n`);
+  const input = JSON.stringify({ session_id: 'agentontrack-selftest', cwd: wtPath, hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'agentontrack approve selftest' } });
+  const r = spawnSync(command, { shell: true, input, encoding: 'utf8', timeout: 30_000, cwd: wtPath, env: { ...process.env, AGENTONTRACK_ROOT: mainRoot } });
+  if (r.status === 0 && /"permissionDecision":"deny"/.test(r.stdout ?? '')) return { ok: true, detail: 'The hook program ran from the worktree and refused a test request' };
+  return { ok: false, detail: `The hook program did not refuse a test request from the worktree (exit ${r.status ?? 'none'}): ${`${r.stderr ?? ''}${r.error?.message ?? ''}`.trim().slice(0, 200)}`, fix };
+}

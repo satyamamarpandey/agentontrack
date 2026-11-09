@@ -33,7 +33,7 @@ beforeEach(async () => {
   p.human.setGoal({ statement: 'Fix the crash', scope: { include: ['**'] } });
   p.close();
   installHooks('claude-code', root, 'agentontrack');
-  c = await startCompanion({ root, uiDir: join(dir, 'ui'), claudeCommand: [process.execPath, join(dir, 'fake-claude.mjs')] });
+  c = await startCompanion({ root, uiDir: join(dir, 'ui'), claudeCommand: [process.execPath, join(dir, 'fake-claude.mjs')], allowPaidApi: true, detectedAuthMode: () => 'api-key' });
   origin = c.url.slice(0, -1);
 });
 afterEach(async () => { await c.close(); delete process.env.AOT_FAKE_NEVER_FIXES; delete process.env.AOT_FAKE_DELAY_MS; rmSync(dir, { recursive: true, force: true, maxRetries: 5 }); });
@@ -44,6 +44,7 @@ const pair = async () => {
 };
 type S = Awaited<ReturnType<typeof pair>>;
 const api = (s: S, path: string, body?: unknown) => fetch(`${origin}${path}`, { method: body === undefined ? 'GET' : 'POST', headers: { cookie: s.cookie, 'x-agentontrack-csrf': s.csrf, 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+const allow = async (s: S) => { expect((await api(s, '/api/settings/unattended', { allow: true, maxRounds: 5, ...(await proof(s)) })).status).toBe(200); };
 const proof = async (s: S) => { const ch = await (await api(s, '/api/challenge', {})).json(); return { challengeId: ch.challengeId, confirm: ch.code }; };
 const statusOf = async (s: S, id: string) => (await (await api(s, '/api/plan')).json()).views.find((x: any) => x.id === id).status;
 const until = async (fn: () => Promise<boolean>, ms = 20_000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await fn()) return; await new Promise((ok) => setTimeout(ok, 150)); } throw new Error('timed out waiting'); };
@@ -62,9 +63,60 @@ async function approvedPlan(s: S) {
 }
 const implementId = (view: any) => view.plan.phases[0].id;
 
+describe('unattended runs are off until a person turns them on at the terminal', () => {
+  it('refuses several rounds when off, allows a single round, and the refusal says where to turn it on', async () => {
+    const s = await pair();
+    const id = implementId(await approvedPlan(s));
+    const r = await api(s, '/api/plan/loop', { phaseId: id, rounds: 3 });
+    expect(r.status).toBe(409);
+    expect((await r.json()).error).toMatch(/Unattended runs are off.*Settings/s);
+    expect(fs.existsSync(join(root, 'prompts.log'))).toBe(false);
+    const one = await api(s, '/api/plan/loop', { phaseId: id, rounds: 1 });
+    expect(one.status).toBe(200);
+    await until(async () => fs.existsSync(join(root, 'prompts.log')));
+  });
+
+  it('has no client-supplied chain flag: a start with chain:true is just one run, and a direct caller cannot start several phases or rounds without a grant', async () => {
+    const s = await pair();
+    const id = implementId(await approvedPlan(s));
+    const flagged = await api(s, '/api/plan/phases/start', { phaseId: id, chain: true });
+    expect(flagged.status).toBe(200); // the field is ignored: exactly one run, which is what a click is
+    await until(async () => fs.existsSync(join(root, 'prompts.log')));
+    await new Promise((ok) => setTimeout(ok, 1500));
+    expect(fs.readFileSync(join(root, 'prompts.log'), 'utf8').trim().split('\n')).toHaveLength(1);
+    const cont = await api(s, '/api/plan/continue', { maxPhases: 3 });
+    expect(cont.status).toBe(409);
+    expect((await cont.json()).error).toMatch(/Unattended runs are off.*Settings/s);
+  });
+
+  it('cannot be switched on without the confirmation code, by the general settings route, or by an unpaired caller', async () => {
+    const s = await pair();
+    const bare = await api(s, '/api/settings/unattended', { allow: true });
+    expect([400, 403]).toContain(bare.status);
+    expect((await api(s, '/api/settings/unattended', { allow: true, challengeId: 'nope', confirm: 'wrong' })).status).toBe(403);
+    expect((await api(s, '/api/settings', { allowUnattended: true, unattendedGrant: { projectId: 'x' } })).status).toBe(200);
+    expect((await (await api(s, '/api/settings')).json()).unattended.active).toBe(false);
+    const anon = await fetch(`${origin}/api/settings/unattended`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ allow: true }) });
+    expect(anon.status).toBe(401);
+    expect((await (await api(s, '/api/settings')).json()).unattended.active).toBe(false);
+  });
+
+  it('allows several rounds once switched on with the code, and off again with the code', async () => {
+    const s = await pair();
+    const id = implementId(await approvedPlan(s));
+    await allow(s);
+    expect((await (await api(s, '/api/settings')).json()).unattended.active).toBe(true);
+    expect((await api(s, '/api/plan/loop', { phaseId: id, rounds: 3 })).status).toBe(200);
+    await until(async () => (await statusOf(s, id)) === 'verified');
+    expect((await api(s, '/api/settings/unattended', { allow: false, ...(await proof(s)) })).status).toBe(200);
+    expect((await (await api(s, '/api/settings')).json()).unattended.active).toBe(false);
+  });
+});
+
 describe('the managed loop', () => {
   it('runs the checks itself between rounds, feeds the failure back, and stops as soon as they pass', async () => {
     const s = await pair();
+    await allow(s);
     const view = await approvedPlan(s);
     const id = implementId(view);
     // Phases before it must be settled for it to be ready: skip them (a person's choice, recorded in the plan).
@@ -81,6 +133,7 @@ describe('the managed loop', () => {
   it('stops at the number of rounds when the agent never fixes it, and the phase is then failed, not verified', async () => {
     process.env.AOT_FAKE_NEVER_FIXES = '1';
     const s = await pair();
+    await allow(s);
     const id = implementId(await approvedPlan(s));
     expect((await api(s, '/api/plan/loop', { phaseId: id, rounds: 2 })).status).toBe(200);
     await until(async () => fs.existsSync(join(root, 'prompts.log')) && fs.readFileSync(join(root, 'prompts.log'), 'utf8').trim().split('\n').length >= 2);
@@ -93,6 +146,7 @@ describe('the managed loop', () => {
     process.env.AOT_FAKE_NEVER_FIXES = '1';
     process.env.AOT_FAKE_DELAY_MS = '4000';
     const s = await pair();
+    await allow(s);
     const id = implementId(await approvedPlan(s));
     expect((await api(s, '/api/plan/loop', { phaseId: id, rounds: 5 })).status).toBe(200);
     await until(async () => fs.existsSync(join(root, 'prompts.log')));
@@ -108,6 +162,7 @@ describe('the managed loop', () => {
 
   it('refuses/ a phase with no command check, because it could never know when to stop', async () => {
     const s = await pair();
+    await allow(s);
     const view = await approvedPlan(s);
     const manual = view.plan.phases.find((p: any) => !p.acceptance.some((a: any) => a.kind === 'command'))!;
     const r = await api(s, '/api/plan/loop', { phaseId: manual.id, rounds: 2 });
@@ -117,6 +172,7 @@ describe('the managed loop', () => {
 
   it('is bounded by the rounds asked for and by the rounds the phase allows, and rejects more than five', async () => {
     const s = await pair();
+    await allow(s);
     const view = await approvedPlan(s);
     const id = implementId(view);
     expect((await api(s, '/api/plan/loop', { phaseId: id, rounds: 6 })).status).toBe(400);

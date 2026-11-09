@@ -51,3 +51,14 @@ Google's sign-in script runs only on the account page, which the dashboard opens
 ## Supply chain
 
 Release archives list a SHA-256 in `SHA256SUMS`, and the installers refuse a mismatch. Note that a checksum fetched from the same place as the file only catches corruption. Where GitHub build attestations are available, verify with `gh attestation verify <file> -R satyamamarpandey/agentontrack`. Binaries are not code-signed, so Windows and macOS may warn.
+
+**For 1.0.0-rc.7 specifically:** the binaries were built by GitHub Actions in this public repository from the commit the release tag points to, and GitHub recorded a build attestation for each file (`gh attestation verify <file> -R satyamamarpandey/agentontrack`). There is no code signing, so Windows and macOS may warn, and checksums catch a damaged download, not someone replacing both the file and the list. Nobody has rebuilt the files independently to compare. Earlier releases: rc.5 had no attestation; rc.6 was built in a private repository (an attestation exists there that the public cannot verify).
+
+## Known security-relevant limitations of this release candidate
+
+- **Codex fails open** if its hook program is missing: Codex then runs the action. `agentontrack run codex` refuses to start unless the hook answers a test request; starting `codex` directly skips that check.
+- A held or declined action is stopped only where the agent honours its hook. Files changed by opaque scripts are detected afterwards, not prevented.
+- **Phone control and sign-in are experimental**: tested against local emulators only, not against a real Firebase project or a physical phone. They are off unless a build carries a Firebase config.
+- An attachment or file that tells an agent to ignore its instructions was summarised, not obeyed, in 3 of 3 real Claude Code observations. That is an observation of one model, not a guarantee.
+- Real-agent testing covers one Windows machine. Linux and macOS installs are tested; agents running on them are not.
+- A failed command is shown in the run and gets one recovery turn, but an agent can still stop after it. A cross-review whose builder changed nothing ends as failed.

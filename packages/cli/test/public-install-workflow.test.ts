@@ -1,11 +1,13 @@
 // The post-publication install check must test the version that was just published. A pre-release is never "latest", so an unpinned install would install an older
 // release and the check could pass for the wrong build (found by an independent review of the rc.5 draft).
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-const FILE = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..', '..', 'scripts', 'release', 'public-install.yml');
+const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..', '..');
+// The file sits in scripts/release in the private tree and in .github/workflows in the public one.
+const FILE = [join(ROOT, 'scripts', 'release', 'public-install.yml'), join(ROOT, '.github', 'workflows', 'public-install.yml')].find((p) => existsSync(p)) ?? join(ROOT, 'scripts', 'release', 'public-install.yml');
 const yml = readFileSync(FILE, 'utf8');
 
 describe('public-install workflow', () => {

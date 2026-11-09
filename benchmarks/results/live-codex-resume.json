@@ -1,0 +1,14 @@
+{
+  "date": "2026-11-07T10:28:05.418Z",
+  "what": "Real Codex: resume across processes; decline via approval callback. Script: scripts/live-codex-resume.mjs",
+  "checks": {
+    "sameThread": true,
+    "rememberedAcrossProcesses": true,
+    "declinedActionDidNotRun": true,
+    "approvalWasAsked": true
+  },
+  "asked": [
+    "\"C:\\\\windows\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe\" -Command 'del keep.txt'"
+  ],
+  "verdict": "PASS"
+}

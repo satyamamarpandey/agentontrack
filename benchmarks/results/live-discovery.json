@@ -1,0 +1,42 @@
+{
+  "date": "2026-11-02",
+  "what": "One real Claude Code run through the product (haiku, $0.10 cap, prompt: reply OK), then discovery and orchestration read back. Script: scripts/live-discovery.mjs.",
+  "before": {
+    "agents": "claude-code:ready:authenticated codex:missing hermes:missing",
+    "models": [
+      "claude-code/opusplan (configured, entitlement unknown)"
+    ]
+  },
+  "run": {
+    "status": "finished",
+    "output": "OK"
+  },
+  "after": {
+    "commandsSource": "reported-by-runtime",
+    "commandCount": 55,
+    "includes": [
+      "loop",
+      "code-review",
+      "simplify",
+      "schedule",
+      "verify"
+    ],
+    "models": [
+      "claude-code/claude-haiku-5-5 (used in a run, worked)",
+      "claude-code/opusplan (configured, unknown)"
+    ],
+    "orchestrateReview": {
+      "recommended": "managed",
+      "nativeOffered": "code-review (reported by the runtime)"
+    },
+    "unsupportedSlash": "409, not sent: command not among those the runtime reported",
+    "reportedCommandChecks": {
+      "goal": true,
+      "loop": true,
+      "code-review": true,
+      "plan": false,
+      "review": false
+    }
+  },
+  "notRun": "Codex and Hermes are not installed here, so their discovery is NOT TESTED live. Claude Code reports goal, loop and code-review, so AgentOnTrack offers them as options; actually sending a native /goal or /loop and judging what it does was NOT TESTED (AgentOnTrack recommends its own bounded loop, which it can limit and cancel)."
+}

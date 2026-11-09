@@ -1,0 +1,257 @@
+{
+  "when": "2026-11-07T09:16:52.404Z",
+  "model": "codex default",
+  "checks": {
+    "handshakeAndThread": true,
+    "turnCompleted": true,
+    "approvalRequestsSeen": 1,
+    "fileWritten": true,
+    "usageReported": true,
+    "interrupted": true
+  },
+  "events": [
+    {
+      "kind": "session",
+      "threadId": "01a1b54b-e72a-7712-866c-01cc44f26259"
+    },
+    {
+      "kind": "session",
+      "threadId": "01a1b54b-e72a-7712-866c-01cc44f26259"
+    },
+    {
+      "kind": "turn",
+      "status": "started",
+      "turnId": "01a1b54b-e7d9-7543-9be8-351ea34a77d3"
+    },
+    {
+      "kind": "delta",
+      "text": "I"
+    },
+    {
+      "kind": "delta",
+      "text": "’ll"
+    },
+    {
+      "kind": "delta",
+      "text": " create"
+    },
+    {
+      "kind": "delta",
+      "text": " hello"
+    },
+    {
+      "kind": "delta",
+      "text": ".txt"
+    },
+    {
+      "kind": "delta",
+      "text": ".\n"
+    },
+    {
+      "kind": "message",
+      "text": "I’ll create hello.txt.\n"
+    },
+    {
+      "kind": "tool",
+      "tool": "shell",
+      "summary": "\"C:\\\\windows\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe\" -Command \"[System.IO.File]::WriteAllText((Join-Path (Get-Location) 'hello.txt'), 'hello', [System.Text.UTF8Encoding]::new(\"'$false))'",
+      "phase": "started"
+    },
+    {
+      "kind": "approval",
+      "request": {
+        "kind": "command",
+        "threadId": "01a1b54b-e72a-7712-866c-01cc44f26259",
+        "itemId": "exec-24a701be-0852-4d2c-bfc0-98b108cf922c",
+        "command": "\"C:\\\\windows\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe\" -Command \"[System.IO.File]::WriteAllText((Join-Path (Get-Location) 'hello.txt'), 'hello', [System.Text.UTF8Encoding]::new(\"'$false))'",
+        "cwd": "C:\\Users\\<user>\\AppData\\Local\\Temp\\aot-live-codex-0DsjSc"
+      },
+      "answer": "accept"
+    },
+    {
+      "kind": "usage",
+      "inputTokens": 17663,
+      "cachedInputTokens": 13952,
+      "outputTokens": 75,
+      "reasoningOutputTokens": 0
+    },
+    {
+      "kind": "usage",
+      "inputTokens": 35429,
+      "cachedInputTokens": 31488,
+      "outputTokens": 105,
+      "reasoningOutputTokens": 0
+    },
+    {
+      "kind": "usage",
+      "inputTokens": 53253,
+      "cachedInputTokens": 49152,
+      "outputTokens": 135,
+      "reasoningOutputTokens": 0
+    },
+    {
+      "kind": "usage",
+      "inputTokens": 71135,
+      "cachedInputTokens": 66816,
+      "outputTokens": 173,
+      "reasoningOutputTokens": 6
+    },
+    {
+      "kind": "usage",
+      "inputTokens": 89083,
+      "cachedInputTokens": 84608,
+      "outputTokens": 203,
+      "reasoningOutputTokens": 6
+    },
+    {
+      "kind": "usage",
+      "inputTokens": 107089,
+      "cachedInputTokens": 102400,
+      "outputTokens": 233,
+      "reasoningOutputTokens": 6
+    },
+    {
+      "kind": "tool",
+      "tool": "shell",
+      "summary": "\"C:\\\\windows\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe\" -Command \"[System.IO.File]::WriteAllText((Join-Path (Get-Location) 'hello.txt'), 'hello', [System.Text.UTF8Encoding]::new(\"'$false))'",
+      "phase": "completed"
+    },
+    {
+      "kind": "usage",
+      "inputTokens": 125153,
+      "cachedInputTokens": 120320,
+      "outputTokens": 273,
+      "reasoningOutputTokens": 14
+    },
+    {
+      "kind": "delta",
+      "text": "done"
+    },
+    {
+      "kind": "message",
+      "text": "done"
+    },
+    {
+      "kind": "usage",
+      "inputTokens": 143314,
+      "cachedInputTokens": 138240,
+      "outputTokens": 278,
+      "reasoningOutputTokens": 14
+    },
+    {
+      "kind": "turn",
+      "status": "completed"
+    },
+    {
+      "kind": "turn",
+      "status": "started",
+      "turnId": "01a1b54c-c2ae-7be2-bdc4-fc5d38f1a1d2"
+    },
+    {
+      "kind": "delta",
+      "text": "I"
+    },
+    {
+      "kind": "delta",
+      "text": "’ll"
+    },
+    {
+      "kind": "delta",
+      "text": " print"
+    },
+    {
+      "kind": "delta",
+      "text": " one"
+    },
+    {
+      "kind": "delta",
+      "text": " number"
+    },
+    {
+      "kind": "delta",
+      "text": " per"
+    },
+    {
+      "kind": "delta",
+      "text": " line"
+    },
+    {
+      "kind": "delta",
+      "text": ","
+    },
+    {
+      "kind": "delta",
+      "text": " with"
+    },
+    {
+      "kind": "delta",
+      "text": " a"
+    },
+    {
+      "kind": "delta",
+      "text": " one"
+    },
+    {
+      "kind": "delta",
+      "text": "-second"
+    },
+    {
+      "kind": "delta",
+      "text": " shell"
+    },
+    {
+      "kind": "delta",
+      "text": " pause"
+    },
+    {
+      "kind": "delta",
+      "text": " between"
+    },
+    {
+      "kind": "delta",
+      "text": " numbers"
+    },
+    {
+      "kind": "delta",
+      "text": ".\n"
+    },
+    {
+      "kind": "message",
+      "text": "I’ll print one number per line, with a one-second shell pause between numbers.\n"
+    },
+    {
+      "kind": "tool",
+      "tool": "shell",
+      "summary": "\"C:\\\\windows\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe\" -Command 'for ($number = 1; $number -le 500; $number++) { Write-Output $number; if ($number -lt 500) { Start-Sleep -Seconds 1 } }'",
+      "phase": "started"
+    },
+    {
+      "kind": "approval",
+      "request": {
+        "kind": "command",
+        "threadId": "01a1b54b-e72a-7712-866c-01cc44f26259",
+        "itemId": "exec-3fccbaf6-93ff-4fe1-9735-b69f7a01e9fe",
+        "command": "\"C:\\\\windows\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe\" -Command 'for ($number = 1; $number -le 500; $number++) { Write-Output $number; if ($number -lt 500) { Start-Sleep -Seconds 1 } }'",
+        "cwd": "C:\\Users\\<user>\\AppData\\Local\\Temp\\aot-live-codex-0DsjSc"
+      },
+      "answer": "accept"
+    },
+    {
+      "kind": "usage",
+      "inputTokens": 181256,
+      "cachedInputTokens": 156288,
+      "outputTokens": 376,
+      "reasoningOutputTokens": 14
+    },
+    {
+      "kind": "turn",
+      "status": "interrupted"
+    }
+  ],
+  "notes": [
+    "approvalRequestsSeen is 0 when Codex judged every action safe under its own policy; that is not a failure of the client, but it means the approval path was not exercised by this run."
+  ],
+  "codexVersion": "codex-cli 0.167.0-alpha.3.2",
+  "loginStatus": "Logged in using ChatGPT",
+  "verdict": "PASS"
+}

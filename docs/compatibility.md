@@ -90,7 +90,7 @@ Chromium, Edge, Firefox and WebKit pass pairing against a local copy of the site
 
 | | Claude Code | Codex |
 |---|---|---|
-| Start, stream, stop | Verified with the real program | Verified with a real Codex 0.167.0-alpha.3 on a ChatGPT sign-in, 1 trial (the maintainers' record "live-codex-appserver.json" (not published)) |
+| Start, stream, stop | Verified with the real program | Verified with a real Codex 0.167.0-alpha.3 on a ChatGPT sign-in, 1 trial (`benchmarks/results/live-codex-appserver.json`) |
 | Approval at the moment of the action | Hook holds the action until a person approves (real agent) | The app-server asks before running; AgentOnTrack answers from the same approval records. One-time accepts only. Real Codex asked, a decline kept a file from being deleted (`live-codex-resume.json`); an approve-then-run was seen in a real cross-review (1 trial) |
 | Runs inside an isolated worktree | Verified with the real program, 1 trial | Verified with a real Codex, 1 trial (the maintainers' record "live-worktree-codex.json" (not published)): file only in the worktree, project folder unchanged, a push held for a person, clean merge preview |
 | Resume, attachments, usage | Resume and a text attachment verified (1 trial each) | Resume and usage verified with a real Codex (1 trial); attachments fixture only |

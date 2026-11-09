@@ -2,7 +2,7 @@
 
 AgentOnTrack starts Codex through `codex app-server`, the interface that lets an action wait for an answer. Codex signs in with your ChatGPT account through its own `codex login`. AgentOnTrack never reads, copies or forwards that login, and removes API-key variables from the environment it gives Codex.
 
-**Status (2026-11-07): verified once against a real Codex** (codex-cli 0.167.0-alpha.3, ChatGPT sign-in, Windows): handshake, a turn that wrote a file, usage, interrupt, one approval request (the maintainers' record "live-codex-appserver.json" (not published)); resume in a second process and a declined deletion (`live-codex-resume.json`); Claude Code ↔ Codex cross-review in both orders (`live-handoff.json`). One trial each, one machine. Not tested with a real Codex: the exec transport and attachments. A worktree run passed once (`live-worktree-codex.json`). The first live run found a bug the protocol script could not: the model name `default` is rejected on a ChatGPT sign-in, so it now means "send no model".
+**Status (2026-11-07): verified once against a real Codex** (codex-cli 0.167.0-alpha.3, ChatGPT sign-in, Windows): handshake, a turn that wrote a file, usage, interrupt, one approval request (`benchmarks/results/live-codex-appserver.json`); resume in a second process and a declined deletion (`live-codex-resume.json`); Claude Code ↔ Codex cross-review in both orders (`live-handoff.json`). One trial each, one machine. Not tested with a real Codex: the exec transport and attachments. A worktree run passed once (`live-worktree-codex.json`). The first live run found a bug the protocol script could not: the model name `default` is rejected on a ChatGPT sign-in, so it now means "send no model".
 
 **The Codex desktop app carries its own CLI**, e.g. `%LOCALAPPDATA%OpenAICodexin<hash>codex.exe`. If `codex` is not on PATH, add that folder to PATH for the terminal you run the scripts in. Nothing is installed or copied.
 
@@ -16,7 +16,7 @@ AgentOnTrack starts Codex through `codex app-server`, the interface that lets an
    node scripts/live-codex.mjs
    ```
 
-   It works in a throwaway folder and writes the maintainers' record "live-codex-appserver.json" (not published). It checks: handshake and session id, a completed turn, a file written, usage reported, and interrupt. If any check fails, the JSON shows the events Codex really sent, which is what is needed to correct the field names.
+   It works in a throwaway folder and writes `benchmarks/results/live-codex-appserver.json`. It checks: handshake and session id, a completed turn, a file written, usage reported, and interrupt. If any check fails, the JSON shows the events Codex really sent, which is what is needed to correct the field names.
 4. Then the two-agent check (real Claude Code and real Codex, cross-review in both orders; refuses to start if either is missing, signed out, or billed by use):
 
    ```

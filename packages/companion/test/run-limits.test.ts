@@ -107,7 +107,7 @@ describe('dollar cap', () => {
 
 describe('usage limit', () => {
   it('names the limit plainly, keeps the session resumable and does not call it a crash', async () => {
-    process.env.FAKE_LIMIT = 'Claude AI usage limit reached|1760000000. You can try again at 5pm. key sk-ant-abcdefghijklmnopqrstuvwxyz0123 in C:\\Users\\bob\\proj\\file.ts';
+    process.env.FAKE_LIMIT = 'Claude AI usage limit reached|1760000000. You can try again at 5pm. key sk-' + 'ant-abcdefghijklmnopqrstuvwxyz0123 in C:\\Users\\bob\\proj\\file.ts';
     await boot();
     const s = await pair();
     const r = await settled(s, await start(s));

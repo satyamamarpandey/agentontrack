@@ -1,0 +1,96 @@
+{
+  "date": "2026-11-07T10:23:47.081Z",
+  "what": "Real Claude Code and real Codex, cross-review both orders. Script: scripts/live-handoff.mjs",
+  "orders": [
+    {
+      "builder": "claude-code",
+      "reviewer": "codex",
+      "authModes": {
+        "claude-code": "subscription",
+        "codex": "unknown"
+      },
+      "checks": {
+        "workflowFinished": true,
+        "steps": true,
+        "fileBuilt": true,
+        "reviewerAcceptedHandoff": true,
+        "hooksFromBothAgents": false,
+        "checksPassed": true
+      },
+      "approvedByHarness": [
+        {
+          "id": "apr_7887aa1afdd1",
+          "runtime": "codex",
+          "effect": "{\"kind\":\"exec.dynamic\",\"target\":\"$content -cmatch '\\\\Ahello(?:\\\\r?\\\\n)?\\\\z'\"}",
+          "status": 200
+        },
+        {
+          "id": "apr_bf7a6fd462eb",
+          "runtime": "codex",
+          "effect": "{\"kind\":\"exec.dynamic\",\"target\":\"$content = [System.IO.File]::ReadAllText\"}",
+          "status": 200
+        },
+        {
+          "id": "apr_38e376ce01a0",
+          "runtime": "codex",
+          "effect": "{\"kind\":\"exec.dynamic\",\"target\":\"$content = Get-Content -LiteralPath hello.txt -Raw\"}",
+          "status": 200
+        }
+      ],
+      "usageRows": [
+        {
+          "runtime": "claude-code",
+          "input": 4,
+          "output": 267
+        },
+        {
+          "runtime": "claude-code",
+          "input": 4,
+          "output": 267
+        },
+        {
+          "runtime": "codex",
+          "input": 23892,
+          "output": 328
+        }
+      ],
+      "verdict": "FAIL"
+    },
+    {
+      "builder": "codex",
+      "reviewer": "claude-code",
+      "authModes": {
+        "claude-code": "subscription",
+        "codex": "unknown"
+      },
+      "checks": {
+        "workflowFinished": true,
+        "steps": true,
+        "fileBuilt": true,
+        "reviewerAcceptedHandoff": true,
+        "hooksFromBothAgents": false,
+        "checksPassed": true
+      },
+      "approvedByHarness": [],
+      "usageRows": [
+        {
+          "runtime": "codex",
+          "input": 11211,
+          "output": 147
+        },
+        {
+          "runtime": "claude-code",
+          "input": 4,
+          "output": 1099
+        },
+        {
+          "runtime": "claude-code",
+          "input": 4,
+          "output": 1099
+        }
+      ],
+      "verdict": "FAIL"
+    }
+  ],
+  "verdict": "FAIL"
+}

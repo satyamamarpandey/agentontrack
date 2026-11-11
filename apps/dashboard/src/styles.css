@@ -511,13 +511,14 @@ textarea.editor:focus-visible { outline: none; box-shadow: inset 2px 0 0 var(--a
   .live i.on { animation: pulse 2.4s ease-out infinite; }
   .progress i { transition: width var(--dur-4) var(--ease-out); }
   .hbar-track i { animation: grow-x var(--dur-4) var(--ease-out) backwards; transition: width var(--dur-4) var(--ease-out); }
-  .plot .bar { animation: bar-up 520ms var(--ease-out) backwards; animation-delay: calc(var(--i, 0) * 28ms); }
+  /* The plot rises from its baseline once, as one composited clip-path reveal. Per-bar transforms on SVG rects run on the main thread and repaint the chart every frame (452 ms of blocking at a 4x slow-down on the demo overview). */
+  .plot svg { animation: plot-rise 520ms var(--ease-out) backwards; }
   .etab { transition: color var(--dur-1), background-color var(--dur-1), box-shadow var(--dur-2); }
   @keyframes enter { from { --fade: 0; transform: translateY(7px); -webkit-mask-image: linear-gradient(rgb(0 0 0 / var(--fade)), rgb(0 0 0 / var(--fade))); mask-image: linear-gradient(rgb(0 0 0 / var(--fade)), rgb(0 0 0 / var(--fade))); } 99% { --fade: 1; -webkit-mask-image: linear-gradient(rgb(0 0 0 / var(--fade)), rgb(0 0 0 / var(--fade))); mask-image: linear-gradient(rgb(0 0 0 / var(--fade)), rgb(0 0 0 / var(--fade))); } }
   @keyframes pop { from { transform: translateY(10px) scale(0.985); } } /* transform only: a mask or opacity fade here costs a repaint of the whole dialog per frame */
   @keyframes scrim-in { from { background-color: transparent; } } /* the blur is static: animating backdrop-filter re-blurs the page behind on every frame */
   @keyframes grow-x { from { transform: scaleX(0); } }
-  @keyframes bar-up { from { transform: scaleY(0); } }
+  @keyframes plot-rise { from { clip-path: inset(100% 0 0 0); } }
   @keyframes shimmer { to { transform: translateX(100%); } }
   @keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--good) 55%, transparent); } 70% { box-shadow: 0 0 0 6px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
 }

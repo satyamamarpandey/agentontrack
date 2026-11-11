@@ -305,6 +305,8 @@ for (const theme of ['dark', 'light']) {
     for (const p of PAGES) {
       await page.goto(`${SITE}${p}`);
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+      // Axe reads colours as painted: a button still fading to its colour on a slow runner reads as low contrast (seen once on the configured Pages build, /account/, light).
+      await page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.timeline instanceof DocumentTimeline && Number.isFinite(a.effect?.getComputedTiming().endTime ?? Infinity)).map((a) => a.finished.catch(() => undefined))));
       const r = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze();
       const bad = r.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical');
       expect(bad.map((v) => `${p}: ${v.id}: ${v.nodes.map((n) => n.target.join(' ')).slice(0, 3).join(' | ')}`)).toEqual([]);

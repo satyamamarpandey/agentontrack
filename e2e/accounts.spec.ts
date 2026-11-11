@@ -3,7 +3,8 @@
 // Early access makes accounts invitation-only: a sign-in on its own is a person with no documents. The invitation itself is covered by
 // early-access-emulator.spec; here membership is granted outright where a test is about something else.
 import { expect, test, type Page } from '@playwright/test';
-import { AUTH, clearEmulators, commit, DOCS, grantMembership, googlePopupSignIn, OWNER, PROJECT, readDoc, signUpRest, str, uidOf } from './emulator-helpers';
+import { createHash } from 'node:crypto';
+import { AUTH, clearEmulators, commit, DOCS, grantMembership, googlePopupSignIn, markVerified, OWNER, ownerRead, ownerWrite, PROJECT, readDoc, signInRest, signUpRest, str, uidOf } from './emulator-helpers';
 
 const SITE = 'http://127.0.0.1:4199/agentontrack';
 
@@ -117,6 +118,75 @@ test('delete removes a member\'s documents and sign-in', async ({ page }) => {
   expect((await fetch(`${DOCS}/users/${uid}`, { headers: OWNER })).status).toBe(404);
   const accounts = await (await fetch(`http://${AUTH}/identitytoolkit.googleapis.com/v1/projects/${PROJECT}/accounts:query`, { method: 'POST', headers: { 'content-type': 'application/json', ...OWNER }, body: '{}' })).json() as { userInfo: { email: string }[] };
   expect(accounts.userInfo.some((u) => u.email === 'third@example.com')).toBe(false);
+});
+
+/** An email account, made a member by the owner, with the leftovers a tester would have: a redeemed invitation, an application and a tester report. */
+async function memberWithTrail(email: string, password: string, status: 'active' | 'revoked') {
+  const made = await signUpRest(email, password);
+  await markVerified(made.localId);
+  const applicationId = createHash('sha256').update(email).digest('hex');
+  const inviteId = `invite-${made.localId.slice(0, 8)}`;
+  const feedbackId = `fb-${made.localId.slice(0, 8)}`;
+  await grantMembership(email, { inviteId, applicationId, status });
+  await ownerWrite(`invites/${inviteId}`, { email, applicationId, status: 'redeemed', createdBy: 'owner', redeemedBy: made.localId });
+  await ownerWrite(`applications/${applicationId}`, { name: 'Leaver', email, os: ['linux'], tools: ['codex'], useCases: ['other'], frequency: 'weekly', privacyAccepted: true, marketingConsent: false, source: 'page', status: 'approved', schema: 1 }, ['createdAt']);
+  await ownerWrite(`testerFeedback/${feedbackId}`, { kind: 'bug', message: 'before leaving', uid: made.localId, email }, ['createdAt']);
+  return { uid: made.localId, applicationId, inviteId, feedbackId };
+}
+async function signInWithEmail(page: Page, email: string, password: string) {
+  await page.goto(`${SITE}/sign-in/`);
+  await page.getByLabel('Email', { exact: true }).fill(email);
+  await page.getByLabel('Password', { exact: true }).fill(password);
+  await page.getByTestId('email-submit').click();
+  await page.waitForURL(/\/account\//, { timeout: 30_000 });
+  await expect(page.getByTestId('signed-in')).toBeVisible({ timeout: 20_000 });
+}
+
+test('deleting an account leaves nothing for the administrator to clean, and a token issued before it stops reaching member data at once', async ({ page }) => {
+  const email = 'leaver@example.com'; const password = 'leaver-password-1';
+  const t = await memberWithTrail(email, password, 'active');
+  const oldToken = await signInRest(email, password); // issued while the membership is active
+  expect((await readDoc(oldToken, `users/${t.uid}`)).status, 'before: the token reaches the account tree').not.toBe(403);
+  await signInWithEmail(page, email, password);
+  await expect(page.getByTestId('access-status')).toContainText('Active tester', { timeout: 20_000 });
+  await page.getByTestId('delete-account').click();
+  await page.locator('input[name="delete-password"]').fill(password);
+  await page.getByTestId('delete-confirm').click();
+  await expect(page.getByTestId('signed-out')).toBeVisible({ timeout: 30_000 });
+  for (const path of [`members/${t.uid}`, `users/${t.uid}`, `invites/${t.inviteId}`, `applications/${t.applicationId}`, `testerFeedback/${t.feedbackId}`]) expect(await ownerRead(path), `${path} is gone`).toBeNull();
+  // The token from before the deletion no longer reaches anything a member reaches, and cannot make a member's writes either.
+  expect((await readDoc(oldToken, `users/${t.uid}`)).status, 'old token: read the account tree').toBe(403);
+  expect((await commit(oldToken, `users/${t.uid}/summaries/late`, summary({}), ['savedAt'])).status, 'old token: save a summary').toBe(403);
+  expect((await commit(oldToken, 'testerFeedback/late', { kind: str('bug'), message: str('after deleting'), uid: str(t.uid) }, ['createdAt'])).status, 'old token: tester feedback').toBe(403);
+  expect((await commit(oldToken, `members/${t.uid}`, { email: str(email), inviteId: str(t.inviteId), applicationId: str(t.applicationId), status: str('active') }, ['joinedAt'])).status, 'old token: make the membership again').toBe(403);
+});
+
+test('a revoked member can still delete their account: what the rules still allow is removed, and the rest is not an error', async ({ page }) => {
+  const email = 'revoked-leaver@example.com'; const password = 'revoked-password-1';
+  const t = await memberWithTrail(email, password, 'revoked');
+  await signInWithEmail(page, email, password);
+  await expect(page.getByTestId('access-status')).toContainText('Access revoked', { timeout: 20_000 });
+  await page.getByTestId('delete-account').click();
+  await page.locator('input[name="delete-password"]').fill(password);
+  await page.getByTestId('delete-confirm').click();
+  await expect(page.getByTestId('signed-out')).toBeVisible({ timeout: 30_000 });
+  for (const path of [`members/${t.uid}`, `invites/${t.inviteId}`, `applications/${t.applicationId}`, `testerFeedback/${t.feedbackId}`]) expect(await ownerRead(path), `${path} is gone`).toBeNull();
+  const accounts = await (await fetch(`http://${AUTH}/identitytoolkit.googleapis.com/v1/projects/${PROJECT}/accounts:query`, { method: 'POST', headers: { 'content-type': 'application/json', ...OWNER }, body: '{}' })).json() as { userInfo?: { email: string }[] };
+  expect((accounts.userInfo ?? []).some((u) => u.email === email)).toBe(false);
+});
+
+test('rules: nobody can delete another person\'s membership, tester report or redeemed invitation, or read their reports', async () => {
+  const a = await memberWithTrail('keeper@example.com', 'keeper-password-1', 'active');
+  const b = await signUpRest('intruder@example.com', 'intruder-password-1');
+  await markVerified(b.localId);
+  const token = await signInRest('intruder@example.com', 'intruder-password-1');
+  const del = async (path: string) => (await fetch(`${DOCS}/${path}`, { method: 'DELETE', headers: { authorization: `Bearer ${token}` } })).status;
+  expect(await del(`members/${a.uid}`), 'someone else\'s membership').toBe(403);
+  expect(await del(`testerFeedback/${a.feedbackId}`), 'someone else\'s report').toBe(403);
+  expect(await del(`invites/${a.inviteId}`), 'someone else\'s redeemed invitation').toBe(403);
+  expect((await readDoc(token, `testerFeedback/${a.feedbackId}`)).status, 'read someone else\'s report').toBe(403);
+  expect((await fetch(`${DOCS}/testerFeedback`, { headers: { authorization: `Bearer ${token}` } })).status, 'list all reports').toBe(403);
+  for (const path of [`members/${a.uid}`, `testerFeedback/${a.feedbackId}`, `invites/${a.inviteId}`]) expect(await ownerRead(path), `${path} is still there`).not.toBeNull();
 });
 
 test('email: a wrong password is refused in plain words, the eye shows the password, and reset sends a link without revealing who has an account', async ({ page }) => {

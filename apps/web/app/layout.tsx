@@ -9,6 +9,7 @@ const inter = localFont({ src: './fonts/inter.woff2', variable: '--font-inter', 
 import { ACCOUNTS_ENABLED, INSTALL_GATED } from '../lib/accounts-config';
 import { SOURCE_STATUS } from '../lib/release';
 import { EarlyAccessButton, EarlyAccessHost } from './early-access/launcher';
+import { NavAuth } from './nav-auth';
 import { NavLink } from './nav-link';
 import { NavMenu } from './nav-menu';
 import { ThemeToggle } from './theme-toggle';
@@ -49,7 +50,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             <div className="top-end">
               <ThemeToggle />
               <a className="btn small ghost nav-dashboard" href={`${BASE}/dashboard/`}>Dashboard</a>
-              {ACCOUNTS_ENABLED ? <Link className="btn small ghost nav-signin" href="/sign-in" data-testid="nav-signin">Sign in</Link> : null}
+              {ACCOUNTS_ENABLED ? <NavAuth /> : null}
               <EarlyAccessButton className="btn small primary" testId="nav-early-access">Early access</EarlyAccessButton>
             </div>
           </div>

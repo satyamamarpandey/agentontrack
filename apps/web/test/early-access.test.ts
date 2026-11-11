@@ -77,6 +77,15 @@ describe('the rules agree with the form', () => {
   });
   it('keeps the invitation and membership rules that make access invitation-only', () => {
     for (const must of ['function redeemable(', 'function redemption(', 'getAfter(/databases/$(database)/documents/invites/', "after.status == 'redeemed' && after.redeemedBy == request.auth.uid", 'inviteAfter(d.inviteId).redeemedAt == request.time', 'function canUseAccount(uid) { return isOwner(uid) && (isActiveMember() || isAdmin()); }', 'match /admins/{uid} {', 'allow get: if isOwner(uid);']) expect(rules).toContain(must);
+    // Leaving: a person can remove their own membership, own tester feedback and the invitation they redeemed, and nothing wider.
+    const members = rules.slice(rules.indexOf('match /members/{uid}'), rules.indexOf('match /admins/{uid}'));
+    expect(members).toContain('allow delete: if isAdmin() || isOwner(uid);');
+    expect(members).not.toMatch(/allow (create|update)[^;]*isAdmin\(\) \|\| isOwner/);
+    const invites = rules.slice(rules.indexOf('match /invites/{hash}'), rules.indexOf('function inviteAfter('));
+    expect(invites).toContain("resource.data.status == 'redeemed' && resource.data.redeemedBy == request.auth.uid");
+    const testerFeedback = rules.slice(rules.indexOf('match /testerFeedback/{id}'), rules.indexOf('// ---------- Accounts'));
+    expect(testerFeedback).toContain('allow get, list, delete: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid);');
+    expect(testerFeedback).toMatch(/allow create: if isActiveMember\(\)/);
     // Nobody writes /admins or edits /audit from a browser.
     const admins = rules.slice(rules.indexOf('match /admins/{uid}'), rules.indexOf('match /admins/{uid}') + 200);
     expect(admins).not.toMatch(/allow (create|update|write|delete)/);

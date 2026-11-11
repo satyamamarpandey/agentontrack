@@ -3,7 +3,7 @@
 import { getApp, getApps, initializeApp } from 'firebase/app';
 import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check';
 import { connectAuthEmulator, createUserWithEmailAndPassword, deleteUser, EmailAuthProvider, getAuth, GithubAuthProvider, GoogleAuthProvider, reauthenticateWithCredential, reauthenticateWithPopup, sendEmailVerification, sendPasswordResetEmail, signInWithEmailAndPassword, signInWithPopup, signOut, updateProfile, type AuthProvider, type User } from 'firebase/auth';
-import { collection, connectFirestoreEmulator, deleteDoc, doc, getDoc, getDocs, getFirestore, serverTimestamp, setDoc, Timestamp, updateDoc, writeBatch } from 'firebase/firestore';
+import { collection, connectFirestoreEmulator, deleteDoc, doc, getDoc, getDocs, getFirestore, query, serverTimestamp, setDoc, Timestamp, updateDoc, where, writeBatch } from 'firebase/firestore';
 import { BASE_PATH, SIGNED_IN_FLAG } from './accounts-config';
 import type { Application } from './early-access';
 import { applicationId, normalizeEmail, shortReference } from './early-access';
@@ -408,10 +408,29 @@ async function reauthenticate(user: User, password?: string): Promise<void> {
   }
 }
 
-/** Removes everything this account stored, then the sign-in itself. A revoked member cannot read their tree any more, so only the sign-in goes; the administrator deletes the rest. */
+/** A step that may already have been done, or may not be allowed any more (a revoked member cannot read their tree): both mean there is nothing left for this person to remove. */
+async function tolerant(step: () => Promise<unknown>): Promise<void> {
+  try { await step(); } catch (e) { if (!isDenied(e) && (e as { code?: string })?.code !== 'not-found') throw e; }
+}
+
+/** Firebase accepts an account deletion only shortly after a sign-in; asking for the password or the provider again afterwards would strand a half-finished deletion. */
+const recentlySignedIn = (user: User) => Date.now() - new Date(user.metadata.lastSignInTime ?? 0).getTime() < 4 * 60_000;
+
+/**
+ * Removes everything this account stored, then the sign-in. Order matters, and every step can be repeated after a failure:
+ *   1. sign in again if the last sign-in is not recent, before anything is removed;
+ *   2. the account tree (profile, preferences, feedback, summaries, linked computers and what they left) and the person's own tester feedback;
+ *   3. the redeemed invitation addressed to this person, and their early-access application;
+ *   4. the membership record, last of the data steps: from then on every rule that asks for an active member refuses this person, and so any
+ *      sign-in token issued before the deletion stops reaching member data at once, instead of when it expires;
+ *   5. the sign-in itself.
+ * A revoked member cannot read their tree, so step 2 is skipped for them without an error; the administrator deletes what is left.
+ */
 export async function deleteEverything(user: User, password?: string): Promise<void> {
   const { db } = connect();
-  try {
+  if (!recentlySignedIn(user)) await reauthenticate(user, password);
+  const membership = await getDoc(doc(db, 'members', user.uid)).then((m) => (m.exists() ? m.data() : null), () => null);
+  await tolerant(async () => {
     const feedback = await getDocs(collection(db, 'users', user.uid, 'feedback'));
     const summaries = await getDocs(collection(db, 'users', user.uid, 'summaries'));
     for (const d of feedback.docs) {
@@ -425,14 +444,12 @@ export async function deleteEverything(user: User, password?: string): Promise<v
       await deleteDoc(comp.ref);
     }
     await deleteDoc(doc(db, 'users', user.uid));
-  } catch (e) { if (!isDenied(e)) throw e; }
-  try {
-    await deleteUser(user);
-  } catch (e) {
-    if ((e as { code?: string }).code !== 'auth/requires-recent-login') throw e;
-    await reauthenticate(user, password);
-    await deleteUser(user);
-  }
+  });
+  await tolerant(async () => { for (const d of (await getDocs(query(collection(db, 'testerFeedback'), where('uid', '==', user.uid)))).docs) await deleteDoc(d.ref); });
+  if (typeof membership?.inviteId === 'string') await tolerant(() => deleteDoc(doc(db, 'invites', membership.inviteId)));
+  if (user.email && user.emailVerified) await tolerant(async () => deleteDoc(doc(db, 'applications', await applicationId(user.email!))));
+  await tolerant(() => deleteDoc(doc(db, 'members', user.uid)));
+  await deleteUser(user);
   localStorage.removeItem(SIGNED_IN_FLAG);
   try { localStorage.removeItem('aot-access'); } catch { /* storage may be blocked */ }
 }

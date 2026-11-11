@@ -97,7 +97,9 @@ service cloud.firestore {
       allow get: if isAdmin() || redeemable(resource.data);
       allow list: if isAdmin();
       allow update: if (isAdmin() && adminInviteChange(resource.data, request.resource.data)) || redemption(resource.data, request.resource.data);
-      allow delete: if isAdmin();
+      // The administrator removes any invitation. The person who redeemed one may remove it: it holds their address, and deleting their account
+      // removes what they gave. A deleted invitation cannot be redeemed again, and a membership can only be made from a redemption in its own batch.
+      allow delete: if isAdmin() || (signedIn() && resource.data.status == 'redeemed' && resource.data.redeemedBy == request.auth.uid);
     }
 
     function inviteAfter(id) { return getAfter(/databases/$(database)/documents/invites/$(id)).data; }
@@ -125,7 +127,9 @@ service cloud.firestore {
       allow list: if isAdmin();
       allow create: if isOwner(uid) && validNewMember(request.resource.data, uid);
       allow update: if isAdmin() && adminMemberChange(resource.data, request.resource.data);
-      allow delete: if isAdmin();
+      // A person may remove their own membership: that is how leaving (and deleting an account) ends access at once, for every token already issued,
+      // because every member rule reads this document. It cannot bring access back: a new membership needs a new invitation redeemed in the same batch.
+      allow delete: if isAdmin() || isOwner(uid);
     }
 
     match /admins/{uid} {
@@ -162,7 +166,8 @@ service cloud.firestore {
     }
     match /testerFeedback/{id} {
       allow create: if isActiveMember() && validTesterFeedback(request.resource.data);
-      allow get, list, delete: if isAdmin();
+      // A tester can see and remove their own reports (so deleting an account can remove them); the administrator reads and removes all.
+      allow get, list, delete: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid);
     }
 
     // ---------- Accounts ----------

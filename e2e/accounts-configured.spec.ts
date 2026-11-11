@@ -48,6 +48,22 @@ test('offers sign-in and early access, but a visitor loads no Firebase code and 
   await expect.poll(() => seen.firebaseCode.length).toBeGreaterThan(0);
 });
 
+test('the header offers Account, not Sign in, to a browser that has signed in, and loads no Firebase code to decide', async ({ page }) => {
+  const seen = await watch(page);
+  await page.goto(`${SITE}/`);
+  await expect(page.getByTestId('nav-signin')).toBeVisible();
+  await expect(page.getByTestId('nav-account-action')).toHaveCount(0);
+  await page.evaluate(() => localStorage.setItem('aot-signed-in', '1'));
+  await page.goto(`${SITE}/features/`);
+  await expect(page.getByTestId('nav-account-action')).toHaveAttribute('href', /\/account\/$/);
+  await expect(page.getByTestId('nav-account-action')).toHaveText('Account');
+  await expect(page.getByTestId('nav-signin')).toHaveCount(0);
+  // Signing out in another tab is picked up without a reload.
+  await page.evaluate(() => { localStorage.removeItem('aot-signed-in'); window.dispatchEvent(new StorageEvent('storage', { key: 'aot-signed-in' })); });
+  await expect(page.getByTestId('nav-signin')).toBeVisible();
+  expect(seen.firebaseCode).toEqual([]);
+});
+
 test('the application form loads nothing until it is sent, and a send that cannot reach Firebase fails honestly', async ({ page }) => {
   const seen = await watch(page);
   // In the emulator job Firebase answers on 127.0.0.1; this test is about the case where nothing answers, so those ports are cut as well.

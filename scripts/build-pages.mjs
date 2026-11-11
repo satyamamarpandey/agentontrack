@@ -30,7 +30,8 @@ cpSync(join(web, 'out'), OUT, { recursive: true });
 rmSync(join(web, 'out'), { recursive: true, force: true });
 rmSync(join(web, '.next'), { recursive: true, force: true });
 
-const dash = spawnSync('pnpm', ['--dir', 'apps/dashboard', 'exec', 'vite', 'build'], { stdio: 'inherit', shell, env: { ...process.env, VITE_BASE: `${BASE}/dashboard/`, VITE_OUT: join(OUT, 'dashboard'), VITE_FIREBASE_CONFIG: FIREBASE, VITE_FIREBASE_EMULATORS: EMULATORS, VITE_APPCHECK_KEY: process.env.NEXT_PUBLIC_APPCHECK_SITE_KEY ?? '' } });
+// Early access: with accounts on, installs and this site's dashboard connection are for approved testers until NEXT_PUBLIC_INSTALL_PUBLIC=1.
+const dash = spawnSync('pnpm', ['--dir', 'apps/dashboard', 'exec', 'vite', 'build'], { stdio: 'inherit', shell, env: { ...process.env, VITE_BASE: `${BASE}/dashboard/`, VITE_OUT: join(OUT, 'dashboard'), VITE_FIREBASE_CONFIG: FIREBASE, VITE_FIREBASE_EMULATORS: EMULATORS, VITE_APPCHECK_KEY: process.env.NEXT_PUBLIC_APPCHECK_SITE_KEY ?? '', VITE_INSTALL_PUBLIC: process.env.NEXT_PUBLIC_INSTALL_PUBLIC ?? '' } });
 if (dash.status !== 0) process.exit(dash.status ?? 1);
 writeFileSync(join(OUT, '.nojekyll'), '');
 

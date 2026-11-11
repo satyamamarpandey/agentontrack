@@ -1,13 +1,32 @@
-// Optional accounts, on the public site only. With no config, the bundler drops the import below, so no Firebase code exists in this build.
+// Optional accounts, on the public site only. With no config, the bundler drops the imports below, so no Firebase code exists in this build.
 import type { ProjectSummary } from './metrics';
 import { onPublicSite } from './api';
 
 const CONFIG = import.meta.env.VITE_FIREBASE_CONFIG as string | undefined;
+const SITE = () => import.meta.env.BASE_URL.replace(/dashboard\/$/, '');
 
 export const accountsEnabled = () => Boolean(CONFIG) && onPublicSite();
-/** Set by the account page after sign-in. Reading it needs no network, so this page can offer saving without loading Firebase. */
+/** Set by the site after sign-in. Reading it needs no network, so this page can offer saving without loading Firebase. */
 export const signedInHere = () => localStorage.getItem('aot-signed-in') === '1';
-export const accountPage = () => `${import.meta.env.BASE_URL.replace(/dashboard\/$/, '')}account/`;
+export const accountPage = () => `${SITE()}account/`;
+export const signInPage = () => `${SITE()}sign-in/`;
+export const earlyAccessPage = () => `${SITE()}early-access/`;
+
+/**
+ * Early access: while installs are gated, this site's dashboard connects a computer for approved testers only. The local address a companion prints
+ * never asks. A build without accounts cannot gate anything. NEXT_PUBLIC_INSTALL_PUBLIC=1 (VITE_INSTALL_PUBLIC here) opens it to everyone again.
+ */
+export const connectGated = () => accountsEnabled() && import.meta.env.VITE_INSTALL_PUBLIC !== '1';
+
+export type MemberStatus = 'active' | 'revoked' | 'none';
+export interface AccessStatus { signedIn: boolean; member: MemberStatus; admin: boolean; email: string | null }
+
+/** Asks Firestore for the signed-in person's own membership record. The rules decide; this only reads the answer. */
+export async function checkAccess(): Promise<AccessStatus> {
+  if (!CONFIG) throw new Error('Accounts are not set up on this site.');
+  const { accessStatus } = await import('./accounts-firebase');
+  return accessStatus(CONFIG);
+}
 
 export async function saveSummary(projectId: string, summary: ProjectSummary): Promise<void> {
   if (!CONFIG) throw new Error('Accounts are not set up on this site.');

@@ -9,6 +9,7 @@ import { devices, expect, test, type Browser, type BrowserContext, type Page } f
 import { installHooks } from '../packages/adapters/dist/index.js';
 import { startCompanion, type Companion } from '../packages/companion/dist/index.js';
 import { Project, registerProject } from '../packages/core/dist/index.js';
+import { grantMembership } from './emulator-helpers';
 
 const ORIGIN = 'http://127.0.0.1:4199';
 const SITE = `${ORIGIN}/agentontrack`;
@@ -39,6 +40,10 @@ async function signIn(page: Page) {
   await popup.locator('#display-name-input').fill('New Session Owner');
   await popup.locator('#sign-in').click();
   await expect(page.getByTestId('signed-in')).toBeVisible({ timeout: 20_000 });
+  // Early access: account features are for members. Membership is granted outright here; the early-access spec covers the invitation itself.
+  await grantMembership(EMAIL);
+  await page.reload();
+  await expect(page.getByTestId('access-status')).toContainText('Active tester', { timeout: 20_000 });
 }
 
 let dir = ''; let rootA = ''; let rootB = ''; let idA = ''; let idB = '';

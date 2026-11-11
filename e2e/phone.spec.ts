@@ -10,6 +10,7 @@ import { devices, expect, test, type Browser, type BrowserContext, type Page } f
 import { installHooks } from '../packages/adapters/dist/index.js';
 import { startCompanion, type Companion } from '../packages/companion/dist/index.js';
 import { classifyCommand, Project } from '../packages/core/dist/index.js';
+import { grantMembership } from './emulator-helpers';
 
 const ORIGIN = 'http://127.0.0.1:4199';
 const SITE = `${ORIGIN}/agentontrack`;
@@ -41,6 +42,11 @@ async function signIn(page: Page) {
   await popup.locator('#display-name-input').fill('Phone Owner');
   await popup.locator('#sign-in').click();
   await expect(page.getByTestId('signed-in')).toBeVisible({ timeout: 20_000 });
+  // Early access: the phone link, like every account feature, is for members. This spec is about the link itself, so membership is granted outright,
+  // the way the administrator's console would; the early-access spec covers the invitation.
+  await grantMembership(EMAIL);
+  await page.reload();
+  await expect(page.getByTestId('access-status')).toContainText('Active tester', { timeout: 20_000 });
 }
 
 let dir = '';
@@ -300,6 +306,7 @@ test('a different account sees none of this computer', async ({ browser }) => {
     await popup.locator('#display-name-input').fill('Someone Else');
     await popup.locator('#sign-in').click();
     await expect(pg.getByTestId('signed-in')).toBeVisible({ timeout: 20_000 });
+    await grantMembership('someone-else@example.com');
     await pg.goto(phoneUrl);
     await expect(pg.getByRole('heading', { name: 'No computer is linked yet' })).toBeVisible({ timeout: 30_000 });
     await expect(pg.locator('[data-testid^=m-computer-]')).toHaveCount(0);

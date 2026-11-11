@@ -1,11 +1,17 @@
 // The public site exactly as it would be published: run `pnpm build:pages`, and this serves dist-pages under the same base path.
+// Two shapes of build pass here: the default one (no accounts, installs public) and the early-access one (accounts on, installs gated).
 import AxeBuilder from '@axe-core/playwright';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 
 const SITE = 'http://127.0.0.1:4199/agentontrack';
-const PAGES = ['/', '/install/', '/features/', '/how-it-works/', '/integrations/', '/benchmarks/', '/security/', '/pricing/', '/docs/', '/community/', '/roadmap/', '/changelog/', '/feedback/', '/privacy/', '/terms/', '/account/', '/dashboard/'];
+const PAGES = ['/', '/install/', '/features/', '/how-it-works/', '/integrations/', '/benchmarks/', '/security/', '/pricing/', '/docs/', '/community/', '/roadmap/', '/changelog/', '/feedback/', '/privacy/', '/terms/', '/account/', '/early-access/', '/sign-in/', '/join/', '/admin/', '/dashboard/'];
+const ACCOUNTS = !!process.env.NEXT_PUBLIC_FIREBASE_CONFIG;
+const GATED = ACCOUNTS && process.env.NEXT_PUBLIC_INSTALL_PUBLIC !== '1';
+
+// The early-access popup has its own spec; here it would only get in the way.
+test.beforeEach(async ({ page }) => { await page.addInitScript(() => sessionStorage.setItem('aot-ea-seen', '1')); });
 
 test('all pages load, with working navigation and no console errors', async ({ page }) => {
   const errors: string[] = [];
@@ -22,6 +28,11 @@ test('all pages load, with working navigation and no console errors', async ({ p
   await page.goto(`${SITE}/`);
   await page.getByRole('navigation', { name: 'Footer' }).getByRole('link', { name: 'Privacy' }).click();
   await expect(page).toHaveURL(/privacy/);
+  // The header marks the current page (the links exist on every width; on a phone they sit behind the Menu button).
+  const security = page.locator('#site-nav a', { hasText: 'Security' });
+  await expect(security).not.toHaveAttribute('aria-current', 'page');
+  await page.goto(`${SITE}/security/`);
+  await expect(security).toHaveAttribute('aria-current', 'page');
 });
 
 test('home shows the real recorded benchmark, its misses, and no invented adoption numbers', async ({ page }) => {
@@ -30,20 +41,28 @@ test('home shows the real recorded benchmark, its misses, and no invented adopti
   await page.goto(`${SITE}/`);
   await expect(page.locator('main')).toContainText(`${full.prevented} prevented, ${full.detectedAfter} detected afterwards, ${full.missed} missed`);
   await expect(page.locator('main')).toContainText('what has really been run');
+  // The counters end on the recorded values.
+  await page.locator('.kpis').scrollIntoViewIfNeeded();
+  await expect(page.locator('.kpi-value').first()).toHaveText(String(full.prevented), { timeout: 5000 });
   const text = (await page.locator('body').textContent())!.toLowerCase();
-  for (const banned of ['testimonial', 'trusted by', 'zero hallucination', 'tamper-proof', 'guaranteed savings', 'stars on github']) expect(text).not.toContain(banned);
+  for (const banned of ['testimonial', 'trusted by', 'zero hallucination', 'tamper-proof', 'guaranteed savings', 'stars on github', 'be among the first']) expect(text).not.toContain(banned);
+  await expect(page.getByTestId('hero-early-access')).toBeVisible();
+  await expect(page.getByTestId('nav-early-access')).toBeVisible();
 });
 
-test('sends no third-party requests and sets no cookie for visitors', async ({ page, context }) => {
+test('sends no third-party requests and sets no cookie for visitors, and serves its own fonts', async ({ page, context }) => {
   const foreign: string[] = [];
-  page.on('request', (r) => { if (!r.url().startsWith('http://127.0.0.1:4199/') && !r.url().startsWith('data:')) foreign.push(r.url()); });
+  const fonts: string[] = [];
+  page.on('request', (r) => { if (!r.url().startsWith('http://127.0.0.1:4199/') && !r.url().startsWith('data:')) foreign.push(r.url()); if (r.url().endsWith('.woff2')) fonts.push(r.url()); });
   for (const p of PAGES) await page.goto(`${SITE}${p}`);
   expect(foreign).toEqual([]);
   expect(await context.cookies()).toEqual([]);
+  expect(fonts.some((u) => /inter/.test(u))).toBe(true);
+  expect(fonts.every((u) => u.startsWith(SITE))).toBe(true);
 });
 
 test('with no config, the published build holds no Firebase code at all', async () => {
-  test.skip(!!process.env.NEXT_PUBLIC_FIREBASE_CONFIG, 'This build has accounts.');
+  test.skip(ACCOUNTS, 'This build has accounts.');
   const hits: string[] = [];
   const walk = (dir: string) => {
     for (const name of readdirSync(dir)) {
@@ -66,8 +85,15 @@ test('the home page has a clear way into projects, and the demo one is labelled'
   await page.goto(`${SITE}/`);
   await page.getByTestId('open-projects').click();
   await expect(page.getByRole('heading', { name: 'Keep your AI coding agents on track' })).toBeVisible();
-  await page.getByTestId('continue-local').click();
-  await expect(page.getByRole('heading', { name: 'Connect this computer' })).toBeVisible();
+  if (GATED) {
+    // Early access: a visitor is asked to sign in or apply; the demo stays open; nothing pairs from here.
+    await expect(page.getByTestId('gate-signed-out')).toBeVisible();
+    await expect(page.getByTestId('continue-local')).toHaveCount(0);
+    await expect(page.getByTestId('explore-demo')).toBeVisible();
+  } else {
+    await page.getByTestId('continue-local').click();
+    await expect(page.getByRole('heading', { name: 'Connect this computer' })).toBeVisible();
+  }
 });
 
 test('the main menu opens on a small screen, and every link in it is reachable', async ({ page }) => {
@@ -81,11 +107,14 @@ test('the main menu opens on a small screen, and every link in it is reachable',
 });
 
 test('with no config, there is no sign-in UI on any page', async ({ page }) => {
-  test.skip(!!process.env.NEXT_PUBLIC_FIREBASE_CONFIG, 'This build has accounts.');
+  test.skip(ACCOUNTS, 'This build has accounts.');
   await page.goto(`${SITE}/account/`);
   await expect(page.locator('main')).toContainText('no accounts');
   await expect(page.getByTestId('sign-in')).toHaveCount(0);
   await expect(page.getByTestId('nav-account')).toHaveCount(0);
+  await expect(page.getByTestId('nav-signin')).toHaveCount(0);
+  await page.goto(`${SITE}/sign-in/`);
+  await expect(page.getByTestId('email-form')).toHaveCount(0);
   await page.goto(`${SITE}/dashboard/?demo=1#project/demo/overview`);
   await expect(page.getByTestId('project-panel-overview')).toBeVisible();
   await expect(page.getByTestId('summary-saver')).toHaveCount(0);
@@ -94,6 +123,7 @@ test('with no config, there is no sign-in UI on any page', async ({ page }) => {
 });
 
 test('feedback refuses an empty or over-long message, and a contact goes in the issue only if given', async ({ page }) => {
+  test.skip(ACCOUNTS, 'With accounts, feedback is stored rather than opened as an issue; the emulator specs cover it.');
   await page.goto(`${SITE}/feedback/`);
   await page.getByLabel('Your message').fill('   ');
   await page.getByRole('button', { name: 'Send' }).click();
@@ -112,9 +142,11 @@ test('theme toggle persists', async ({ page }) => {
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await expect(page.getByRole('button', { name: 'Switch to dark theme' })).toBeVisible();
 });
 
 test('no page offers accounts, sign-in or sync', async ({ page }) => {
+  test.skip(ACCOUNTS, 'This build has accounts, by design.');
   for (const p of PAGES.filter((x) => x !== '/dashboard/')) {
     await page.goto(`${SITE}${p}`);
     const t = (await page.locator('main').innerText()).toLowerCase();
@@ -124,6 +156,7 @@ test('no page offers accounts, sign-in or sync', async ({ page }) => {
 
 test('a published release links to its real files', async ({ page }) => {
   test.skip(process.env.NEXT_PUBLIC_RELEASE_PUBLISHED !== '1', 'This build has no published release.');
+  test.skip(GATED, 'Installs are gated for early access; the emulator spec checks the steps a tester sees.');
   await page.goto(`${SITE}/install/`);
   await expect(page.getByTestId('release-state')).toHaveAttribute('data-published', 'true');
   await expect(page.getByTestId('download-unavailable')).toHaveCount(0);
@@ -134,6 +167,7 @@ test('a published release links to its real files', async ({ page }) => {
 
 test('an unpublished release is never presented as working', async ({ page }) => {
   test.skip(process.env.NEXT_PUBLIC_RELEASE_PUBLISHED === '1', 'This build has a published release.');
+  test.skip(GATED, 'Installs are gated for early access: a visitor sees no commands at all.');
   await page.goto(`${SITE}/install/`);
   const main = page.locator('main');
   await expect(page.getByTestId('release-state')).toHaveAttribute('data-published', 'false');
@@ -152,7 +186,9 @@ test('an unpublished release is never presented as working', async ({ page }) =>
   await page.goto(`${SITE}/`);
   await expect(page.getByTestId('release-state')).toContainText('these will not work yet');
   await expect(page.getByTestId('home-download')).toHaveText('Download: not published yet');
-  await page.getByRole('link', { name: 'Install', exact: true }).first().click();
+  const install = page.getByRole('link', { name: 'Install', exact: true }).first();
+  if (!(await install.isVisible())) await page.getByRole('button', { name: 'Menu' }).click(); // a phone keeps the header links behind the menu
+  await install.click();
   await expect(page).toHaveURL(/\/install\/$/);
   await page.goto(`${SITE}/`);
   await page.getByTestId('home-download').click();
@@ -163,7 +199,16 @@ test('an unpublished release is never presented as working', async ({ page }) =>
 test('the install page covers every step, and the scripts are served as published', async ({ page, request }) => {
   await page.goto(`${SITE}/install/`);
   const main = page.locator('main');
-  for (const text of ['sha256sum -c', 'Get-FileHash', 'agentontrack self upgrade', 'agentontrack self rollback', 'agentontrack self uninstall --purge', 'Troubleshooting', 'agentontrack setup', 'agentontrack goal set', 'agentontrack run codex', 'agentontrack approve', 'agentontrack verify', 'agentontrack dashboard']) await expect(main, text).toContainText(text);
+  if (GATED) {
+    // Early access: a visitor sees the gate, an honest note that the source is public, and no commands.
+    await expect(page.getByTestId('install-gate')).toBeVisible();
+    await expect(main).toContainText('open to invited testers');
+    await expect(main).toContainText('source and releases are public on GitHub');
+    for (const text of ['sha256sum -c', 'agentontrack self upgrade', 'curl -fsSL']) await expect(main).not.toContainText(text);
+    await expect(page.getByTestId('download')).toHaveCount(0);
+  } else {
+    for (const text of ['sha256sum -c', 'Get-FileHash', 'agentontrack self upgrade', 'agentontrack self rollback', 'agentontrack self uninstall --purge', 'Troubleshooting', 'agentontrack setup', 'agentontrack goal set', 'agentontrack run codex', 'agentontrack approve', 'agentontrack verify', 'agentontrack dashboard']) await expect(main, text).toContainText(text);
+  }
   for (const name of ['install.sh', 'install.ps1']) {
     const r = await request.get(`${SITE}/${name}`);
     expect(r.status(), name).toBe(200);
@@ -224,6 +269,7 @@ test('benchmarks keep the negative results as recorded, claim no savings, and ma
 });
 
 test('feedback builds a prefilled GitHub issue and does not pretend to submit', async ({ page }) => {
+  test.skip(ACCOUNTS, 'With accounts, feedback is stored; the emulator specs cover it.');
   await page.goto(`${SITE}/feedback/`);
   await page.getByRole('button', { name: 'Helpful', exact: true }).click();
   await page.getByLabel('What worked well?').fill('Clear status');
@@ -273,23 +319,26 @@ test('the dashboard page policy allows reCAPTCHA hosts only in a build that has 
   expect(html).toContain("default-src 'none'");
   expect(html).not.toContain("'unsafe-eval'");
   expect(html).not.toMatch(/script-src[^;]*'unsafe-inline'/);
+  expect(html).toContain("font-src 'self'");
 });
 
 test('a preview release is shown on its own, never as the stable download, and the changelog no longer says rc.4 is unpublished', async ({ page }) => {
   const on = process.env.NEXT_PUBLIC_PREVIEW_PUBLISHED === '1' && !!process.env.NEXT_PUBLIC_PREVIEW_VERSION;
   const version = process.env.NEXT_PUBLIC_PREVIEW_VERSION ?? '';
-  await page.goto(`${SITE}/install/`);
-  await expect(page.getByTestId('preview-release')).toHaveCount(on ? 1 : 0);
-  if (on) {
-    const sec = page.getByTestId('preview-release');
-    await expect(sec).toContainText('not the stable release');
-    await expect(sec).toContainText('Phone control is switched off');
-    await expect(sec).toContainText(`--version ${version}`);
-    await expect(sec).toContainText(`AOT_VERSION = '${version}'`);
-    await expect(page.getByTestId('preview-notes')).toHaveAttribute('href', `https://github.com/satyamamarpandey/agentontrack/releases/tag/v${version}`);
-    // The stable table and the plain installer text are not changed by a preview.
-    const hrefs = await page.getByTestId('download').evaluateAll((els) => els.map((e) => e.getAttribute('href') ?? ''));
-    for (const h of hrefs) expect(h, h).not.toContain(version);
+  if (!GATED) {
+    await page.goto(`${SITE}/install/`);
+    await expect(page.getByTestId('preview-release')).toHaveCount(on ? 1 : 0);
+    if (on) {
+      const sec = page.getByTestId('preview-release');
+      await expect(sec).toContainText('not the stable release');
+      await expect(sec).toContainText('Phone control is switched off');
+      await expect(sec).toContainText(`--version ${version}`);
+      await expect(sec).toContainText(`AOT_VERSION = '${version}'`);
+      await expect(page.getByTestId('preview-notes')).toHaveAttribute('href', `https://github.com/satyamamarpandey/agentontrack/releases/tag/v${version}`);
+      // The stable table and the plain installer text are not changed by a preview.
+      const hrefs = await page.getByTestId('download').evaluateAll((els) => els.map((e) => e.getAttribute('href') ?? ''));
+      for (const h of hrefs) expect(h, h).not.toContain(version);
+    }
   }
   await page.goto(`${SITE}/changelog/`);
   await expect(page.locator('main')).not.toContainText('Not published yet. Downloads on this site are still');

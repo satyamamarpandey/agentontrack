@@ -296,6 +296,7 @@ test('mobile layout: no horizontal page overflow on any screen', async ({ page, 
 for (const theme of ['dark', 'light']) {
   test(`accessibility: no serious axe violations on any screen (${theme})`, async ({ page, env }) => {
     test.skip(test.info().project.name !== 'chromium', 'Axe runs once, in Chromium.');
+    test.setTimeout(240_000); // fifteen screens, each analysed by axe, after a real pairing: well over the usual budget on a slow machine
     seed(env);
     env.hook('git push');
     await env.pair(page);

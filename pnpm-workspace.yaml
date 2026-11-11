@@ -14,3 +14,5 @@ allowBuilds:
 # Firestore pins @grpc/grpc-js ~1.9, which has a high advisory (GHSA-m9gg-hp2v-232j). Only its Node entry uses grpc: the browser bundles here never load it.
 overrides:
   '@grpc/grpc-js': ^1.14.7
+
+storeDir: .pnpm-store

@@ -73,6 +73,9 @@ export function demoGet(path: string): unknown {
     case '/api/actions': return [{ seq: 44, ts: day(0), type: 'action.requested', payload: { tool: 'Bash', decision: 'request_approval', assurance: 'enforced', reasons: ['vcs.push requires human approval'], effects: [] } }, { seq: 43, ts: day(0), type: 'action.requested', payload: { tool: 'Bash', decision: 'allow', assurance: 'partial', reasons: [], effects: [{ kind: 'exec.opaque' }] } }];
     case '/api/evaluations': return { heldout: pick('heldout'), matched: pick('matched-v3') ?? pick('matched-v3.partial'), securityCampaign: pick('security-campaign'), performance: pick('performance') };
     case '/api/settings': return { telemetry: false, diagnostics: false, theme: 'dark', environment: { show: true }, sync: { enabled: false, endpoint: '', deviceToken: '', lastSync: null }, syncPreview: { schema: 'agentontrack.sync/v1', projectLabel: 'demo-project', totals: { input: 130, output: 6300 } }, sessions: [{ id: 'demo', current: true, expiresAt: Date.now() + 3_600_000 }] };
+    // The Workspace's Plan tab and model fields read these; the demo has no plan and discovers nothing, and says so.
+    case '/api/plan': return { plan: null, facts: { testCommand: null, testCommandSource: null } };
+    case '/api/discovery': return { agents: [], models: [], note: 'Demo: nothing is discovered here. Pair with your local companion to see your agents and models.' };
     default:
       if (p?.startsWith('/api/agent-sessions/')) { const s = demoSessions.find((x) => x.id === p.split('/').pop()); return s ? { ...s, runs: [{ id: 'run_demo1', status: null, events: s.status === 'failed' ? ['Demo output', 'Error: 2 tests failed'] : ['Demo output'] }], transcript: [] } : {}; }
       if (p?.startsWith('/api/event/')) return { note: 'Demo: pair with your local companion to see real source records.', seq: Number(p.split('/').pop()) };

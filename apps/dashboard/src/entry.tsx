@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { accountPage, accountsEnabled, signedInHere } from './accounts';
+import { accountPage, accountsEnabled, checkAccess, connectGated, earlyAccessPage, signedInHere, signInPage } from './accounts';
 import { currentPort, enterDemo, localAddress, onPublicSite, pair, probeCompanion, setPort, type Probe } from './api';
 import { Icon, Logo } from './icons';
 
@@ -17,26 +17,61 @@ function Frame({ children, wide }: { children: ReactNode; wide?: boolean }) {
   );
 }
 
-/** The sign-in choices. Signing in and connecting a computer are separate: this page only decides which comes first. */
+type Gate = 'open' | 'checking' | 'signed-out' | 'not-approved' | 'revoked';
+
+/**
+ * The welcome page on the public site. Signing in and connecting a computer are separate: this page only decides which comes first.
+ * While early access lasts, connecting a computer from this site is for approved testers; the local address a companion prints always works.
+ */
 function Welcome({ onLocal, onDemo }: { onLocal: () => void; onDemo: () => void }) {
   const on = accountsEnabled();
+  const gated = connectGated();
   const signedIn = signedInHere();
-  const go = () => { location.href = `${accountPage()}?next=dashboard`; };
+  const [gate, setGate] = useState<Gate>(() => (!gated ? 'open' : signedIn ? 'checking' : 'signed-out'));
+  const [email, setEmail] = useState<string | null>(null);
+  useEffect(() => {
+    if (gate !== 'checking') return;
+    checkAccess().then((a) => { setEmail(a.email); setGate(a.admin || a.member === 'active' ? 'open' : a.member === 'revoked' ? 'revoked' : a.signedIn ? 'not-approved' : 'signed-out'); }).catch(() => setGate('signed-out'));
+  }, [gate]);
+  const go = () => { location.href = `${signInPage()}?next=dashboard`; };
   return (
     <Frame>
       <h1>Keep your AI coding agents on track</h1>
       <p className="muted">Set a goal, approve what matters, and see proof when the work is done. Your code and your agents stay on your computer.</p>
-      {signedIn ? <div className="alert good" role="status">You are signed in. <a href={accountPage()}>Account</a></div> : null}
+      {signedIn && on ? <div className="alert good" role="status">You are signed in. <a href={accountPage()}>Account</a></div> : null}
       <div className="stack" data-testid="welcome-options">
-        <button className="btn primary big" onClick={onLocal} data-testid="continue-local"><Icon name="terminal" />Continue on this computer</button>
-        <p className="muted small">No account needed. Next, you connect this computer to your own AgentOnTrack.</p>
-        <div className="divider"><span>or sign in to save your preferences</span></div>
-        <button className="btn big" disabled={!on} onClick={go} data-testid="continue-google">Continue with Google</button>
-        <button className="btn big" disabled={!on} onClick={go} data-testid="continue-github">Continue with GitHub</button>
-        <button className="btn big" disabled={!on} onClick={go} data-testid="continue-email">Sign up or sign in with email</button>
-        {!on
-          ? <p className="muted small" data-testid="signin-off">Sign-in is not switched on for this site yet. Everything else works without it.</p>
-          : <p className="muted small">Signing in is experimental (tested against emulators only) and saves your preferences. It never gives this website access to your computer.</p>}
+        {gate === 'open' ? <>
+          <button className="btn primary big" onClick={onLocal} data-testid="continue-local"><Icon name="terminal" />Continue on this computer</button>
+          <p className="muted small">{on ? 'Next, you connect this computer to your own AgentOnTrack.' : 'No account needed. Next, you connect this computer to your own AgentOnTrack.'}</p>
+        </> : null}
+        {gate === 'checking' ? <p className="muted" role="status" data-testid="gate-checking">Checking your early-access status…</p> : null}
+        {gate === 'signed-out' ? <div className="gate-note" data-testid="gate-signed-out">
+          <b>Early access</b>
+          <p className="muted small" style={{ margin: 0 }}>Connecting a computer from this site is open to approved testers for now. Sign in with your early-access account, or apply. The local address your companion prints, such as <code>{localAddress()}</code>, always works and needs no account.</p>
+          <a className="btn primary big" href={`${signInPage()}?next=dashboard`} data-testid="gate-signin">Sign in to continue</a>
+          <a className="btn big" href={earlyAccessPage()} data-testid="gate-apply">Apply for early access</a>
+        </div> : null}
+        {gate === 'not-approved' ? <div className="gate-note" data-testid="gate-not-approved">
+          <b>Not approved yet</b>
+          <p className="muted small" style={{ margin: 0 }}>{email ? `${email} is signed in, but ` : 'This account is signed in, but '}it is not an early-access tester yet. Your account page shows where your application stands. The local address your companion prints always works.</p>
+          <a className="btn big" href={accountPage()}>Your account</a>
+        </div> : null}
+        {gate === 'revoked' ? <div className="gate-note" data-testid="gate-revoked">
+          <b>Access revoked</b>
+          <p className="muted small" style={{ margin: 0 }}>This account's early access was switched off. The local address your companion prints still works for your own computer.</p>
+          <a className="btn big" href={accountPage()}>Your account</a>
+        </div> : null}
+        {!on ? <>
+          <div className="divider"><span>or sign in to save your preferences</span></div>
+          <button className="btn big" disabled onClick={go} data-testid="continue-google">Continue with Google</button>
+          <button className="btn big" disabled onClick={go} data-testid="continue-github">Continue with GitHub</button>
+          <button className="btn big" disabled onClick={go} data-testid="continue-email">Sign up or sign in with email</button>
+          <p className="muted small" data-testid="signin-off">Sign-in is not switched on for this site yet. Everything else works without it.</p>
+        </> : (!signedIn && gate === 'open' ? <>
+          <div className="divider"><span>or</span></div>
+          <button className="btn big" onClick={go} data-testid="continue-signin">Sign in to your account</button>
+          <p className="muted small">An account is for early access and the optional cloud features. It never gives this website access to your computer.</p>
+        </> : null)}
         <div className="divider"><span>or look around first</span></div>
         <button className="btn big" onClick={onDemo} data-testid="explore-demo">Explore a demo <span className="badge warn">invented data</span></button>
       </div>

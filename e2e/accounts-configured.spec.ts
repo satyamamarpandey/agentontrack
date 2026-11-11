@@ -9,8 +9,10 @@ import { Project } from '../packages/core/dist/index.js';
 
 const ORIGIN = 'http://127.0.0.1:4199';
 const SITE = `${ORIGIN}/agentontrack`;
+const GATED = process.env.NEXT_PUBLIC_INSTALL_PUBLIC !== '1';
 
 test.skip(!process.env.AOT_CONFIGURED_BUILD, 'Needs a site built with a config, and AOT_CONFIGURED_BUILD=1.');
+test.beforeEach(async ({ page }) => { await page.addInitScript(() => sessionStorage.setItem('aot-ea-seen', '1')); });
 
 /** Firebase's module chunks and any request to a Firebase or Google host. */
 async function watch(page: Page) {
@@ -30,18 +32,42 @@ async function watch(page: Page) {
   return { outside, firebaseCode };
 }
 
-test('offers sign-in, but a visitor loads no Firebase code and sends nothing outside until asking', async ({ page }) => {
+test('offers sign-in and early access, but a visitor loads no Firebase code and sends nothing outside until asking', async ({ page }) => {
   const seen = await watch(page);
-  for (const p of ['/', '/account/', '/feedback/', '/privacy/', '/install/', '/dashboard/?demo=1#project/demo/overview']) await page.goto(`${SITE}${p}`);
+  for (const p of ['/', '/account/', '/sign-in/', '/early-access/', '/feedback/', '/privacy/', '/install/', '/dashboard/?demo=1#project/demo/overview']) await page.goto(`${SITE}${p}`);
   expect(seen.outside).toEqual([]);
   expect(seen.firebaseCode).toEqual([]);
 
   await page.goto(`${SITE}/`);
   await expect(page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Account', includeHidden: true })).toHaveCount(1);
-  await page.goto(`${SITE}/account/`);
+  await expect(page.getByTestId('nav-signin')).toHaveAttribute('href', /\/sign-in\/$/);
+  await expect(page.getByTestId('nav-early-access')).toBeVisible();
+  await page.goto(`${SITE}/sign-in/`);
   await expect(page.getByTestId('signed-out')).toContainText('Google and Firebase become third parties');
   await page.getByTestId('sign-in').click();
   await expect.poll(() => seen.firebaseCode.length).toBeGreaterThan(0);
+});
+
+test('the application form loads nothing until it is sent, and a send that cannot reach Firebase fails honestly', async ({ page }) => {
+  const seen = await watch(page);
+  // In the emulator job Firebase answers on 127.0.0.1; this test is about the case where nothing answers, so those ports are cut as well.
+  await page.route(/127\.0\.0\.1:(8080|9099)\//, (route) => route.abort());
+  await page.goto(`${SITE}/early-access/`);
+  const f = page.getByTestId('early-access-form');
+  await f.getByLabel('Full name').fill('Config Person');
+  await f.getByLabel('Email address').fill('config@example.com');
+  await f.getByTestId('ea-next').click();
+  await f.getByLabel('macOS', { exact: true }).check();
+  await f.getByLabel('OpenAI Codex', { exact: true }).check();
+  await f.getByLabel('How frequently do you use AI coding agents?').selectOption('weekly');
+  await f.getByTestId('ea-next').click();
+  await f.getByLabel('Sandbox testing').check();
+  await f.getByLabel(/I have read the privacy notice/).check();
+  expect(seen.firebaseCode).toEqual([]);
+  await f.getByTestId('ea-submit').click();
+  await expect.poll(() => seen.firebaseCode.length).toBeGreaterThan(0);
+  await expect(page.getByTestId('early-access-error')).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId('early-access-sent')).toHaveCount(0);
 });
 
 test('feedback says where it goes, and sends only on Send', async ({ page }) => {
@@ -55,69 +81,58 @@ test('feedback says where it goes, and sends only on Send', async ({ page }) => 
   await expect.poll(() => seen.firebaseCode.length).toBeGreaterThan(0);
 });
 
-test('privacy and security say what accounts store, and that they are optional', async ({ page }) => {
+test('privacy, terms and security say what accounts and early access store, and that the program needs none of it', async ({ page }) => {
   await page.goto(`${SITE}/privacy/`);
   const main = page.locator('main');
   for (const text of ['You never need an account', 'Google and Firebase become third parties', 'never sent', 'Export or delete']) await expect(main).toContainText(text);
-  // The cloud features are disclosed as experimental, with what each one sends and what cannot be deleted.
   const all = (await main.innerText()).replace(/\s+/g, ' ');
-  for (const text of ['optional cloud features that can send data', 'experimental', 'Phone control', 'signed and encrypted with keys Firebase never sees', 'has not been run on a real Firebase project or a physical phone', 'Anonymous usage counts', 'off unless you turn them on', 'cannot be deleted once sent', 'No AgentOnTrack account is required for local use', 'processed by that provider']) expect(all).toContain(text);
-  for (const claim of ['Nothing leaves your machine', 'no telemetry']) expect(all).not.toContain(claim);
+  for (const text of ['optional cloud features that can send data', 'experimental', 'Phone control', 'signed and encrypted with keys Firebase never sees', 'has not been run on a physical phone', 'Anonymous usage counts', 'off unless you turn them on', 'cannot be deleted once sent', 'No AgentOnTrack account is required for local use', 'processed by that provider',
+    'Applying.', 'One application is kept per address', 'nothing is pre-ticked', 'Invitations.', 'one-way hash', 'Withdrawing.', 'audit log']) expect(all).toContain(text);
+  for (const claim of ['Nothing leaves your machine', 'no telemetry', 'no server of ours to send anything to']) expect(all).not.toContain(claim);
   await page.goto(`${SITE}/security/`);
-  await expect(page.locator('main')).toContainText('Optional accounts');
+  await expect(page.locator('main')).toContainText('Optional accounts and early access');
+  await expect(page.locator('main')).toContainText('one-way hashes');
+  await page.goto(`${SITE}/terms/`);
+  await expect(page.locator('main')).toContainText('No hosted execution');
+  if (GATED) await expect(page.locator('main')).toContainText('invited testers');
 });
 
-test('the project summary is off by default, and its preview holds only counts and the typed label', async ({ page }) => {
+test('a visitor meets the early-access gate on the install page and on this site\'s dashboard, and the local address still pairs', async ({ page }) => {
+  test.skip(!GATED, 'Installs are public in this build.');
+  const seen = await watch(page);
+  await page.goto(`${SITE}/install/`);
+  await expect(page.getByTestId('install-gate')).toBeVisible();
+  await expect(page.getByTestId('install-signin')).toHaveAttribute('href', /\/sign-in\/\?next=install$/);
+  await expect(page.locator('main')).not.toContainText('irm https://');
+  await expect(page.locator('main')).toContainText('source and releases are public on GitHub');
+  await page.goto(`${SITE}/dashboard/`);
+  await expect(page.getByRole('heading', { name: 'Keep your AI coding agents on track' })).toBeVisible();
+  await expect(page.getByTestId('gate-signed-out')).toBeVisible();
+  await expect(page.getByTestId('gate-signin')).toHaveAttribute('href', /\/sign-in\/\?next=dashboard$/);
+  await expect(page.getByTestId('continue-local')).toHaveCount(0);
+  expect(seen.firebaseCode).toEqual([]);
+  // A signed-in person whose status cannot be checked (nothing answers) is treated as signed out, not let through.
+  await page.evaluate(() => localStorage.setItem('aot-signed-in', '1'));
+  await page.reload();
+  await expect(page.getByTestId('gate-signed-out')).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId('continue-local')).toHaveCount(0);
+
+  // The companion's own address needs no account and no site at all.
   const dir = mkdtempSync(join(tmpdir(), 'aot-acct-'));
-  const root = join(dir, 'private-folder-name');
+  const root = join(dir, 'repo');
   mkdirSync(join(root, 'src'), { recursive: true });
   writeFileSync(join(root, 'src', 'a.txt'), 'a');
   process.env.AGENTONTRACK_HOME = join(dir, 'home');
   const p = new Project(root);
-  p.human.setGoal({ statement: 'A private goal', scope: { include: ['src/**'] }, prohibit: ['deploy'] });
-  p.human.createTask({ id: 't1', title: 'A private task', criteria: [{ id: 'c', description: 'npm run private-check', kind: 'artifact', path: 'src/a.txt' }] });
-  p.verifyTask('t1');
-  p.recordUsage({ runtime: 'claude-code', model: 'test-model', source: 'provider-reported', sessionId: 's', inputTokens: 100, outputTokens: 420 });
+  p.human.setGoal({ statement: 'A goal', scope: { include: ['src/**'] } });
   p.close();
   const c = await startCompanion({ root, allowedOrigins: [ORIGIN] });
   try {
-    const seen = await watch(page);
-    await page.goto(`${SITE}/dashboard/`);
-    await expect(page.getByRole('heading', { name: 'Keep your AI coding agents on track' })).toBeVisible();
-    await page.getByTestId('continue-local').click();
-    await page.getByText('This computer uses a different port').click();
-    await page.getByLabel('Companion port').fill(String(c.port));
-    await page.getByTestId('retry').click();
-    await expect(page.getByTestId('probe-status')).toContainText('Found AgentOnTrack on this computer', { timeout: 30_000 });
+    await page.goto(c.url);
+    await expect(page.getByRole('heading', { name: 'Connect this computer' })).toBeVisible();
     await page.getByLabel('Pairing code').fill(c.newPairingCode());
     await page.getByRole('button', { name: 'Pair', exact: true }).click();
-    await page.getByTestId('project-card').locator('.project-open').click();
-    const saver = page.getByTestId('summary-saver');
-    await expect(saver).toContainText('Sign in on the account page');
-    await expect(saver.getByRole('link')).toHaveAttribute('rel', 'noopener');
-
-    await page.evaluate(() => localStorage.setItem('aot-signed-in', '1'));
-    await page.reload();
-    const toggle = page.getByTestId('summary-toggle');
-    await expect(toggle).not.toBeChecked();
-    await expect(page.getByTestId('summary-preview')).toHaveCount(0);
-    await toggle.check();
-    await expect(saver.getByRole('button', { name: 'Save summary' })).toBeDisabled();
-    await page.getByTestId('summary-label').fill('my label');
-    const preview = JSON.parse((await page.getByTestId('summary-preview').textContent())!);
-    expect(preview).toEqual({
-      label: 'my label',
-      totals: { inputTokens: 100, outputTokens: 420, sessions: 1, tasks: 1, tasksVerified: expect.any(Number), actions: 0 },
-      rates: { criteriaPassing: 1, verificationRunsPassing: 1 },
-    });
-    expect(JSON.stringify(preview)).not.toMatch(/private|src|npm/);
-    // Nothing outside yet, and no Firebase code in the page that holds the companion session.
-    expect(seen.outside).toEqual([]);
-    expect(seen.firebaseCode).toEqual([]);
-    await saver.getByRole('button', { name: 'Save summary' }).click();
-    await expect.poll(() => seen.firebaseCode.length).toBeGreaterThan(0);
-    // Google's sign-in script is never asked for from this page.
-    expect(seen.outside.filter((u) => /apis\.google\.com|gstatic/.test(u))).toEqual([]);
+    await expect(page.getByTestId('project-card')).toBeVisible();
   } finally {
     await c.close();
     rmSync(dir, { recursive: true, force: true, maxRetries: 5 });

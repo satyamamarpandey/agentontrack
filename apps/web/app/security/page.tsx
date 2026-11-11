@@ -63,8 +63,8 @@ export default function Security() {
       <p>So a session from an outside origin gets no confirmation codes. Every change it asks for shows a code in your terminal, tied to that exact request, and describes the request there. Check it before typing the code. A compromised page can read what a paired session can read, but it cannot change anything alone.</p>
 
       {ACCOUNTS_ENABLED ? <>
-        <h2>Optional accounts</h2>
-        <p>Firebase rules limit each person to their own documents. Google's sign-in script loads only on the account page, which you open in a separate tab, so it does not run in a dashboard page that holds a companion session. Saving a project summary loads Firebase's code into the dashboard, but only when you press Save. Firebase's code comes from this site's own files, and is then as trusted as the site. See <Link href="/privacy">privacy</Link> for what is stored.</p>
+        <h2>Optional accounts and early access</h2>
+        <p>Firebase security rules are the only server-side authority this site has, and they limit each person to their own documents. Early access adds three rules of its own: an account reaches its cloud features only while it is an active member; a membership can only be created by using an invitation, in one transaction, by a signed-in account whose confirmed address the invitation names, before it expires; and only the administrator's account can read applications, make invitations, or revoke access. Invitation codes are stored as one-way hashes. Google's sign-in script loads only on the sign-in and account pages, which you open in a separate tab, so it does not run in a dashboard page that holds a companion session. Saving a project summary loads Firebase's code into the dashboard, but only when you press Save. Firebase's code comes from this site's own files, and is then as trusted as the site. See <Link href="/privacy">privacy</Link> for what is stored.</p>
       </> : null}
 
       <h2>Reporting</h2>

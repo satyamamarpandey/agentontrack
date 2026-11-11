@@ -1,5 +1,6 @@
 // Every skipped test is a place where a regression can hide, so each skip site is listed here with the reason it is acceptable. Adding a skip
-// fails this test until the list and docs/evaluation/ci-skip-audit.md are updated, which makes the addition a reviewed decision and not a quiet one.
+// fails this test until the list is updated (and the readiness record in docs/PRODUCT_READINESS.md says why), which makes the addition a reviewed
+// decision and not a quiet one.
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,7 +13,9 @@ const SKIP = /\b(?:test|it|describe)\.(?:skip|skipIf|fixme|todo)\(|\b(?:test|it)
 const AUDITED: Record<string, { count: number; why: string }> = {
   'packages/core/test/hardening.test.ts': { count: 0, why: 'the "it.skip" there is text written into a fixture file to test skipped-test detection, not a skip' },
   'packages/vscode/test/live.test.ts': { count: 1, why: 'real inference; runs only with AGENTONTRACK_LIVE=1' },
-  'e2e/accounts-configured.spec.ts': { count: 1, why: 'needs a site built with a Firebase config' },
+  'e2e/accounts-configured.spec.ts': { count: 2, why: 'needs a site built with a Firebase config; the early-access gate test applies only while installs are gated (NEXT_PUBLIC_INSTALL_PUBLIC unset)' },
+  'e2e/early-access-emulator.spec.ts': { count: 1, why: 'Firebase emulator job; that job fails on any skip' },
+  'e2e/early-access.spec.ts': { count: 1, why: 'axe runs once, in Chromium' },
   'e2e/accounts.spec.ts': { count: 1, why: 'Firebase emulator job; that job fails on any skip' },
   'e2e/phone.spec.ts': { count: 1, why: 'Firebase emulator job; that job fails on any skip' },
   'e2e/rules.spec.ts': { count: 1, why: 'Firebase emulator job; that job fails on any skip' },
@@ -27,7 +30,7 @@ const AUDITED: Record<string, { count: number; why: string }> = {
   'e2e/sessions.spec.ts': { count: 2, why: 'the Workspace is laid out differently on a phone (narrow widths are checked on the desktop projects); archiving needs a terminal proof on some builds, and the wording is covered by companion tests' },
   'e2e/phone-shell.spec.ts': { count: 1, why: 'applies only to the build without accounts' },
   'e2e/public-pairing.spec.ts': { count: 2, why: 'RISK: skips when the browser blocks the page from reaching the companion. The block is recorded as a result, but a regression that causes it would also skip. Listed in the audit doc' },
-  'e2e/site.spec.ts': { count: 5, why: 'build-variant conditions (accounts or not, release published or not) and axe once' },
+  'e2e/site.spec.ts': { count: 10, why: 'build-variant conditions (accounts or not, installs gated or not, release published or not) and axe once; each variant has its own assertions in the same file, so a skip here is always paired with a test that runs' },
   'e2e/workspace.spec.ts': { count: 3, why: 'desktop/mobile split and axe once' },
 };
 

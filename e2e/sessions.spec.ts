@@ -45,7 +45,8 @@ test.beforeEach(async ({ page, isMobile }) => {
   await expect(page.getByRole('navigation', { name: 'Main' }).or(page.getByRole('button', { name: 'Menu' })).first()).toBeVisible();
 });
 test.afterEach(async () => {
-  try { writeFileSync(join(root, 'release'), '1'); } catch { /* gone */ }
+  // When beforeEach skipped the test (phone layout), root is still '' and join('', 'release') would land in the repo folder.
+  if (root) { try { writeFileSync(join(root, 'release'), '1'); } catch { /* gone */ } }
   await c?.close();
   try { rmSync(dir, { recursive: true, force: true, maxRetries: 30, retryDelay: 200 }); } catch { /* a just-killed process can hold its folder for a moment; it is a throwaway in the OS temp directory */ }
 });
@@ -137,7 +138,8 @@ test('sessions: rename, pin and archive are recorded by the companion; archived 
   await startSession(page, 'quick-b', 'Second');
   await item(page, 'First').click();
   const detail = page.getByTestId('sess-detail');
-  await expect(detail.getByTestId('sess-fork')).toBeDisabled();
+  // No Fork control is offered, because this build cannot fork: a sentence says so instead of a dead button.
+  await expect(detail.getByTestId('sess-fork')).toHaveCount(0);
   await expect(detail.getByTestId('sess-fork-why')).toContainText('Not supported');
 
   await detail.getByTestId('sess-rename').click();

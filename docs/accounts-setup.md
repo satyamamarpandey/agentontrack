@@ -1,31 +1,34 @@
-# Accounts: what the owner has to switch on
+# Accounts and early access: what has to be switched on
 
-Accounts are optional, and off in any build without a Firebase config. The code for Google, GitHub and email sign-in, password reset, export, deletion and optional usage counts is in the repository and passes against the Firebase **emulators** in CI. **That is not production.** Nothing here is working for real visitors until the owner has done the steps below, and until a real sign-in has been tried on the live site.
+Accounts are optional for the program and off in any build of the site without a Firebase config. With a config, the site has sign-in, an early-access application form, an invitation-only membership, an administrator's review page, tester feedback, and the optional cloud features (saved summaries, the phone link, anonymous usage counts). All of it is enforced by `firestore.rules`; there is no server of ours. The code passes against the Firebase **emulators** in CI (`accounts`, `early-access-emulator`, `rules`, `phone` and `phone-new-session` specs). **That is not production**: the status of the real project is recorded below and in the launch report.
 
 ## Status
 
 | Part | Status |
 |---|---|
-| Sign-in code for Google, GitHub and email, reset, sign-out, export, delete | Written. Tested against the Auth and Firestore emulators in CI |
-| Per-user Firestore rules, and create-only usage counts | Written. Tested against the emulator |
-| A real Firebase project | **Owner action, not done** |
-| A real Google or GitHub sign-in on the live site | **NOT TESTED** |
-| App Check | Code present, **off** until a key is set. Enforcement is switched on by the owner |
+| Sign-in (Google, email and password; GitHub behind `NEXT_PUBLIC_AUTH_PROVIDERS`), reset, sign-out, export, delete | Written. Tested against the emulators in CI |
+| Early access: application form and popup, per-address de-duplication, invitation-only membership, administrator review page, revocation, audit log, tester feedback | Written. Tested against the emulators in CI (`e2e/early-access-emulator.spec.ts`) |
+| Per-user Firestore rules, membership gate on every account feature, create-only usage counts | Written. Tested against the emulators |
+| A real Firebase project | **Done 2026-11-10:** `agentontrack-early-access`, Firestore in `nam5`, rules deployed, web app registered, by `scripts/release/firebase-provision.mjs` from the owner's CLI login (see docs/early-access/ADMIN_RUNBOOK.md) |
+| Authentication on that project | Needs the console's "Get started" once; then the script enables email and password and the authorized domains. Google sign-in needs the console's two clicks |
+| A real Google sign-in on the live site | **NOT TESTED** until the owner enables Google in the console and tries it |
+| App Check | Code present, **off** until a reCAPTCHA key is set. Enforcement is switched on by the owner |
 
-## Steps (owner only)
+## Steps
 
-1. **Create a Firebase project** (the free Spark plan is enough) and register a web app. Copy its web config: `apiKey`, `authDomain`, `projectId`, `appId`. These are public identifiers, not secrets.
-2. **Authentication:** enable Google, GitHub and Email/Password. For GitHub, create an OAuth app at GitHub, set its callback to the URL Firebase shows, and paste the client id and secret into Firebase (the secret goes only into Firebase). Turn on email enumeration protection, and add `pandeysatyam.com` (and any dedicated hostname) to Authorized domains.
-3. **Firestore:** create the database in production mode, then deploy `firestore.rules` from this repository.
-4. **Repository variables** (public repo, Settings, Variables): `FIREBASE_WEB_CONFIG` set to the config as one line of JSON. Re-run the Pages workflow.
-5. **App Check (recommended):** register the web app with reCAPTCHA v3, set the variable `APPCHECK_SITE_KEY` to the **site key** (public), re-run Pages, watch the App Check metrics for a few days, then switch enforcement on for Authentication in the console, and for Firestore too only if you do not use the phone link (the computer cannot produce App Check tokens; see "Phone remote control" below). Feedback and usage counts are the calls an anonymous visitor can make, so they are the ones to protect.
-6. **Try it for real:** sign in with Google, with GitHub and with an email, send feedback, export, then delete, on the live site. Only then is this PASS.
+1. **Log the Firebase CLI in, as the owner** (once, in your own browser): `pnpm dlx firebase-tools@15 login`.
+2. **Provision**: `node scripts/release/firebase-provision.mjs --project <id>` creates the free project, a web app, the Firestore database, deploys the rules, enables email-and-password sign-in, adds the site's domain to the authorized domains, and writes the public web config to `.local/firebase-web-config.json`. Idempotent. It tells you if a step needs the console (Authentication "Get started", or enabling Google, whose OAuth consent screen cannot be created by an API).
+3. **Repository variable** on the public repository (Settings → Variables, or `gh variable set`): `FIREBASE_WEB_CONFIG` set to the config as one line of JSON. It is public identifiers, not a secret. Then export and push `main`; the pages workflow builds the site with accounts on.
+4. **Make yourself the administrator**: sign in once on the live site, copy the **Account id** from the account page, and add a document with that id to the `admins` collection (console, or with owner credentials). See `docs/early-access/ADMIN_RUNBOOK.md`.
+5. **Installs**: while `NEXT_PUBLIC_INSTALL_PUBLIC` is unset, the install page and the site's dashboard connection step are for active members. Set it to `1` in the pages workflow to open them to everyone.
+6. **App Check (recommended later)**: register the web app with reCAPTCHA v3, set the variable `APPCHECK_SITE_KEY` to the **site key**, re-run Pages, watch the metrics, then switch enforcement on for Authentication, and for Firestore only if nobody uses the phone link (the computer cannot produce App Check tokens).
+7. **Try it for real** with a controlled application: apply, approve, invite, use the invitation, install, connect, revoke. Only then is this PASS; record the result in the launch report.
 
 ## What is stored, and never stored
 
-Stored, under the person's own user id: name and email, theme, feedback they sent while signed in, project summaries they chose to save (counts only). Anonymous feedback is stored without a link to anyone. Usage counts, if a person opts in, hold a random install id, a week, agent program names and four counts.
+Under a person's own account: name and email, theme, feedback sent while signed in, project summaries they chose to save (counts only). Early access: the application's answers (keyed by the hash of the address), invitations as hashes with address and expiry, membership records, tester feedback, and the administrator's audit log. Anonymous feedback is stored without a link to anyone. Usage counts, if opted in, hold a random install id, a week, agent program names and four counts.
 
-Never stored or sent: code, prompts, file paths, commands, goals, conversations, provider logins or tokens. No GitHub token is read: sign-in keeps only the name and email, and importing a repository uses your own git setup on your own computer.
+Never stored or sent: code, prompts, file paths, commands, goals, conversations, provider logins or tokens, invitation tokens (only their hashes). No GitHub token is read.
 
 ## Cost
 
@@ -33,11 +36,10 @@ Spark limits apply. If a limit is reached the site keeps working and accounts st
 
 ## Phone remote control: extra owner steps
 
-These are needed only if you want the phone link (see docs/workspace/PHONE.md). Everything below is done in the Firebase console or with the Firebase CLI; nothing here can be done by the code.
+Needed only for the phone link (see docs/workspace/PHONE.md). The link is for active members.
 
-1. **Enable the Email/Password sign-in provider.** The phone link makes one limited account per linked computer (`computer-<id>@agentontrack.invalid`) with a random password the computer stores in its own 0600 file. These accounts are not for people.
-2. **Deploy `firestore.rules`** (`firebase deploy --only firestore:rules --project <your project>`). Without the new rules the link cannot work, and with the old rules it is closed by default.
-3. **Time-to-live (optional, recommended):** in Firestore, add a TTL policy on the field `expireAt` for the collection groups `responses`. Requests, snapshots and presence are small and replaced; responses are deleted by the phone after reading, and TTL cleans the rest.
-4. **App Check:** set `APPCHECK_SITE_KEY` (already covered above) so the phone and link pages attach tokens. **Do not enforce App Check on Firestore** for this feature: the computer is a Node program that cannot produce reCAPTCHA tokens. Enforcing it on Authentication is fine.
-5. **Authorized domains:** the Pages host must be listed under Authentication, Settings, Authorized domains.
-6. **Verify with disposable accounts** in a disposable project first: link a computer, connect a phone from a different network, send a prompt, revoke the phone, and unlink. Record the result in the release notes. Until then the phone link is verified only against the emulators.
+1. **Email/Password sign-in** must be on (the provisioning script enables it): the link makes one limited account per linked computer (`computer-<id>@agentontrack.invalid`) with a random password the computer stores in its own 0600 file. These accounts are not people and are not members; the person's own computer document admits them.
+2. **Deploy `firestore.rules`** (`firebase deploy --only firestore:rules --project <your project>`).
+3. **Time-to-live (optional, recommended):** in Firestore, add a TTL policy on the field `expireAt` for the collection group `responses`.
+4. **App Check:** do not enforce it on Firestore for this feature.
+5. **Verify with disposable accounts** first: link a computer, connect a phone from a different network, send a prompt, revoke the phone, and unlink. Until then the phone link is verified only against the emulators.

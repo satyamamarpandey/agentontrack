@@ -154,11 +154,10 @@ function SessionDetail({ s, reload, listRef }: { s: SessionRow; reload: () => vo
         <button className="btn small" aria-pressed={s.pinned} onClick={() => void update({ pinned: !s.pinned })} data-testid="sess-pin">{s.pinned ? 'Unpin' : 'Pin'}</button>
         <button className="btn small" onClick={() => void update({ archived: !s.archived })} data-testid="sess-archive">{s.archived ? 'Unarchive' : 'Archive'}</button>
         <button className="btn small" onClick={() => void review()} disabled={!!reviewWhy || busy} aria-describedby="sess-review-why" data-testid="sess-review">Review this run</button>
-        <button className="btn small" disabled aria-describedby="sess-fork-why" data-testid="sess-fork">Fork</button>
       </div>
       <p id="sess-review-why" className="muted small" data-testid="sess-review-why">{reviewWhy ?? `Review this run: ${reviewer?.name ?? 'another agent'} reads a handoff from the last run and reports problems. It is one run that you start now; nothing follows it. Automatic build-then-review needs your own API key in paid API mode and a grant.`}</p>
       {reviewer ? <ModelField agent={reviewer.id} value={reviewModel} onChange={setReviewModel} name="sess-review-model" models={disc.data?.models} width={140} placeholder="reviewer default" /> : null}
-      <p id="sess-fork-why" className="muted small" data-testid="sess-fork-why">Fork: {FORK_UNSUPPORTED}</p>
+      <p className="muted small" data-testid="sess-fork-why">Fork: {FORK_UNSUPPORTED}</p>
       {msg ? <div className="alert bad" role="alert">{msg}</div> : null}
       {limitLine ? <div className="alert warn" role="status" data-testid="sess-limit">{limitLine}</div> : null}
       {timeLine ? <div className="alert warn" role="status" data-testid="sess-time-limit">{timeLine}. The session is kept: resume it with a longer limit if the work is not done.</div> : null}

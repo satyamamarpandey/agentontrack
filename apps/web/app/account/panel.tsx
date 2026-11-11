@@ -1,127 +1,127 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
 import type { User } from 'firebase/auth';
-import type { AccountData } from '../../lib/accounts';
-import { loadAccounts, SIGNED_IN_FLAG } from '../../lib/accounts-config';
+import Link from '../link';
+import { EarlyAccessButton } from '../early-access/launcher';
+import { Icon } from '../ui/icons';
+import { toast } from '../ui/toast';
 import { applyTheme } from '../theme-toggle';
-
-type Api = NonNullable<Awaited<ReturnType<NonNullable<typeof loadAccounts>>>>;
-// Kept outside React state so an error on the very first click can still be put in plain words.
-let loadedApi: Api | null = null;
+import { loadAccounts, SIGNED_IN_FLAG } from '../../lib/accounts-config';
+import type { Access, AccountData, MyApplication } from '../../lib/accounts';
+import { SignInPanel, type Api } from '../sign-in/panel';
 
 export function AccountPanel() {
   const [api, setApi] = useState<Api | null>(null);
   const [user, setUser] = useState<User | null>(null);
+  const [access, setAccess] = useState<Access | null>(null);
+  const [application, setApplication] = useState<MyApplication | null>(null);
   const [data, setData] = useState<AccountData | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [mode, setMode] = useState<'signin' | 'create' | 'reset'>('signin');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
   const [deletePassword, setDeletePassword] = useState('');
+  const [ready, setReady] = useState(false);
 
   const refresh = useCallback(async (a: Api, u: User) => {
-    const d = await a.loadData(u.uid);
-    setData(d);
-    if (d.preferences?.theme) applyTheme(d.preferences.theme);
+    const acc = await a.access();
+    setAccess(acc);
+    if (acc.member === 'active' || acc.admin) {
+      let d = await a.loadData(u.uid);
+      if (!d.profile) { await a.ensureProfile(u, document.documentElement.dataset.theme ?? 'dark'); d = await a.loadData(u.uid); }
+      setData(d);
+      if (d.preferences?.theme) applyTheme(d.preferences.theme);
+    } else {
+      setData(null);
+      setApplication(await a.myApplication());
+    }
   }, []);
   const act = async (fn: () => Promise<void>) => {
     setBusy(true); setError(''); setNote('');
-    try { await fn(); } catch (e) { setError(loadedApi ? loadedApi.explain(e) : (e as Error).message); } finally { setBusy(false); }
+    try { await fn(); } catch (e) { setError(api ? api.explain(e) : (e as Error).message); } finally { setBusy(false); }
   };
 
   // Firebase loads here only for someone who signed in on this browser before.
   useEffect(() => {
-    if (localStorage.getItem(SIGNED_IN_FLAG) !== '1' || !loadAccounts) return;
+    if (localStorage.getItem(SIGNED_IN_FLAG) !== '1' || !loadAccounts) { setReady(true); return; }
     act(async () => {
       const a = await loadAccounts!();
       setApi(a);
       const u = await a.currentUser();
       setUser(u);
       if (u) await refresh(a, u);
-    });
+    }).finally(() => setReady(true));
   }, [refresh]);
 
-  const theme = () => document.documentElement.dataset.theme ?? 'dark';
-  const finishWith = async (a: Api, u: User) => {
-    setUser(u);
-    await refresh(a, u);
-    // Came from the dashboard's welcome page: go back there, now signed in. Signing in grants nothing on the computer.
-    const next = new URLSearchParams(location.search).get('next');
-    if (next === 'dashboard') location.href = `${process.env.NEXT_PUBLIC_BASE_PATH ?? ''}/dashboard/`;
-    if (next === 'mobile') location.href = `${process.env.NEXT_PUBLIC_BASE_PATH ?? ''}/dashboard/?m=1`;
-  };
-  const withApi = async () => { const a = api ?? await loadAccounts!(); loadedApi = a; setApi(a); return a; };
-
+  if (!ready) return <p className="muted" role="status">One moment…</p>;
   if (!user) {
     return (
-      <section className="panel stack" data-testid="signed-out">
-        <h2>Sign in or create an account</h2>
-        <p>An account is optional. It keeps your name and email, your theme, feedback you send while signed in, and project summaries you choose to save, in Firebase under your own account only.</p>
-        <p><b>Signing in never gives this website access to your computer, your files or your agents.</b> Connecting your computer is a separate step, confirmed in your terminal.</p>
-        <p className="muted small">Pressing a button loads Firebase, and for Google or GitHub their sign-in too, from their servers, so Google and Firebase become third parties for you. Until then, nothing is loaded from them. Code, prompts, paths, commands and project records are never sent.</p>
-        {error ? <p className="alert" role="alert">{error}</p> : null}
-        <div className="row">
-          <button className="btn primary" disabled={busy} data-testid="sign-in" onClick={() => act(async () => { const a = await withApi(); await finishWith(a, await a.signIn(theme(), 'google')); })}>Continue with Google</button>
-          <button className="btn" disabled={busy} data-testid="sign-in-github" onClick={() => act(async () => { const a = await withApi(); await finishWith(a, await a.signIn(theme(), 'github')); })}>Continue with GitHub</button>
-        </div>
-        <form className="form" data-testid="email-form" onSubmit={(e) => { e.preventDefault(); act(async () => {
-          const a = await withApi();
-          if (mode === 'reset') { await a.resetPassword(email); setNote('If that address has an account, a reset link is on its way.'); return; }
-          await finishWith(a, mode === 'create' ? await a.emailSignUp(name, email, password, theme()) : await a.emailSignIn(email, password, theme()));
-        }).catch(() => undefined); }}>
-          <div className="row" role="group" aria-label="How to use email">
-            {(['signin', 'create', 'reset'] as const).map((m) => <button key={m} type="button" className={`btn small ${mode === m ? 'primary' : ''}`} aria-pressed={mode === m} onClick={() => { setMode(m); setError(''); setNote(''); }}>{m === 'signin' ? 'Sign in with email' : m === 'create' ? 'Create an account' : 'Reset password'}</button>)}
-          </div>
-          {mode === 'create' ? <label>Name<input value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" name="name" /></label> : null}
-          <label>Email<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" name="email" required /></label>
-          {mode !== 'reset' ? <label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={mode === 'create' ? 'new-password' : 'current-password'} name="password" required minLength={6} /></label> : null}
-          <div><button className="btn" type="submit" disabled={busy} data-testid="email-submit">{mode === 'create' ? 'Create account' : mode === 'reset' ? 'Send reset link' : 'Sign in'}</button></div>
-          {note ? <p role="status" data-testid="account-note">{note}</p> : null}
-        </form>
-        <p className="small"><a href={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ''}/dashboard/`}>Skip this: continue without an account</a></p>
+      <section className="panel stack">
+        <h2>Sign in</h2>
+        <SignInPanel onSignedIn={async (a, u) => { setApi(a); setUser(u); await refresh(a, u); }} />
       </section>
     );
   }
 
+  const member = access?.member === 'active' || access?.admin;
   return (
     <div className="stack" data-testid="signed-in">
-      {error ? <p className="alert" role="alert">{error}</p> : null}
-      {note ? <p className="panel" role="status" data-testid="account-note">{note}</p> : null}
+      {error ? <p className="alert bad" role="alert">{error}</p> : null}
+      {note ? <p className="alert good" role="status" data-testid="account-note">{note}</p> : null}
+
+      <section className="panel" data-testid="access-status">
+        <h2>Early access</h2>
+        {access?.admin ? <p><span className="badge accent">Administrator</span> You review applications on the <Link href="/admin">early access review page</Link>.</p> : null}
+        {access?.member === 'active' ? <p><span className="badge good"><Icon name="check" size={13} />Active tester</span> You can <Link href="/install">install the desktop preview</Link>, use the dashboard from this site, and send <Link href="/feedback">tester feedback</Link>.</p> : null}
+        {access?.member === 'revoked' ? <p><span className="badge bad">Access revoked</span> This account's early access was switched off. Write to the maintainer through the <Link href="/feedback">feedback page</Link> if you think that is wrong.</p> : null}
+        {access?.member === 'none' && !access.admin ? (
+          <div className="stack">
+            <p><span className="badge warn">Not approved yet</span> This account is signed in but is not an early-access tester.</p>
+            {application?.needsVerification ? <p className="small muted">Confirm your email address to see whether an application exists for it: <button type="button" className="link" disabled={busy} onClick={() => act(async () => { await api!.sendVerification(); setNote('Confirmation email sent. Follow its link, then reload this page.'); })}>send the confirmation email</button>.</p> : null}
+            {application && !application.needsVerification ? <p className="small">Your application <code>{application.reference}</code> is <b>{application.status}</b>{application.status === 'approved' ? ': the maintainer will send your invitation link by email' : application.status === 'pending' ? ': it is in the queue and has been read or will be soon' : ''}.</p> : null}
+            {!application ? <div className="row"><EarlyAccessButton className="btn primary">Apply for early access</EarlyAccessButton><span className="small muted">Received an invitation link? Open it; it signs you up.</span></div> : null}
+            {application && !application.needsVerification ? <button type="button" className="link" style={{ alignSelf: 'flex-start' }} disabled={busy} onClick={() => act(async () => { await api!.withdrawApplication(); setApplication(null); setNote('Your application was withdrawn and deleted.'); })}>Withdraw and delete my application</button> : null}
+          </div>
+        ) : null}
+      </section>
+
       <section className="panel">
         <h2>Profile</h2>
         <dl className="kv">
-          <dt>Name</dt><dd data-testid="profile-name">{data?.profile?.name || 'Not given'}</dd>
-          <dt>Email</dt><dd data-testid="profile-email">{data?.profile?.email || 'Not given'}</dd>
+          <dt>Name</dt><dd data-testid="profile-name">{data?.profile?.name || user.displayName || 'Not given'}</dd>
+          <dt>Email</dt><dd data-testid="profile-email">{data?.profile?.email || user.email || 'Not given'}{access?.verified ? '' : ' (not confirmed)'}</dd>
+          <dt>Signs in with</dt><dd>{access?.providerId === 'google.com' ? 'Google' : access?.providerId === 'github.com' ? 'GitHub' : 'email and password'}</dd>
+          <dt>Account id</dt><dd><code className="tiny" data-testid="account-uid">{user.uid}</code> <button type="button" className="link" onClick={() => navigator.clipboard?.writeText(user.uid).then(() => toast('Account id copied', 'good'))}>copy</button></dd>
         </dl>
       </section>
-      <section className="panel">
-        <h2>Preferences</h2>
-        <div className="row" role="group" aria-label="Saved theme">{['dark', 'light'].map((t) => <button key={t} className={`btn small ${data?.preferences?.theme === t ? 'primary' : ''}`} aria-pressed={data?.preferences?.theme === t} disabled={busy} onClick={() => act(async () => { await api!.savePreferences(user.uid, t); await refresh(api!, user); })}>{t}</button>)}</div>
-      </section>
-      <section className="panel" data-testid="account-feedback">
-        <h2>Feedback you sent while signed in</h2>
-        {data?.feedback.length ? <ul className="plain">{data.feedback.map((f) => <li key={f.id}>{f.rating ? <b>{f.rating}: </b> : null}{f.message}</li>)}</ul> : <p className="muted">None.</p>}
-      </section>
-      <section className="panel" data-testid="account-summaries">
-        <h2>Project summaries you saved</h2>
-        {data?.summaries.length ? <ul className="plain">{data.summaries.map((s) => <li key={s.id}><b>{s.label}</b> <code>{JSON.stringify({ ...s.totals, ...s.rates })}</code></li>)}</ul> : <p className="muted">None. You can save one from a project page in the dashboard.</p>}
-      </section>
+
+      {member ? <>
+        <section className="panel">
+          <h2>Preferences</h2>
+          <div className="seg" role="group" aria-label="Saved theme">{['dark', 'light'].map((t) => <button key={t} aria-pressed={data?.preferences?.theme === t} disabled={busy} onClick={() => act(async () => { await api!.savePreferences(user.uid, t); await refresh(api!, user); })}>{t}</button>)}</div>
+        </section>
+        <section className="panel" data-testid="account-feedback">
+          <h2>Feedback you sent while signed in</h2>
+          {data?.feedback.length ? <ul className="plain">{data.feedback.map((f) => <li key={f.id}>{f.rating ? <b>{f.rating}: </b> : null}{f.message}</li>)}</ul> : <p className="muted">None.</p>}
+        </section>
+        <section className="panel" data-testid="account-summaries">
+          <h2>Project summaries you saved</h2>
+          {data?.summaries.length ? <ul className="plain">{data.summaries.map((s) => <li key={s.id}><b>{s.label}</b> <code>{JSON.stringify({ ...s.totals, ...s.rates })}</code></li>)}</ul> : <p className="muted">None. You can save one from a project page in the dashboard.</p>}
+        </section>
+      </> : null}
+
       <section className="panel stack">
         <h2>Your data</h2>
         <div className="row">
-          <button className="btn" disabled={busy || !data} data-testid="export-data" onClick={() => api!.downloadData(data!)}>Export my data</button>
-          <button className="btn" disabled={busy} onClick={() => act(async () => { await api!.signOutHere(); setUser(null); setData(null); })}>Sign out</button>
+          {member ? <button className="btn" disabled={busy || !data} data-testid="export-data" onClick={() => api!.downloadData(data!)}>Export my data</button> : null}
+          <button className="btn" disabled={busy} onClick={() => act(async () => { await api!.signOutHere(); setUser(null); setData(null); setAccess(null); })}>Sign out</button>
           {!confirmDelete ? <button className="btn danger" disabled={busy} data-testid="delete-account" onClick={() => setConfirmDelete(true)}>Delete my account and data</button> : null}
         </div>
         {confirmDelete ? <div className="alert" role="alert">
-          {user.providerData[0]?.providerId === 'password' ? <label>Your password, to confirm<input type="password" value={deletePassword} onChange={(e) => setDeletePassword(e.target.value)} autoComplete="current-password" name="delete-password" /></label> : null}
-          <p>This deletes your profile, preferences, saved summaries, feedback sent while signed in, and your sign-in. It cannot be undone. Feedback sent while signed out is not linked to you, so it cannot be found this way.</p>
+          {access?.providerId === 'password' ? <label>Your password, to confirm<input type="password" value={deletePassword} onChange={(e) => setDeletePassword(e.target.value)} autoComplete="current-password" name="delete-password" /></label> : null}
+          <p>This deletes your profile, preferences, saved summaries, feedback sent while signed in, and your sign-in. It cannot be undone. Feedback sent while signed out is not linked to you, so it cannot be found this way. Your early-access application, if any, is deleted separately with the button above.</p>
           <div className="row">
-            <button className="btn danger" disabled={busy} data-testid="delete-confirm" onClick={() => act(async () => { await api!.deleteEverything(user, deletePassword); setUser(null); setData(null); setConfirmDelete(false); })}>Delete everything</button>
+            <button className="btn danger" disabled={busy} data-testid="delete-confirm" onClick={() => act(async () => { await api!.deleteEverything(user, deletePassword); setUser(null); setData(null); setAccess(null); setConfirmDelete(false); })}>Delete everything</button>
             <button className="btn" onClick={() => setConfirmDelete(false)}>Cancel</button>
           </div>
         </div> : null}

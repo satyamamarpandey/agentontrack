@@ -6,7 +6,7 @@ import { extname, join, normalize, resolve } from 'node:path';
 
 const ROOT = resolve(process.env.SITE_ROOT ?? 'site');
 const PORT = Number(process.env.SITE_PORT ?? 4173);
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json', '.txt': 'text/plain', '.json': 'application/json', '.sh': 'text/plain; charset=utf-8', '.ps1': 'text/plain; charset=utf-8' };
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json', '.txt': 'text/plain', '.json': 'application/json', '.sh': 'text/plain; charset=utf-8', '.ps1': 'text/plain; charset=utf-8', '.woff2': 'font/woff2', '.webm': 'video/webm' };
 createServer((req, res) => {
   const path = decodeURIComponent(new URL(req.url, 'http://x').pathname);
   if (!path.startsWith('/agentontrack')) { res.writeHead(404); res.end(); return; }

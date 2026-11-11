@@ -206,7 +206,7 @@ function Comparisons() {
           </ChartFrame>
         ))}
       </> : <Empty><Provenance kind="unavailable" /> No matched benchmark has been run, so no savings are claimed.</Empty>}
-      <section className="card"><h2>Not comparable yet</h2><p className="muted">Claude versus Codex versus Hermes: Codex and Hermes are not installed here, so there is no runtime comparison. Before-and-after on your own projects needs a matched baseline, which ordinary use does not provide.</p></section>
+      <section className="card"><h2>Not comparable yet</h2><p className="muted">Claude versus Codex versus Hermes: no matched comparison between runtimes has been run, so none is shown. Before-and-after on your own projects needs a matched baseline, which ordinary use does not provide.</p></section>
     </Page>
   );
 }
@@ -408,7 +408,7 @@ function SettingsPage({ theme, setTheme, onUnpair, reloadShell }: { theme: strin
   if (!data) return <Loading error={error} />;
   const save = async (body: object) => { setMsg(''); try { await post('/api/settings', body); reload(); } catch (e) { setMsg((e as Error).message); } };
   return (
-    <Page title="Settings" intro="Local-only. No account is needed, and this version sends nothing anywhere.">
+    <Page title="Settings" intro="Local-only. Nothing here leaves this computer unless you switch on one of the cloud features below, and each of them says exactly what it would send.">
       {dialog}
       {msg ? <div className="alert bad" role="alert">{msg}</div> : null}
       <section className="card stack">
@@ -417,11 +417,6 @@ function SettingsPage({ theme, setTheme, onUnpair, reloadShell }: { theme: strin
       </section>
       <PhoneAccessCard />
       <TelemetryCard consent={!!data.telemetry} setConsent={(on) => void save({ telemetry: on })} />
-      <section className="card stack">
-        <h2>Diagnostics</h2>
-        <label className="check"><input type="checkbox" checked={data.diagnostics} onChange={(e) => save({ diagnostics: e.target.checked })} /> Diagnostics (off by default)</label>
-        <p className="muted small">This only records your preference. This build sends no diagnostics, whatever it is set to.</p>
-      </section>
       <section className="card stack">
         <h2>This browser and others</h2>
         <ul className="list">{data.sessions.map((s: any) => <li key={s.id} className="row wrap"><span className="grow small">{s.current ? 'This browser' : s.userAgent || 'Browser'} · expires {new Date(s.expiresAt).toLocaleString()}</span>{!s.current ? <button className="btn small" onClick={async () => { await post('/api/sessions/revoke', { id: s.id }); reload(); }}>Revoke</button> : null}</li>)}</ul>
@@ -468,8 +463,19 @@ export function App() {
   const [palette, setPalette] = useState(false);
   const [extra, setExtra] = useState<Command[]>([]);
 
+  // Ctrl/Cmd K opens the palette. "G then a letter" jumps to a section, as in keyboard-first tools, and never while typing or inside a dialog.
   useEffect(() => {
-    const on = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette((p) => !p); } };
+    let armed = 0;
+    const GO: Record<string, Screen> = { p: 'Projects', w: 'Workspace', a: 'Agents', v: 'Approvals', u: 'Usage', s: 'Settings' };
+    const typing = (t: EventTarget | null) => t instanceof HTMLElement && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable);
+    const on = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette((p) => !p); return; }
+      if (e.ctrlKey || e.metaKey || e.altKey || typing(e.target) || document.querySelector('[role="dialog"]')) { armed = 0; return; }
+      const k = e.key.toLowerCase();
+      if (k === 'g') { armed = Date.now(); return; }
+      if (armed && Date.now() - armed < 900 && GO[k]) { e.preventDefault(); setRoute(null); setScreen(GO[k]!); setMenu(false); }
+      armed = 0;
+    };
     window.addEventListener('keydown', on);
     return () => window.removeEventListener('keydown', on);
   }, []);

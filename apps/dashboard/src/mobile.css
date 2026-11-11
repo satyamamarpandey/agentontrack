@@ -1,27 +1,30 @@
-.m-app{min-height:100dvh;display:flex;flex-direction:column;background:var(--bg,#0e1116);color:var(--fg,#e6edf3);padding-bottom:env(safe-area-inset-bottom)}
-.m-top{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;padding:calc(10px + env(safe-area-inset-top)) 16px 10px;background:inherit;border-bottom:1px solid var(--line,#2a313c)}
+/* Phone layout. It uses the shared tokens from styles.css, so it follows the light and dark themes like the rest of the app. */
+.m-app{min-height:100dvh;display:flex;flex-direction:column;background:var(--bg);color:var(--text);padding-bottom:env(safe-area-inset-bottom)}
+.m-top{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;padding:calc(10px + env(safe-area-inset-top)) 16px 10px;background:color-mix(in srgb, var(--bg) 88%, transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid var(--border)}
 .m-top h1{font-size:1.1rem;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .m-icon{min-width:44px;min-height:44px;display:grid;place-items:center;background:none;border:0;color:inherit;transform:rotate(180deg)}
 .m-main{flex:1;padding:12px 16px 96px;display:flex;flex-direction:column;gap:12px;max-width:640px;width:100%;margin:0 auto}
-.m-card{background:var(--panel,#161b22);border:1px solid var(--line,#2a313c);border-radius:12px;padding:14px;text-align:left;color:inherit;font:inherit;width:100%}
+.m-card{background:var(--raised);border:1px solid var(--border);border-radius:var(--r-4);padding:14px;text-align:left;color:inherit;font:inherit;width:100%}
 .m-card h2{font-size:1rem;margin:0 0 4px}
 .m-row{display:flex;align-items:center;gap:10px;min-height:56px;cursor:pointer}
-.m-btn{min-height:48px;padding:0 18px;font-size:1rem;display:inline-flex;align-items:center;justify-content:center;text-decoration:none}
-.m-note{margin:0;color:var(--muted,#9aa6b2);font-size:.9rem}
-.m-code{display:block;word-break:break-all;font-family:ui-monospace,monospace;font-size:.95rem;padding:8px;background:var(--bg,#0e1116);border-radius:8px}
-.m-fresh{margin:0;padding:8px 12px;border-radius:8px;font-size:.88rem;border:1px solid var(--line,#2a313c)}
-.m-fresh.off{background:#3a2a0a;color:#ffd58a;border-color:#7a5a1a}
-.m-tabs{position:fixed;left:0;right:0;bottom:0;display:flex;flex-direction:row;flex:none;overflow:visible;gap:0;background:var(--panel,#161b22);border-top:1px solid var(--line,#2a313c);padding-bottom:env(safe-area-inset-bottom);z-index:6}
-.m-tabs button{padding:4px 2px;border-radius:0;box-shadow:none;flex:1;min-height:56px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;background:none;border:0;color:var(--muted,#9aa6b2);font-size:.72rem;position:relative}
-.m-tabs button[aria-current=page]{color:#5eead4}
-.m-dot{position:absolute;top:8px;right:28%;width:9px;height:9px;border-radius:50%;background:#f59e0b}
+.m-btn{min-height:48px;padding:0 18px;font-size:1rem;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;border-radius:var(--r-3)}
+.m-note{margin:0;color:var(--muted);font-size:.9rem}
+.m-code{display:block;word-break:break-all;font-family:var(--font-mono);font-size:.95rem;padding:8px;background:var(--sunken);border-radius:var(--r-2)}
+.m-fresh{margin:0;padding:8px 12px;border-radius:var(--r-2);font-size:.88rem;border:1px solid var(--border)}
+.m-fresh.off{background:var(--warn-bg);color:var(--warn);border-color:var(--warn)}
+.m-tabs{position:fixed;left:0;right:0;bottom:0;display:flex;flex-direction:row;flex:none;overflow:visible;gap:0;background:var(--raised);border-top:1px solid var(--border);padding-bottom:env(safe-area-inset-bottom);z-index:6}
+.m-tabs button{padding:4px 2px;border-radius:0;box-shadow:none;flex:1;min-height:56px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;background:none;border:0;color:var(--muted);font-size:.72rem;position:relative}
+.m-tabs button[aria-current=page]{color:var(--accent)}
+.m-tabs button[aria-current=page]::after{content:'';position:absolute;top:0;left:20%;right:20%;height:2px;border-radius:2px;background:var(--accent)}
+.m-dot{position:absolute;top:8px;right:28%;width:9px;height:9px;border-radius:50%;background:var(--warn)}
 .m-app textarea,.m-app input{font-size:16px}
 .m-app button:disabled{opacity:.5}
-.m-suggest{padding:10px;border:1px solid var(--line,#2a313c);border-radius:10px}.m-app select{min-height:44px;font-size:16px}
+.m-suggest{padding:10px;border:1px solid var(--border);border-radius:var(--r-3)}.m-app select{min-height:44px;font-size:16px}
+@media (prefers-reduced-motion: no-preference){.m-tabs button{transition:color var(--dur-1)}.m-card{transition:border-color var(--dur-1)}}
 
 .dictation { display: inline-flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
-.dictation-btn { min-height: 44px; padding: 0 1rem; border-radius: 8px; border: 1px solid currentColor; background: transparent; color: inherit; font: inherit; cursor: pointer; }
-.dictation-btn.on { background: #b3261e; color: #fff; border-color: #b3261e; }
-.dictation-status.err { color: #b3261e; }
+.dictation-btn { min-height: 44px; padding: 0 1rem; border-radius: var(--r-2); border: 1px solid currentColor; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.dictation-btn.on { background: var(--bad); color: #fff; border-color: var(--bad); }
+.dictation-status.err { color: var(--bad); }
 .dictation-interim { opacity: .7; font-style: italic; }
-.dictation-consent { display: block; padding: .75rem; border: 1px solid currentColor; border-radius: 8px; margin-top: .5rem; }
+.dictation-consent { display: block; padding: .75rem; border: 1px solid currentColor; border-radius: var(--r-2); margin-top: .5rem; }

@@ -2,6 +2,7 @@
 // This tests what the rules refuse (the content is sealed by keys Firestore never sees, so the rules only keep accounts and roles apart and bound size and lifetime).
 // It says nothing about a real Firebase project: the same rules still need to be deployed and checked there by the owner.
 import { expect, test } from '@playwright/test';
+import { grantMembership } from './emulator-helpers';
 
 const PROJECT = 'demo-agentontrack';
 const AUTH = process.env.FIREBASE_AUTH_EMULATOR_HOST ?? '127.0.0.1:9099';
@@ -44,6 +45,21 @@ const A = () => `users/${alice.uid}/computers/c1`;
 test.beforeAll(async () => {
   alice = await signUp('alice@example.com'); aliceComputer = await signUp('computer-a@agentontrack.invalid');
   bob = await signUp('bob@example.com'); bobComputer = await signUp('computer-b@agentontrack.invalid');
+  // Early access: a person's account documents exist only while they are a member. The computers' limited accounts are not members and need not be.
+  await grantMembership('alice@example.com');
+  await grantMembership('bob@example.com');
+});
+
+test('a person who is not a member has no account documents at all, and a revoked member loses theirs', async () => {
+  const carol = await signUp('carol@example.com');
+  const doc = { name: 'Carol laptop', computerUid: aliceComputer.uid, pub: PUB, fingerprint: 'EEEE' };
+  expect((await write(carol, `users/${carol.uid}/computers/c1`, doc, ['createdAt'])).status, 'not a member').toBe(403);
+  expect((await write(carol, `users/${carol.uid}`, { profile: { name: 'Carol', email: 'carol@example.com' } }, ['updatedAt'])).status, 'not a member: profile').toBe(403);
+  await grantMembership('carol@example.com');
+  expect((await write(carol, `users/${carol.uid}`, { profile: { name: 'Carol', email: 'carol@example.com' } }, ['updatedAt'])).status, 'member: profile').toBe(200);
+  await grantMembership('carol@example.com', { status: 'revoked' });
+  expect((await read(carol, `users/${carol.uid}`)).status, 'revoked: read').toBe(403);
+  expect((await write(carol, `users/${carol.uid}/computers/c1`, doc, ['createdAt'])).status, 'revoked: link a computer').toBe(403);
 });
 
 test('a computer record is made by its owner only, with its key fixed afterwards', async () => {

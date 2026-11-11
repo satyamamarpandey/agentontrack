@@ -1,13 +1,171 @@
 rules_version = '2';
-// Optional accounts. Each person reaches only their own documents. Feedback can be created by anyone, read by no client,
-// and deleted only by the signed-in person who wrote it. Limits match apps/web/lib/feedback.ts.
+// Optional accounts, early access and the phone link. These rules are the only server-side authority this product has: there is no server of ours.
+//
+// Who is who:
+//   visitor   no sign-in. May apply for early access, send feedback and send usage counts. Reads nothing.
+//   person    signed in. Reaches their own membership record and their own application (by verified email). Nothing else until a member.
+//   member    signed in, in /members with status 'active', which only an invitation redeemed in a transaction can create. Reaches their own
+//             /users tree (profile, preferences, feedback, summaries, linked computers) and may send tester feedback.
+//   admin     signed in, listed in /admins. Reviews applications, creates invitations, revokes access, reads tester feedback and the audit log.
+//             /admins has no client write rule: the owner adds a document in the Firebase console (or with owner credentials). That is also the recovery path.
+//
+// Invitations are stored by the SHA-256 of their token, never the token. Redemption is one batch: the invite goes from 'sent' to 'redeemed' by the
+// signed-in, email-verified person it was addressed to, and in the same batch that person creates their own /members document, which the rules
+// accept only because getAfter() sees the redemption. Expired, revoked, redeemed or misaddressed invitations fail every one of those checks.
 service cloud.firestore {
   match /databases/{database}/documents {
-    function isOwner(uid) { return request.auth != null && request.auth.uid == uid; }
+    function signedIn() { return request.auth != null; }
+    function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
     function isString(v, max) { return v is string && v.size() <= max; }
+    function shortString(v, max) { return v is string && v.size() > 0 && v.size() <= max; }
     function isCount(v) { return v is number && v >= 0; }
     function isRate(v) { return v == null || (v is number && v >= 0 && v <= 1); }
+    function verifiedEmail() { return signedIn() && request.auth.token.email is string && request.auth.token.email_verified == true; }
+    function myEmail() { return request.auth.token.email.lower(); }
+    function emailHash(email) { return hashing.sha256(email).toHexString().lower(); }
+    function isAdmin() { return signedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)); }
+    function memberStatus(uid) { return get(/databases/$(database)/documents/members/$(uid)).data.status; }
+    function isActiveMember() { return signedIn() && exists(/databases/$(database)/documents/members/$(request.auth.uid)) && memberStatus(request.auth.uid) == 'active'; }
+    /** A person's own account documents: theirs, and only while they are an active member (or the administrator). */
+    function canUseAccount(uid) { return isOwner(uid) && (isActiveMember() || isAdmin()); }
+    function inList(values, allowed) { return values is list && values.size() > 0 && values.size() <= allowed.size() && values.hasOnly(allowed); }
 
+    // ---------- Early access ----------
+    function validApplication(d, id) {
+      return d.keys().hasAll(['name', 'email', 'os', 'tools', 'useCases', 'frequency', 'privacyAccepted', 'marketingConsent', 'source', 'status', 'schema', 'createdAt'])
+        && d.keys().hasOnly(['name', 'email', 'organization', 'role', 'os', 'osOther', 'tools', 'toolsOther', 'useCases', 'useCasesNote', 'frequency', 'challenge', 'why', 'privacyAccepted', 'marketingConsent', 'source', 'status', 'schema', 'createdAt'])
+        && shortString(d.name, 120)
+        && shortString(d.email, 254) && d.email == d.email.lower() && d.email.matches('^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$')
+        && id == emailHash(d.email)
+        && (!('organization' in d) || shortString(d.organization, 120))
+        && (!('role' in d) || shortString(d.role, 120))
+        && inList(d.os, ['windows', 'macos', 'linux', 'other'])
+        && (!('osOther' in d) || shortString(d.osOther, 120))
+        && inList(d.tools, ['claude-code', 'codex', 'hermes', 'local-models', 'other', 'none'])
+        && (!('toolsOther' in d) || shortString(d.toolsOther, 120))
+        && inList(d.useCases, ['multi-agent', 'monitoring', 'governance', 'approvals', 'sandbox', 'automation', 'local', 'team', 'other'])
+        && (!('useCasesNote' in d) || shortString(d.useCasesNote, 600))
+        && d.frequency in ['daily', 'weekly', 'monthly', 'rarely', 'never']
+        && (!('challenge' in d) || shortString(d.challenge, 1000))
+        && (!('why' in d) || shortString(d.why, 1000))
+        && d.privacyAccepted == true && d.marketingConsent is bool
+        && d.source in ['popup', 'page']
+        && d.status == 'pending' && d.schema == 1
+        && d.createdAt == request.time;
+    }
+    function adminReview(before, after) {
+      return after.diff(before).affectedKeys().hasOnly(['status', 'notes', 'reviewedAt', 'reviewedBy'])
+        && after.status in ['pending', 'approved', 'rejected']
+        && (!('notes' in after) || isString(after.notes, 2000))
+        && (!('reviewedAt' in after) || after.reviewedAt == request.time)
+        && (!('reviewedBy' in after) || after.reviewedBy == request.auth.uid);
+    }
+    match /applications/{id} {
+      // Anyone may apply, once per address. Nobody can read the pile except the administrator, and the applicant themselves once they sign in with that address.
+      allow create: if validApplication(request.resource.data, id);
+      allow get: if isAdmin() || (verifiedEmail() && id == emailHash(myEmail()));
+      allow list: if isAdmin();
+      allow update: if isAdmin() && adminReview(resource.data, request.resource.data);
+      allow delete: if isAdmin() || (verifiedEmail() && id == emailHash(myEmail()));
+    }
+
+    function validInvite(d) {
+      return d.keys().hasOnly(['email', 'applicationId', 'status', 'createdAt', 'createdBy', 'expiresAt', 'note'])
+        && d.keys().hasAll(['email', 'applicationId', 'status', 'createdAt', 'createdBy', 'expiresAt'])
+        && shortString(d.email, 254) && d.email == d.email.lower()
+        && shortString(d.applicationId, 64)
+        && d.status == 'sent'
+        && d.createdAt == request.time && d.createdBy == request.auth.uid
+        && d.expiresAt is timestamp && d.expiresAt > request.time && d.expiresAt < request.time + duration.value(31, 'd')
+        && (!('note' in d) || isString(d.note, 300));
+    }
+    /** The invitation is still open, addressed to the signed-in person, and that address is verified. */
+    function redeemable(d) {
+      return verifiedEmail() && d.status == 'sent' && d.email == myEmail() && request.time < d.expiresAt;
+    }
+    function redemption(before, after) {
+      return redeemable(before)
+        && after.diff(before).affectedKeys().hasOnly(['status', 'redeemedBy', 'redeemedAt'])
+        && after.status == 'redeemed' && after.redeemedBy == request.auth.uid && after.redeemedAt == request.time;
+    }
+    function adminInviteChange(before, after) {
+      return after.diff(before).affectedKeys().hasOnly(['status', 'revokedAt', 'revokedBy'])
+        && before.status == 'sent' && after.status == 'revoked' && after.revokedAt == request.time && after.revokedBy == request.auth.uid;
+    }
+    match /invites/{hash} {
+      allow create: if isAdmin() && validInvite(request.resource.data);
+      allow get: if isAdmin() || redeemable(resource.data);
+      allow list: if isAdmin();
+      allow update: if (isAdmin() && adminInviteChange(resource.data, request.resource.data)) || redemption(resource.data, request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    function inviteAfter(id) { return getAfter(/databases/$(database)/documents/invites/$(id)).data; }
+    function validNewMember(d, uid) {
+      return d.keys().hasOnly(['email', 'inviteId', 'applicationId', 'status', 'joinedAt', 'name'])
+        && d.keys().hasAll(['email', 'inviteId', 'applicationId', 'status', 'joinedAt'])
+        && verifiedEmail() && d.email == myEmail()
+        && shortString(d.inviteId, 64) && shortString(d.applicationId, 64)
+        && d.status == 'active' && d.joinedAt == request.time
+        && (!('name' in d) || isString(d.name, 200))
+        // The invitation named in the record must be redeemed by this very person in this very batch: getAfter() alone would also accept an
+        // invitation redeemed long ago (a re-admission ticket after the membership was deleted), so the redemption's time must be this request's.
+        && inviteAfter(d.inviteId).status == 'redeemed' && inviteAfter(d.inviteId).redeemedBy == uid
+        && inviteAfter(d.inviteId).redeemedAt == request.time
+        && inviteAfter(d.inviteId).email == d.email && inviteAfter(d.inviteId).applicationId == d.applicationId;
+    }
+    function adminMemberChange(before, after) {
+      return after.diff(before).affectedKeys().hasOnly(['status', 'statusAt', 'statusBy', 'note'])
+        && after.status in ['active', 'revoked']
+        && after.statusAt == request.time && after.statusBy == request.auth.uid
+        && (!('note' in after) || isString(after.note, 300));
+    }
+    match /members/{uid} {
+      allow get: if isOwner(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if isOwner(uid) && validNewMember(request.resource.data, uid);
+      allow update: if isAdmin() && adminMemberChange(resource.data, request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /admins/{uid} {
+      // A person can learn that they are the administrator; nobody can make themselves one from a browser.
+      allow get: if isOwner(uid);
+    }
+
+    function validAudit(d) {
+      return d.keys().hasOnly(['action', 'target', 'by', 'at', 'note'])
+        && d.keys().hasAll(['action', 'target', 'by', 'at'])
+        && d.action in ['approve', 'reject', 'reopen', 'invite', 'revoke-invite', 'revoke-member', 'reinstate', 'note', 'delete-application', 'export']
+        && shortString(d.target, 300) && d.by == request.auth.uid && d.at == request.time
+        && (!('note' in d) || isString(d.note, 300));
+    }
+    match /audit/{id} {
+      // Written by the administrator as they act; nobody can change or remove an entry afterwards, from a browser.
+      allow create: if isAdmin() && validAudit(request.resource.data);
+      allow get, list: if isAdmin();
+    }
+
+    function validTesterFeedback(d) {
+      return d.keys().hasOnly(['kind', 'rating', 'message', 'version', 'os', 'connector', 'diagnostics', 'uid', 'email', 'createdAt'])
+        && d.keys().hasAll(['kind', 'message', 'uid', 'createdAt'])
+        && d.kind in ['bug', 'feature', 'ui', 'connector', 'experience']
+        && (!('rating' in d) || (d.rating is int && d.rating >= 1 && d.rating <= 5))
+        && shortString(d.message, 4000)
+        && (!('version' in d) || isString(d.version, 40))
+        && (!('os' in d) || d.os in ['windows', 'macos', 'linux', 'other'])
+        && (!('connector' in d) || isString(d.connector, 60))
+        && (!('diagnostics' in d) || isString(d.diagnostics, 6000))
+        && d.uid == request.auth.uid
+        && (!('email' in d) || d.email == myEmail())
+        && d.createdAt == request.time;
+    }
+    match /testerFeedback/{id} {
+      allow create: if isActiveMember() && validTesterFeedback(request.resource.data);
+      allow get, list, delete: if isAdmin();
+    }
+
+    // ---------- Accounts ----------
     function validFeedback(d) {
       return d.keys().hasAll(['rating', 'message', 'uid', 'createdAt'])
         && d.keys().hasOnly(['rating', 'message', 'contact', 'uid', 'createdAt'])
@@ -42,16 +200,18 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
-      allow read, delete: if isOwner(uid);
-      allow create, update: if isOwner(uid) && validUser(request.resource.data);
+      // A person's own account, and only while they are an active member. A revoked member keeps nothing reachable from a browser; the administrator can delete the tree.
+      allow read: if canUseAccount(uid) || isAdmin();
+      allow delete: if canUseAccount(uid) || isAdmin();
+      allow create, update: if canUseAccount(uid) && validUser(request.resource.data);
 
       match /feedback/{id} {
-        allow read, delete: if isOwner(uid);
-        allow create: if isOwner(uid) && validFeedback(request.resource.data) && request.resource.data.uid == uid;
+        allow read, delete: if canUseAccount(uid) || isAdmin();
+        allow create: if canUseAccount(uid) && validFeedback(request.resource.data) && request.resource.data.uid == uid;
       }
       match /summaries/{id} {
-        allow read, delete: if isOwner(uid);
-        allow create, update: if isOwner(uid) && validSummary(request.resource.data);
+        allow read, delete: if canUseAccount(uid) || isAdmin();
+        allow create, update: if canUseAccount(uid) && validSummary(request.resource.data);
       }
     }
 
@@ -70,11 +230,11 @@ service cloud.firestore {
     // Everything the phone and a computer exchange is encrypted and signed by keys Firestore never sees, so these rules do not decide what is
     // allowed. They keep accounts apart, keep each principal to its own kind of write, and bound size and lifetime. The person's own account
     // (the phone) writes requests. A second, limited account made for the computer writes answers and snapshots. Neither can do the other's job.
+    // The computer's account is not a member: it is named in the person's own computer document, and that is what admits it.
     function isComputer(uid, cid) {
       return request.auth != null
         && request.auth.uid == get(/databases/$(database)/documents/users/$(uid)/computers/$(cid)).data.computerUid;
     }
-    function shortString(v, max) { return v is string && v.size() > 0 && v.size() <= max; }
     function validPub(p) { return p is map && p.keys().hasOnly(['sign', 'agree']) && shortString(p.sign, 200) && shortString(p.agree, 200); }
     function validEnvelope(d, id) {
       return d.keys().hasOnly(['v', 'uid', 'cid', 'did', 'rid', 'kind', 'ctr', 'iat', 'exp', 'iv', 'ct', 'sig', 'expireAt'])
@@ -87,47 +247,47 @@ service cloud.firestore {
     }
 
     match /users/{uid}/computers/{cid} {
-      allow read: if isOwner(uid) || isComputer(uid, cid);
+      allow read: if canUseAccount(uid) || isComputer(uid, cid) || isAdmin();
       // Made once, by the person, with the computer's key and its limited account named. After that only its display name can change, so a
       // page cannot swap the key later.
-      allow create: if isOwner(uid)
+      allow create: if canUseAccount(uid)
         && request.resource.data.keys().hasOnly(['name', 'computerUid', 'pub', 'fingerprint', 'createdAt'])
         && request.resource.data.keys().hasAll(['name', 'computerUid', 'pub', 'fingerprint', 'createdAt'])
         && shortString(request.resource.data.name, 60) && shortString(request.resource.data.computerUid, 128)
         && validPub(request.resource.data.pub) && shortString(request.resource.data.fingerprint, 40)
         && request.resource.data.createdAt == request.time;
-      allow update: if isOwner(uid) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name']) && shortString(request.resource.data.name, 60);
-      allow delete: if isOwner(uid);
+      allow update: if canUseAccount(uid) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name']) && shortString(request.resource.data.name, 60);
+      allow delete: if canUseAccount(uid) || isAdmin();
 
       match /devices/{did} {
-        allow read: if isOwner(uid) || isComputer(uid, cid);
+        allow read: if canUseAccount(uid) || isComputer(uid, cid);
         // A phone asks to be trusted. Being listed here trusts nothing: only the computer's own file does that.
-        allow create: if isOwner(uid) && request.resource.data.keys().hasOnly(['name', 'pub', 'status', 'createdAt'])
+        allow create: if canUseAccount(uid) && request.resource.data.keys().hasOnly(['name', 'pub', 'status', 'createdAt'])
           && request.resource.data.status == 'pending' && shortString(request.resource.data.name, 60) && validPub(request.resource.data.pub)
           && request.resource.data.createdAt == request.time;
         allow update: if isComputer(uid, cid) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) && request.resource.data.status in ['trusted', 'revoked'];
-        allow delete: if isOwner(uid) || isComputer(uid, cid);
+        allow delete: if canUseAccount(uid) || isComputer(uid, cid) || isAdmin();
       }
       match /requests/{rid} {
-        allow create: if isOwner(uid) && validEnvelope(request.resource.data, rid)
+        allow create: if canUseAccount(uid) && validEnvelope(request.resource.data, rid)
           && request.resource.data.uid == uid && request.resource.data.cid == cid
           && request.resource.data.iat <= request.time.toMillis() + 120000 && request.resource.data.exp > request.time.toMillis();
-        allow read, delete: if isComputer(uid, cid) || isOwner(uid);
+        allow read, delete: if isComputer(uid, cid) || canUseAccount(uid) || isAdmin();
       }
       match /responses/{rid} {
         allow create, update: if isComputer(uid, cid) && validEnvelope(request.resource.data, rid) && request.resource.data.uid == uid && request.resource.data.cid == cid;
-        allow read, delete: if isOwner(uid) || isComputer(uid, cid);
+        allow read, delete: if canUseAccount(uid) || isComputer(uid, cid) || isAdmin();
       }
       match /snapshots/{sid} {
         allow create, update: if isComputer(uid, cid) && request.resource.data.keys().hasOnly(['v', 'uid', 'cid', 'did', 'rid', 'kind', 'ctr', 'iat', 'exp', 'iv', 'ct', 'sig'])
           && request.resource.data.keys().hasAll(['v', 'uid', 'cid', 'did', 'rid', 'kind', 'ctr', 'iat', 'exp', 'iv', 'ct', 'sig'])
           && request.resource.data.uid == uid && request.resource.data.cid == cid && request.resource.data.ct is string && request.resource.data.ct.size() <= 260000;
-        allow read, delete: if isOwner(uid) || isComputer(uid, cid);
+        allow read, delete: if canUseAccount(uid) || isComputer(uid, cid) || isAdmin();
       }
       match /presence/{pid} {
         allow create, update: if isComputer(uid, cid) && request.resource.data.keys().hasOnly(['lastSeen', 'version']) && request.resource.data.lastSeen == request.time;
-        allow read: if isOwner(uid) || isComputer(uid, cid);
-        allow delete: if isOwner(uid);
+        allow read: if canUseAccount(uid) || isComputer(uid, cid);
+        allow delete: if canUseAccount(uid) || isAdmin();
       }
     }
 
@@ -139,6 +299,7 @@ service cloud.firestore {
       allow create: if validFeedback(request.resource.data)
         && (request.resource.data.uid == null || isOwner(request.resource.data.uid));
       allow delete: if request.auth != null && resource.data.uid == request.auth.uid;
+      allow get, list: if isAdmin();
     }
   }
 }

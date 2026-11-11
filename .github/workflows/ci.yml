@@ -96,7 +96,7 @@ jobs:
       - run: pnpm build:pages
       - run: pnpm exec playwright install --with-deps chromium
       - name: Sign-in, saved data, feedback, delete and rules, against the Firebase emulators
-        run: pnpm dlx firebase-tools@15 emulators:exec --only auth,firestore --project demo-agentontrack "pnpm exec playwright test accounts.spec accounts-configured.spec rules.spec phone.spec phone-new-session.spec --project=chromium --workers=1"
+        run: pnpm dlx firebase-tools@15 emulators:exec --only auth,firestore --project demo-agentontrack "pnpm exec playwright test accounts.spec accounts-configured.spec early-access-emulator.spec rules.spec phone.spec phone-new-session.spec --project=chromium --workers=1"
       - name: No emulator test may be silently skipped
         run: |
           node -e "const r=require('./test-results/e2e.json');const n=r.stats.skipped+r.stats.unexpected;console.log(JSON.stringify(r.stats));if(r.stats.skipped>0||r.stats.expected<20){console.error('skipped or too few tests ran');process.exit(1)}"

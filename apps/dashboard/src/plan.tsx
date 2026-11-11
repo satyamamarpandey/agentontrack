@@ -9,7 +9,7 @@ type Mode = 'manual' | 'guided' | 'bounded';
 interface Phase { id: string; title: string; kind: string; role: string; instructions: string; dependsOn: string[]; agent?: string; model?: string; acceptance: { id: string; description: string; kind: 'command' | 'manual'; command?: string }[]; budget: { maxUsd?: number; maxMinutes?: number; maxRuns?: number }; risks: string[]; effort?: { minutes: number; basis: string }; state: 'draft' | 'paused' | 'skipped'; taskId?: string }
 interface Plan { id: string; goal: string; mode: Mode; limits: { maxUsd: number; maxMinutes: number; maxRuns: number }; defaults: Record<string, { agent: string; model?: string }>; phases: Phase[] }
 interface View { id: string; status: string; why: string; runs: number; spentUsd: number }
-interface PlanData { plan: Plan | null; version?: number; sha?: string; approved?: boolean; views?: View[]; spent?: { usd: number; runs: number; minutes: number }; facts: { testCommand: string | null; testCommandSource: string | null }; sequence?: { active: boolean; ended: { reason: string; message: string } | null } }
+interface PlanData { plan: Plan | null; version?: number; sha?: string; approved?: boolean; views?: View[]; spent?: { usd: number; runs: number; minutes: number }; facts?: { testCommand: string | null; testCommandSource: string | null }; sequence?: { active: boolean; ended: { reason: string; message: string } | null } }
 interface Unattended { active: boolean; reason: string | null; grant: { remainingRuns: number; maxRuns: number; maxPhasesPerSequence: number; expiresAt: string } | null }
 
 const MODES: { id: Mode; label: string; help: string }[] = [
@@ -135,7 +135,7 @@ export function PlanPanel({ tick, agents, onRunStarted, reloadShell }: { tick: n
           <label>The goal<textarea value={goal} onChange={(e) => setGoal(e.target.value)} rows={3} required name="plan-goal" placeholder="For example: Fix the crash when the date is empty" /></label>
           <div><button className="btn primary" type="submit" disabled={!!busy || !goal.trim() || isDemo()} data-testid="plan-create">Create a plan</button></div>
         </form>
-        <p className="muted small">{d.facts.testCommand ? `This project's tests run with ${d.facts.testCommand}, found in ${d.facts.testCommandSource}.` : 'No test command was found in this project, so a test phase could not be checked by AgentOnTrack until you add one.'}</p>
+        <p className="muted small">{d.facts?.testCommand ? `This project's tests run with ${d.facts.testCommand}, found in ${d.facts.testCommandSource}.` : 'No test command was found in this project, so a test phase could not be checked by AgentOnTrack until you add one.'}</p>
       </div>
     );
   }
@@ -199,7 +199,7 @@ export function PlanPanel({ tick, agents, onRunStarted, reloadShell }: { tick: n
                     {ph.acceptance.map((a, k) => (
                       <div className="row wrap" key={a.id}>
                         <input className="grow" aria-label={`Check ${k + 1} description`} value={a.description} onChange={(e) => patchPhase(ph.id, (x) => { x.acceptance[k]!.description = e.target.value; })} />
-                        <select aria-label={`Check ${k + 1} kind`} value={a.kind} onChange={(e) => patchPhase(ph.id, (x) => { const c = x.acceptance[k]!; c.kind = e.target.value as 'command' | 'manual'; if (c.kind === 'manual') delete c.command; else c.command ??= d.facts.testCommand ?? ''; })} style={{ width: 120 }}><option value="command">Command</option><option value="manual">By hand</option></select>
+                        <select aria-label={`Check ${k + 1} kind`} value={a.kind} onChange={(e) => patchPhase(ph.id, (x) => { const c = x.acceptance[k]!; c.kind = e.target.value as 'command' | 'manual'; if (c.kind === 'manual') delete c.command; else c.command ??= d.facts?.testCommand ?? ''; })} style={{ width: 120 }}><option value="command">Command</option><option value="manual">By hand</option></select>
                         {a.kind === 'command' ? <input className="mono" aria-label={`Check ${k + 1} command`} value={a.command ?? ''} onChange={(e) => patchPhase(ph.id, (x) => { x.acceptance[k]!.command = e.target.value; })} style={{ width: 180 }} /> : null}
                         <button type="button" className="icon-btn" aria-label={`Remove check ${k + 1}`} onClick={() => patchPhase(ph.id, (x) => { x.acceptance.splice(k, 1); })}><Icon name="x" size={14} /></button>
                       </div>

@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { Icon } from './ui/icons';
 
 const EVENT = 'aot-theme';
 /** For a saved preference arriving from elsewhere on the page. */
@@ -15,5 +16,6 @@ export function ThemeToggle() {
     return () => window.removeEventListener(EVENT, on);
   }, []);
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem('bl-theme', theme); }, [theme]);
-  return <button className="btn small" aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? 'Light' : 'Dark'}</button>;
+  const next = theme === 'dark' ? 'light' : 'dark';
+  return <button className="icon-btn" aria-label={`Switch to ${next} theme`} title={`Switch to ${next} theme`} onClick={() => setTheme(next)}><Icon name={theme === 'dark' ? 'sun' : 'moon'} /></button>;
 }

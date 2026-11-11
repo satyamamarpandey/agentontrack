@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { execFile, spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
@@ -202,39 +202,58 @@ function detectVersionArgs(cmd: string, args: string[]): string | null {
   return r.status === 0 ? r.stdout.trim().split('\n')[0]!.slice(0, 80) : null;
 }
 
-function detectVersion(cmd: string): string | null {
-  const r = spawnSync(cmd, ['--version'], { encoding: 'utf8', timeout: 8000, shell: process.platform === 'win32' });
-  return r.status === 0 ? r.stdout.trim().split('\n')[0]!.slice(0, 80) : null;
+const seenCache = new Map<string, { at: number; v: string | null; refreshing?: boolean }>();
+const PROBE_TTL_MS = 60_000;
+/** The same probe without blocking: used to refresh an expired answer while the request is served from the old one. */
+function probeAsync(cmd: string, args: string[], timeout: number, pick: (stdout: string, stderr: string) => string | null): Promise<string | null> {
+  return new Promise((resolve) => {
+    execFile(cmd, args, { encoding: 'utf8', timeout, shell: process.platform === 'win32', windowsHide: true }, (err, stdout, stderr) => resolve(err ? null : pick(String(stdout), String(stderr))));
+  });
 }
-
-const seenCache = new Map<string, { at: number; v: string | null }>();
-/** A program's version, remembered for a minute: starting a process per agent on every request would be slow. */
-function cachedVersion(key: string, probe: () => string | null): string | null {
+const firstLine = (stdout: string) => stdout.trim().split('\n')[0]!.slice(0, 80) || null;
+/**
+ * A program's version (or login state), remembered for a minute: starting a process per agent on every request would be slow.
+ * The first answer is probed on the spot, since the page needs it. After that an expired answer is served as it is and refreshed in the
+ * background, so the dashboard never waits several seconds for a `--version` just because a minute has passed.
+ */
+function cachedVersion(key: string, probe: () => string | null, refresh?: () => Promise<string | null>): string | null {
   const hit = seenCache.get(key);
-  if (hit && Date.now() - hit.at < 60_000) return hit.v;
+  if (hit && Date.now() - hit.at < PROBE_TTL_MS) return hit.v;
+  if (hit && refresh) {
+    if (!hit.refreshing) {
+      hit.refreshing = true;
+      refresh().then((v) => seenCache.set(key, { at: Date.now(), v }), () => seenCache.set(key, { at: Date.now(), v: hit.v }));
+    }
+    return hit.v;
+  }
   const v = probe();
   seenCache.set(key, { at: Date.now(), v });
   return v;
 }
+/** A program's first `--version` line (or null when it is not installed), through the cache. */
+const programVersion = (cmd: string, args: string[] = ['--version']) => cachedVersion(cmd, () => detectVersionArgs(cmd, args), () => probeAsync(cmd, args, 8000, firstLine));
+/** Claude Code's own `auth status` JSON, through the cache: one process at most per minute, never a credential file. */
+const cachedClaudeAuth = () => parseClaudeAuth(cachedVersion('claude-auth-json', claudeAuthRaw, () => probeAsync('claude', ['auth', 'status'], 10_000, (out) => out.slice(0, 2000) || null)));
 
 /** Every agent this computer knows about, and whether the product can really start it. With no project given, nothing is claimed startable. */
 function runtimeList(root: string | undefined, claudeOverride = false, codexOverride = false): { id: string; name: string; installed: boolean; authenticated: boolean | null; canStart: boolean; authMode: AuthMode; apiKeyVarsInEnvironment: string[]; how: string | null; reason: string | null }[] {
   const terminal = (name: string) => `Starting ${name} from AgentOnTrack is not built yet. Start it in its own terminal: its hooks still report to this project.`;
   // A configured command (tests, or a person pointing at a wrapper) is what will actually be run, so it counts as installed.
-  const claudeInstalled = claudeOverride || !!cachedVersion('claude', () => detectVersion('claude'));
+  const version = programVersion;
+  const claudeInstalled = claudeOverride || !!version('claude');
   const claudeHooked = root ? hooksInstalled('claude-code', root) : false;
-  const claudeAuthed = claudeOverride ? null : claudeInstalled ? cachedVersion('claude-auth', () => (claudeAuth().authenticated ? 'yes' : null)) === 'yes' : null;
-  const claudeMode: AuthMode = claudeOverride || !claudeInstalled ? 'unknown' : classifyClaudeMethod(cachedVersion('claude-auth-method', () => claudeAuth().method));
+  const claudeAuthed = claudeOverride ? null : claudeInstalled ? cachedClaudeAuth().authenticated : null;
+  const claudeMode: AuthMode = claudeOverride || !claudeInstalled ? 'unknown' : classifyClaudeMethod(cachedClaudeAuth().method);
   const keyVars = apiKeyVarsPresent(process.env);
-  const codexInstalled = codexOverride || !!cachedVersion('codex', () => detectVersion('codex'));
+  const codexInstalled = codexOverride || !!version('codex');
   const codexHooked = root ? hooksInstalled('codex', root) : false;
-  const codexText = codexOverride || !codexInstalled ? null : cachedVersion('codex-login', codexLoginText);
+  const codexText = codexOverride || !codexInstalled ? null : cachedVersion('codex-login', codexLoginText, () => probeAsync('codex', ['login', 'status'], 10_000, (out, err) => `${out}${err}`.trim().slice(0, 200) || null));
   const codexMode: AuthMode = classifyCodexStatus(codexText);
   return [
     { id: 'claude-code', name: 'Claude Code', installed: claudeInstalled, authenticated: claudeAuthed, authMode: claudeMode, apiKeyVarsInEnvironment: keyVars, canStart: claudeInstalled && claudeHooked, how: 'claude -p, started by AgentOnTrack in this project, with its hooks reporting here', reason: !claudeInstalled ? 'Claude Code is not installed on this computer.' : !root ? 'Open a project to see whether it can start there.' : !claudeHooked ? 'Connect Claude Code to this project first, so its hooks are in place.' : null },
     { id: 'codex', name: 'Codex', installed: codexInstalled, authenticated: codexOverride || !codexInstalled ? null : codexText !== null, authMode: codexMode, apiKeyVarsInEnvironment: keyVars, canStart: codexInstalled && codexHooked, how: 'codex exec --json, started by AgentOnTrack in this project. It starts only after its hook program refuses a test request, because Codex runs actions if the hook is missing', reason: !codexInstalled ? 'Codex is not installed on this computer.' : !root ? 'Open a project to see whether it can start there.' : !codexHooked ? 'Connect Codex to this project first, so its hooks are in place.' : null },
-    { id: 'hermes', name: 'Hermes', installed: !!cachedVersion('hermes', () => detectVersion('hermes')), authenticated: null, authMode: 'unknown' as AuthMode, apiKeyVarsInEnvironment: keyVars, canStart: false, how: null, reason: terminal('Hermes') },
-    ...Object.values(PROVIDERS).map((a) => ({ id: a.id, name: a.name, installed: !!cachedVersion(a.bin, () => detectVersionArgs(a.bin, a.versionArgs)), authenticated: null, authMode: 'unknown' as AuthMode, apiKeyVarsInEnvironment: keyVars, canStart: false, how: null, reason: terminal(a.name) })),
+    { id: 'hermes', name: 'Hermes', installed: !!version('hermes'), authenticated: null, authMode: 'unknown' as AuthMode, apiKeyVarsInEnvironment: keyVars, canStart: false, how: null, reason: terminal('Hermes') },
+    ...Object.values(PROVIDERS).map((a) => ({ id: a.id, name: a.name, installed: !!version(a.bin, a.versionArgs), authenticated: null, authMode: 'unknown' as AuthMode, apiKeyVarsInEnvironment: keyVars, canStart: false, how: null, reason: terminal(a.name) })),
   ];
 }
 
@@ -245,12 +264,15 @@ function codexLoginText(): string | null {
   return r.status === 0 ? `${r.stdout}${r.stderr}`.trim().slice(0, 200) : null;
 }
 
-function claudeAuth(): { authenticated: boolean; method: string | null; subscription: string | null } {
-  const r = spawnSync('claude', ['auth', 'status'], { encoding: 'utf8', timeout: 10_000, shell: process.platform === 'win32' });
+function parseClaudeAuth(text: string | null): { authenticated: boolean; method: string | null; subscription: string | null } {
   try {
-    const o = JSON.parse(r.stdout);
+    const o = JSON.parse(text ?? '');
     return { authenticated: !!o.loggedIn, method: o.authMethod ?? null, subscription: o.subscriptionType ?? null };
   } catch { return { authenticated: false, method: null, subscription: null }; }
+}
+function claudeAuthRaw(): string | null {
+  const r = spawnSync('claude', ['auth', 'status'], { encoding: 'utf8', timeout: 10_000, shell: process.platform === 'win32' });
+  return r.status === 0 ? String(r.stdout).slice(0, 2000) || null : null;
 }
 
 export async function startCompanion(opts: CompanionOptions = {}): Promise<Companion> {
@@ -1048,7 +1070,7 @@ ${brief}`.slice(0, 19_900), model: o.reviewerModel, maxBudgetUsd: o.maxUsd }), {
     if (input.runtime !== 'claude-code') throw new HttpError(409, `Starting ${input.runtime} from the dashboard is not built yet. Run it yourself: its hooks still report here.`);
     if (!hooksInstalled('claude-code', entry.root)) throw new HttpError(409, 'Connect Claude Code to this project first, so its hooks are in place');
     try { checkSlashCommand(input.prompt, reportedCommands('claude-code')); } catch (err) { if (err instanceof CommandRefused) throw new HttpError(409, err.message); throw err; }
-    if (!opts.claudeCommand) { const g = mayStartUnder(classifyClaudeMethod(cachedVersion('claude-auth-method', () => claudeAuth().method)), paidApi); if (!g.ok) throw new HttpError(409, g.reason); }
+    if (!opts.claudeCommand) { const g = mayStartUnder(classifyClaudeMethod(cachedClaudeAuth().method), paidApi); if (!g.ok) throw new HttpError(409, g.reason); }
     const [cmd, ...pre] = opts.claudeCommand ?? ['claude'];
     const args = [...pre, '-p', input.prompt + attachmentNote(att), ...(att.length ? ['--add-dir', attachmentDir(p.stateDir)] : []), ...(resumeSession ? ['--resume', resumeSession] : []), '--model', input.model, ...(dollarCapAllowed('claude-code') ? ['--max-budget-usd', String(input.maxBudgetUsd)] : []), '--output-format', 'stream-json', '--verbose', ...claudeToolArgs(input.policy), '--setting-sources', 'project,local'];
     const where = runCwd(entry, p, input);
@@ -1219,10 +1241,11 @@ ${brief}`.slice(0, 19_900), model: o.reviewerModel, maxBudgetUsd: o.maxUsd }), {
     }
     if (path === '/api/agents' && method === 'GET') {
       const { entry } = projectFor(projectId);
-      const claudeV = detectVersion('claude');
-      const codexV = detectVersion('codex');
-      const hermesV = detectVersion('hermes');
-      const claude = claudeV ? claudeAuth() : { authenticated: false, method: null, subscription: null };
+      // Through the same cache as /api/runtimes: this page is opened often, and a probe per request stalled the companion for seconds.
+      const claudeV = programVersion('claude');
+      const codexV = programVersion('codex');
+      const hermesV = programVersion('hermes');
+      const claude = claudeV ? cachedClaudeAuth() : { authenticated: false, method: null, subscription: null };
       return json(res, 200, [
         { id: 'claude-code', name: 'Claude Code', version: claudeV, installed: !!claudeV, ...claude, hooksInstalled: hooksInstalled('claude-code', entry.root), coverage: coverageFor('claude-code'), liveStatus: claudeV ? 'see-evidence' : 'BLOCKED' },
         { id: 'codex', name: 'Codex', version: codexV, installed: !!codexV, authenticated: null, hooksInstalled: hooksInstalled('codex', entry.root), coverage: coverageFor('codex'), liveStatus: codexV ? 'Installed here. Connect to use it' : 'Not installed on this machine' },

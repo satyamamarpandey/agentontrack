@@ -45,7 +45,7 @@ export function Palette({ commands, onClose }: { commands: Command[]; onClose: (
           <li key={c.id} id={`pal-${c.id}`} role="option" aria-selected={n === i} onMouseMove={() => setI(n)} onMouseDown={(e) => { e.preventDefault(); run(c); }}>
             <span>{c.label}</span>{c.hint ? <kbd>{c.hint}</kbd> : null}<span className="group">{c.group}</span>
           </li>))}</ul> : <p className="none" role="status">Nothing matches “{q}”.</p>}
-        <div className="palette-foot"><span><kbd>↑</kbd> <kbd>↓</kbd> move</span><span><kbd>↵</kbd> run</span><span><kbd>Esc</kbd> close</span></div>
+        <div className="palette-foot"><span><kbd>↑</kbd> <kbd>↓</kbd> move</span><span><kbd>↵</kbd> run</span><span><kbd>Esc</kbd> close</span><span><kbd>G</kbd> then <kbd>P</kbd> <kbd>W</kbd> <kbd>A</kbd> <kbd>V</kbd> <kbd>U</kbd> <kbd>S</kbd> jump</span></div>
       </div>
     </div>,
     document.body,

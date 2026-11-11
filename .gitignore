@@ -37,3 +37,10 @@ test-results-repeat/
 firebase-debug.log
 firestore-debug.log
 ui-debug.log
+
+# Local caches kept inside the project folder (nothing lives directly in D:\).
+.local/
+.pnpm-store/
+
+# Staging copy of the frontend for the owner's redesign (see frontend/README.md); merged back into apps/ and then deleted.
+frontend/

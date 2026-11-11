@@ -118,6 +118,12 @@ console.log('  ' + (dep.out.split('\n').filter((l) => /rules|Deploy complete/i.t
 step(5, 'Sign-in methods');
 const cfgUrl = `https://identitytoolkit.googleapis.com/admin/v2/projects/${PROJECT}/config`;
 let authCfg = await api(token, cfgUrl);
+if (authCfg.status === 404) {
+  // The console's "Get started" button calls this; with the owner's login the API can do the same (Identity Platform's free tier, no billing).
+  const init = await api(token, `https://identitytoolkit.googleapis.com/v2/projects/${PROJECT}/identityPlatform:initializeAuth`, { method: 'POST', body: '{}' });
+  console.log(init.status === 200 ? '  Authentication initialised through the API (identityPlatform:initializeAuth).' : `  initializeAuth answered HTTP ${init.status}: ${JSON.stringify(init.data).slice(0, 300)}`);
+  if (init.status === 200) authCfg = await api(token, cfgUrl);
+}
 if (authCfg.status === 404 || authCfg.status === 403) {
   console.log(`  Authentication is not initialised yet (HTTP ${authCfg.status}). Owner: Firebase console → Build → Authentication → Get started. Then run this script again. Skipping the rest of this step.`);
 } else if (authCfg.status !== 200) {

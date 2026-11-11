@@ -9,16 +9,18 @@ import { chromium, devices } from 'playwright';
 
 const argv = process.argv.slice(2);
 const PORT = 4310;
-const BASE = `http://127.0.0.1:${PORT}/agentontrack`;
+// --base <url> measures a deployed site (the live one, for instance) instead of serving dist-pages locally; network time then joins the loading marks.
+const baseArg = argv.indexOf('--base');
+const BASE = baseArg >= 0 ? String(argv[baseArg + 1]).replace(/\/$/, '') : `http://127.0.0.1:${PORT}/agentontrack`;
 const THROTTLE = argv.includes('--no-throttle') ? 1 : 4;
 const pagesArg = argv.indexOf('--pages');
-const PAGES = pagesArg >= 0 ? argv.slice(pagesArg + 1).filter((a) => !a.startsWith('--') && !/^\d+$/.test(a)) : ['/', '/early-access/', '/install/', '/sign-in/', '/dashboard/?demo=1'];
+const PAGES = pagesArg >= 0 ? argv.slice(pagesArg + 1).filter((a) => !a.startsWith('--') && !/^\d+$/.test(a) && !/^https?:/.test(a)) : ['/', '/early-access/', '/install/', '/sign-in/', '/dashboard/?demo=1'];
 const runsArg = argv.indexOf('--runs');
 const RUNS = runsArg >= 0 ? Math.max(1, Number(argv[runsArg + 1]) || 1) : 1;
 const BUDGET = { lcpMs: 2500, cls: 0.1, tbtMs: 300, bytesKb: 900, fps: 50 };
 
-const server = spawn(process.execPath, ['e2e/serve.mjs'], { env: { ...process.env, SITE_ROOT: 'dist-pages', SITE_PORT: String(PORT) }, stdio: 'ignore' });
-await new Promise((ok) => setTimeout(ok, 800));
+const server = baseArg >= 0 ? null : spawn(process.execPath, ['e2e/serve.mjs'], { env: { ...process.env, SITE_ROOT: 'dist-pages', SITE_PORT: String(PORT) }, stdio: 'ignore' });
+if (server) await new Promise((ok) => setTimeout(ok, 800));
 
 const browser = await chromium.launch();
 const runs = [];
@@ -26,7 +28,7 @@ try {
   for (let i = 0; i < RUNS; i++) runs.push(await measureOnce());
 } finally {
   await browser.close();
-  server.kill();
+  server?.kill();
 }
 
 async function measureOnce() {
@@ -99,7 +101,7 @@ const results = runs[0].map((row, i) => Object.fromEntries(Object.entries(row).m
 const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
 mkdirSync('.local/perf', { recursive: true });
 writeFileSync(`.local/perf/web-${stamp}.json`, JSON.stringify({ measuredAt: new Date().toISOString(), cpuThrottle: THROTTLE, runs: RUNS, budget: BUDGET, results, perRun: runs }, null, 2));
-console.log(`CPU slow-down ${THROTTLE}x, Chromium, served from dist-pages${RUNS > 1 ? `, median of ${RUNS} runs` : ''}. Budgets: LCP<${BUDGET.lcpMs}ms CLS<${BUDGET.cls} TBT<${BUDGET.tbtMs}ms bytes<${BUDGET.bytesKb}KB dialog>=${BUDGET.fps}fps`);
+console.log(`CPU slow-down ${THROTTLE}x, Chromium, ${server ? 'served from dist-pages' : `measured at ${BASE}`}${RUNS > 1 ? `, median of ${RUNS} runs` : ''}. Budgets: LCP<${BUDGET.lcpMs}ms CLS<${BUDGET.cls} TBT<${BUDGET.tbtMs}ms bytes<${BUDGET.bytesKb}KB dialog>=${BUDGET.fps}fps`);
 console.table(results);
 const over = results.filter((x) => (x.lcpMs > BUDGET.lcpMs) || (x.cls > BUDGET.cls) || (x.tbtMs > BUDGET.tbtMs) || (x.bytesKb > BUDGET.bytesKb) || (x.fps !== undefined && x.fps < BUDGET.fps));
 console.log(over.length ? `Over budget: ${over.map((x) => `${x.profile} ${x.path}`).join('; ')}` : 'All within budget.');

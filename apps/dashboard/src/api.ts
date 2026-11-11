@@ -109,7 +109,8 @@ export const stopRun = (id: string) => stopRunWith(post, id);
 export const stopRuns = (ids: string[]) => stopAllWith(post, ids);
 
 export async function resumeSession(): Promise<boolean> {
-  if (new URLSearchParams(location.search).has('demo')) { enterDemo(); return true; }
+  // A demo entered on the welcome page counts as a session, like ?demo=1 in the address: the application chunk mounts after that choice.
+  if (demo || new URLSearchParams(location.search).has('demo')) { enterDemo(); return true; }
   if (isPublicSite()) {
     // A token in sessionStorage lasts for this tab only, and is never sent anywhere but the companion.
     token = sessionStorage.getItem('aot-token') ?? '';

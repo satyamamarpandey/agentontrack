@@ -3,12 +3,13 @@
 // Early access makes accounts invitation-only: a sign-in on its own is a person with no documents. The invitation itself is covered by
 // early-access-emulator.spec; here membership is granted outright where a test is about something else.
 import { expect, test, type Page } from '@playwright/test';
-import { AUTH, commit, DOCS, grantMembership, googlePopupSignIn, OWNER, PROJECT, readDoc, signUpRest, str, uidOf } from './emulator-helpers';
+import { AUTH, clearEmulators, commit, DOCS, grantMembership, googlePopupSignIn, OWNER, PROJECT, readDoc, signUpRest, str, uidOf } from './emulator-helpers';
 
 const SITE = 'http://127.0.0.1:4199/agentontrack';
 
 test.skip(!process.env.FIREBASE_AUTH_EMULATOR_HOST, 'Needs the Firebase emulators, and a site built for them.');
 test.describe.configure({ mode: 'serial' });
+test.beforeAll(async () => { await clearEmulators(); }); // serial: a retry must not meet the accounts and memberships its first attempt made
 test.beforeEach(async ({ page }) => { await page.addInitScript(() => sessionStorage.setItem('aot-ea-seen', '1')); });
 
 async function signIn(page: Page, email: string, name: string) {
@@ -133,6 +134,7 @@ test('email: a wrong password is refused in plain words, the eye shows the passw
   await expect(page.getByTestId('signed-in')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByTestId('access-status')).toContainText('Not approved yet');
   await page.getByRole('button', { name: 'Sign out' }).click();
+  await expect(page.getByTestId('signed-out')).toBeVisible(); // the sign-out must have landed before the next page loads, or that page still sees the session and sends it back to the account
   // The same sentence for an address nobody has used.
   for (const address of ['mailer@example.com', 'nobody-here@example.com']) {
     await page.goto(`${SITE}/sign-in/`);

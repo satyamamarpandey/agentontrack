@@ -183,7 +183,9 @@ describe('Idempotency-Key on plan phases', () => {
     expect(rs.map((r) => r.status)).toEqual([200, 200, 200]);
     expect(new Set(bodies.map((b) => b.id)).size).toBe(1);
     expect(await runsList(s)).toHaveLength(1);
-    // And the cap applies to a plan start like any other.
+    // And the cap applies to a plan start like any other. The phase's own run must have finished first: while it still counts as running, the
+    // fourth slow start is refused by that very cap, and the four could never all be running (seen on a slow Linux runner).
+    await until('the phase run to finish', async () => (await runsList(s)).every((r) => r.status !== 'running'));
     for (let i = 0; i < MAX_CONCURRENT_RUNS; i++) await api(s, '/api/runs', runBody(`slow-plancap${i}`));
     await until('full', async () => (await runsList(s)).filter((r) => r.status === 'running').length >= MAX_CONCURRENT_RUNS);
   });

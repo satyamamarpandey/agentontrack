@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useState, type CSSProperties, type ReactNode } from 'react';
 import { isDemo } from './api';
 
 export type DataKind = 'actual' | 'record' | 'transcript' | 'benchmark' | 'estimated' | 'demo' | 'unavailable';
@@ -57,7 +57,7 @@ export function StackedBars({ rows, x, series, label, tick = (v) => v.slice(5) }
   const totals = rows.map((r) => series.reduce((n, s) => n + (r[s.key] ?? 0), 0));
   const max = Math.max(1, ...totals);
   const band = (W - L) / Math.max(rows.length, 1);
-  const bw = Math.min(44, band * 0.62);
+  const bw = Math.min(40, band * 0.58);
   const y = (v: number) => T + (H - T - B) * (1 - v / max);
   const ticks = [0, 0.5, 1].map((t) => t * max);
   return (
@@ -82,7 +82,7 @@ export function StackedBars({ rows, x, series, label, tick = (v) => v.slice(5) }
                 const top = y(acc + v);
                 const h = Math.max(1.5, y(acc) - top - 2);
                 acc += v;
-                return <rect key={s.key} x={cx - bw / 2} y={top} width={bw} height={h} rx={2} fill={s.color} />;
+                return <rect key={s.key} className="bar" style={{ '--i': i } as CSSProperties} x={cx - bw / 2} y={top} width={bw} height={h} fill={s.color} />;
               })}
               <text x={cx} y={H - 8} textAnchor="middle" className="tick">{tick(String(r[x]))}</text>
             </g>

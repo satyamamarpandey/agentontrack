@@ -1,6 +1,6 @@
 # AgentOnTrack interface design
 
-Status of this document: describes what is built in `apps/dashboard` and `apps/web` as of 2026-11-10. Test status is in docs/PRODUCT_READINESS.md, and every row there comes from a real run.
+Status of this document: describes what is built in `apps/dashboard` and `apps/web` as of 2026-11-11, after the owner's own redesign (made in Claude Design from a staged copy of these sources, then merged back by a three-way merge; the owner's notes are summarised in `CHANGELOG.md`). Test status is in docs/PRODUCT_READINESS.md, and every row there comes from a real run.
 
 ## Brief and direction
 
@@ -21,23 +21,27 @@ One palette, defined as CSS custom properties in a block marked `/* tokens:start
 
 | Role | Dark | Light |
 |---|---|---|
-| Background / second background | `#0b0c0f` / `#0e1014` | `#f9f9fb` / `#f2f3f6` |
-| Panel / raised | `#121418` / `#191c22` | `#ffffff` / `#f3f4f7` |
-| Sunken (editor, code) | `#08090b` | `#eef0f3` |
-| Border / strong | `#22252c` / `#31353e` | `#e3e5ea` / `#c6cad3` |
-| Text / muted | `#ededf0` / `#8f95a3` | `#121418` / `#5a6070` |
-| Accent (focus, selection, primary action) / link text | `#2dd4bf` / `#5eead4` | `#0f766e` / `#0f766e` |
-| Good / warn / bad | `#4fd98a` / `#f0bb3b` / `#ff8080` | `#14633a` / `#7a4a00` / `#a61b1b` |
+| Background / second background (`--bg`, `--bg-2`) | `#0b0b0c` / `#0f0f10` | `#f7f7f8` / `#f0f0f1` |
+| Panel / raised (`--raised`, `--raised-2`) | `#131314` / `#1b1b1d` | `#ffffff` / `#f1f1f2` |
+| Sunken, editor and code (`--sunken`) | `#070708` | `#ececed` |
+| Border / strong (`--border`, `--border-strong`) | `#242426` / `#37373a` | `#dfdfe1` / `#bcbcc0` |
+| Input edges, 3:1 against their ground (`--field`) | `#6a6a70` | `#85858b` |
+| Text / muted | `#ededee` / `#9c9ca1` | `#131314` / `#59595e` |
+| Accent (focus, selection, primary action) / large accent text / accent ink | `#86acd6` / `#a6c5e8` / `#08121d` | `#355c86` / `#27496c` / `#ffffff` |
+| Accent tint / link text (`--accent-soft`, `--link`) | `#152231` / `#9dc0e6` | `#e2eaf3` / `#2d5580` |
+| Good / warn / bad | `#5fd693` / `#ecba4a` / `#ff8b8b` | `#14633a` / `#7a4a00` / `#a61b1b` |
+| Chart series `--s1` … `--s4` | `#86acd6` `#d3dde8` `#66788c` `#44709f` | `#3f6893` `#7393b3` `#5c6a79` `#1e3f61` |
+| Registration marks and the rail (`--mark`) | `#4d6784` | `#8da6c1` |
 
-Small accent-coloured text (eyebrows, step numbers, badges, terminal commands) uses `--link`, which meets 4.5:1 on panels in both themes; `--accent-2` is for large text and marks only.
+Small accent-coloured text (eyebrows, step numbers, badges, terminal commands) uses `--link`, which meets 4.5:1 on panels in both themes; `--accent-2` is for large text and marks only. The owner computed every text colour against every surface it sits on; the lowest pair is muted text on the accent tint (5.9:1 dark, 5.7:1 light), and the chart series are at least 3.2:1 against the chart ground. axe confirms the serious and critical levels in both themes in the browser suites.
 
 Typography: Inter (variable, Latin subset) for the interface, JetBrains Mono for code, both bundled from the apps' own files under the SIL Open Font License (`apps/web/app/fonts/LICENSES.txt`), with a metric-matched Arial fallback so text does not jump while Inter loads. On the site, Inter is declared by Next's font loader (`next/font/local` in `app/layout.tsx`: preloaded, the fallback's metrics matched automatically, exposed as `--font-inter`); the dashboard declares the same file in CSS. Both feed `--font-ui`. Nothing is fetched from a third party. Base 14px in the application, 16px on the website; headings on the site are Inter at 600 with tight tracking. Numbers are tabular.
 
-Shape: radius follows hierarchy (4px marks, 6px controls, 8px panels, 12px dialogs, 16px large frames). No shadows except on floating layers. Motion: 120–280 ms, `cubic-bezier(0.2, 0.8, 0.2, 1)`; dialogs and toasts scale in, the live dot pulses, progress bars ease; every `transition` and `animation` sits inside `@media (prefers-reduced-motion: no-preference)` (the same test checks). Forced-colors mode gets real borders. Colour is never the only carrier of state: every badge has text, and every figure carries its provenance (Measured, Estimated, User-provided, Benchmark-derived, Unavailable).
+Shape: square. Controls and badges have a 2px radius (`--r-1`, `--r-2`); panels, cards and dialogs have none (`--r-3` to `--r-5` are 0). Hairlines instead of shadows, with shadows only on floating layers; frames carry small `+` registration marks at their corners. Motion: 120, 200, 320 and 620 ms (`--dur-1` to `--dur-4`), `cubic-bezier(0.2, 0.8, 0.2, 1)` and an `--ease-out`; dialogs and toasts scale in, the live dot pulses, progress bars ease; the headline block, the terminal lines, page content on arrival and chart bars enter once without being asked; fades animate a mask through a registered custom property (`--fade`) rather than opacity, so text keeps its computed contrast while it arrives. Scroll-linked rules sit inside `@supports (animation-timeline: view())`, nested in the motion query; browsers without scroll-linked CSS get the section reveal from an observer in `apps/web/app/ui/effects.tsx`. Every `transition` and `animation` sits inside `@media (prefers-reduced-motion: no-preference)` (the same test checks). Forced-colors mode gets real borders. Colour is never the only carrier of state: every badge has text, and every figure carries its provenance (Measured, Estimated, User-provided, Benchmark-derived, Unavailable).
 
 ## Shell
 
-Left rail (220px, the page's second background) with six sections and icons, a soft filled active state, and the live status at the bottom. A top bar with the path (Local or Demo, project, screen), the palette trigger and the theme switch. Keyboard: Ctrl/Cmd K opens the palette; G then P/W/A/V/U/S jumps to Projects, Workspace, Agents, Approvals, Usage, Settings, never while typing or inside a dialog. On narrow screens the rail collapses behind a Menu button.
+Left rail (220px, the page's second background) with six sections and icons, an accent bar on the active section's left edge, jump-key hints (`G P` … `G S`, with `aria-keyshortcuts`) that appear when the rail is hovered or focused, and the live status at the bottom. The project timeline and the phase plan use the same motif: a hairline rail with a square station per event or phase, coloured by state. A top bar with the path (Local or Demo, project, screen), the palette trigger and the theme switch. Keyboard: Ctrl/Cmd K opens the palette; G then P/W/A/V/U/S jumps to Projects, Workspace, Agents, Approvals, Usage, Settings, never while typing or inside a dialog. On narrow screens the rail collapses behind a Menu button.
 
 ## Workspace
 
@@ -61,7 +65,7 @@ Only Claude Code and Codex can be started from the interface; the agent selector
 
 ## Website
 
-Same tokens, sans only. The home page: a hero with the early-access action, a product tour frame that plays a short recording of the dashboard in demo mode (made by `scripts/capture-media.mjs`, labelled "Demo data"; it is never fetched until played, and never auto-plays for someone who prefers reduced motion), real screenshots in a "closer look" strip, the five steps, the measured results with counters, the comparison table, and what it will not do. The early-access application is a three-step dialog (`apps/web/app/early-access/form.tsx`) behind the permanent Early access button, opened by itself about five seconds after arriving on the home page, once per session and never for someone signed in or who already applied. Sign-in, invitation, account, admin review and gated install pages share the `.auth` and `.gate` layouts.
+Same tokens, sans only. The header is one row from 1181px up, drops its links to a second row between 901 and 1180px, and folds them behind the Menu button at 900px and below; it draws its hairline once the page has scrolled and shows reading progress along its foot. The home page: the headline on the left with the four facts as a ruled list beside it; under it one framed object, the product tour (a still, then a short recording of the dashboard in demo mode made by `scripts/capture-media.mjs`, labelled "Demo data"; never fetched until played, never auto-played for someone who prefers reduced motion) with the example terminal session docked on its right, its lines printing in order once; then the sections on a rail down the left, each with a numbered station and a path-like label (`01 ~/early-access`): early access, goal to evidence, agents, projects, closer look (three screenshots as full rows, frame beside caption, alternating sides, magnified under the pointer), the five steps drawn on a track that fills as you scroll, benchmarks (counters plus the prevented, detected and missed counts as one bar to scale), the comparison table with the AgentOnTrack column tinted, what it will not do, and apply or install. Tour and screenshot frames have a title bar over a 16:10 slot, the shape of the 1440×900 captures, so screenshots are shown whole. The early-access application is a three-step dialog (`apps/web/app/early-access/form.tsx`) behind the permanent Early access button, opened by itself about five seconds after arriving on the home page, once per session and never for someone signed in or who already applied. Sign-in, invitation, account, admin review and gated install pages share the `.auth` and `.gate` layouts.
 
 ## Accessibility
 

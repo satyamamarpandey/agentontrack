@@ -70,7 +70,7 @@ export function JoinScreen() {
             <li>Run <code>agentontrack setup</code> in a project folder to connect your Claude Code or Codex, then <code>agentontrack dashboard --allow-public-site</code> to use the dashboard from this site.</li>
             <li>Tell the maintainer what you find on the <Link href="/feedback">feedback page</Link>: bugs, ideas, and what felt wrong.</li>
           </ol>
-          <div className="row"><Link className="btn primary" href="/install">Install AgentOnTrack<Icon name="arrow-right" size={16} /></Link><Link className="btn" href="/account">Your account</Link></div>
+          <div className="row"><Link className="btn primary" href="/install">Install AgentOnTrack<Icon name="arrow-right" size={16} data-nudge="" /></Link><Link className="btn" href="/account">Your account</Link></div>
         </div>
       );
       case 'member': return <div className="stack" data-testid="join-member"><h2>You already have access</h2><p>This account is an active early-access member, so the invitation is not needed.</p><div className="row"><Link className="btn primary" href="/install">Install</Link><Link className="btn" href="/account">Your account</Link></div></div>;

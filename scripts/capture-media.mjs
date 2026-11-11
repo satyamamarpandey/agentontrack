@@ -41,8 +41,17 @@ async function go(page, section, tab) {
 const shots = [];
 async function shoot(page, name, dir = OUT, opts = {}) {
   const file = join(dir, `${name}.png`);
+  if (opts.fullPage) await scrollThrough(page); // a full-page capture does not scroll, so lazily loaded images below the fold would stay empty
   await page.screenshot({ path: file, ...opts });
   shots.push({ name, file, bytes: statSync(file).size });
+}
+/** Walks down the page a viewport at a time, as a reader would, so every lazy image has been asked for, then returns to the top. */
+async function scrollThrough(page) {
+  const steps = await page.evaluate(() => Math.ceil(document.documentElement.scrollHeight / Math.max(1, window.innerHeight)));
+  for (let i = 1; i <= steps; i++) { await page.evaluate((y) => window.scrollTo(0, y), i * 900); await settle(120); }
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.waitForFunction(() => [...document.images].every((img) => img.complete), null, { timeout: 15_000 }).catch(() => undefined);
+  await settle(300);
 }
 
 try {

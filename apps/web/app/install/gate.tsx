@@ -46,7 +46,7 @@ export function InstallGate() {
         <p className="small muted">AgentOnTrack is open source under Apache-2.0, so its <a href={REPO}>source and releases are public on GitHub</a>. This page gates the guided install and the support that comes with early access, not the code.</p>
       </div>
       <div className="stack" style={{ minWidth: 220 }}>
-        {state.kind === 'signed-out' ? <Link className="btn primary big" href="/sign-in?next=install" data-testid="install-signin">Sign in<Icon name="arrow-right" size={16} /></Link> : <Link className="btn big" href="/account">Your account</Link>}
+        {state.kind === 'signed-out' ? <Link className="btn primary big" href="/sign-in?next=install" data-testid="install-signin">Sign in<Icon name="arrow-right" size={16} data-nudge="" /></Link> : <Link className="btn big" href="/account">Your account</Link>}
         <EarlyAccessButton className="btn big" testId="install-apply">Apply for early access</EarlyAccessButton>
       </div>
     </div>

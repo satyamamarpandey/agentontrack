@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { startCompanion, type Companion } from '../packages/companion/dist/index.js';
 import { Project } from '../packages/core/dist/index.js';
-import { commit, DOCS, followVerificationLink, googlePopupSignIn, markVerified, ownerList, ownerRead, ownerWrite, readDoc, signInRest, signUpRest, str, uidOf } from './emulator-helpers';
+import { clearEmulators, commit, DOCS, followVerificationLink, googlePopupSignIn, markVerified, ownerList, ownerRead, ownerWrite, readDoc, signInRest, signUpRest, str, uidOf } from './emulator-helpers';
 
 const ORIGIN = 'http://127.0.0.1:4199';
 const SITE = `${ORIGIN}/agentontrack`;
@@ -27,6 +27,7 @@ let inviteHash = '';
 let testerUid = '';
 
 test.beforeAll(async ({ browser }) => {
+  await clearEmulators(); // this file is serial: a retry must not meet the application and accounts its first attempt left behind
   admin = await browser.newContext(); apage = await admin.newPage();
   tester = await browser.newContext(); tpage = await tester.newPage();
 });
@@ -297,7 +298,8 @@ test('the administrator exports the applications, and a tester can withdraw thei
   const exported = JSON.parse(await (await import('node:fs/promises')).readFile(await dl.path(), 'utf8')) as { email: string }[];
   expect(exported.map((e) => e.email)).toEqual(expect.arrayContaining([APPLICANT, 'second@example.com']));
   expect(exported.length).toBe((await ownerList('applications')).length);
-  expect((await ownerList('audit')).some((a) => a.data.action === 'export')).toBe(true);
+  // The audit entry is written after the file is handed to the browser, so it can land a moment after the download event.
+  await expect.poll(async () => (await ownerList('audit')).some((a) => a.data.action === 'export'), { timeout: 15_000, message: 'an export audit entry' }).toBe(true);
   await apage.getByRole('tab', { name: 'Insights' }).click();
   await expect(apage.getByTestId('insights')).toContainText('Windows');
   // The applicant deletes their own application; the membership record stays, as the privacy page says.

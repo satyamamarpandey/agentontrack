@@ -28,6 +28,13 @@ export const readDoc = (token: string | null, path: string) => fetch(`${DOCS}/${
 export const ownerRead = async (path: string): Promise<Record<string, any> | null> => { const r = await fetch(`${DOCS}/${path}`, { headers: OWNER }); if (r.status === 404) return null; expect(r.status, path).toBe(200); return plain((await r.json()).fields); };
 export const ownerList = async (collection: string): Promise<{ id: string; data: Record<string, any> }[]> => { const r = await fetch(`${DOCS}/${collection}`, { headers: OWNER }); const j = await r.json() as { documents?: { name: string; fields: any }[] }; return (j.documents ?? []).map((d) => ({ id: d.name.split('/').pop()!, data: plain(d.fields) })); };
 export const ownerWrite = (path: string, data: Record<string, unknown>, serverTime: string[] = []) => commit('owner', path, data, serverTime);
+/** Empties the emulators (every document, every account), so a retried serial group starts the way a fresh `emulators:exec` does, instead of meeting its own earlier data. */
+export const clearEmulators = async () => {
+  const store = await fetch(`http://${STORE}/emulator/v1/projects/${PROJECT}/databases/(default)/documents`, { method: 'DELETE' });
+  const auth = await fetch(`http://${AUTH}/emulator/v1/projects/${PROJECT}/accounts`, { method: 'DELETE' });
+  expect(store.status, 'clearing the Firestore emulator').toBe(200);
+  expect(auth.status, 'clearing the Auth emulator').toBe(200);
+};
 
 /** A password account made straight at the emulator, for testing what the rules refuse. */
 export async function signUpRest(email: string, password = 'not-a-secret-1'): Promise<{ idToken: string; localId: string; email: string }> {

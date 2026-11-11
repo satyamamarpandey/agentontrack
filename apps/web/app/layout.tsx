@@ -13,6 +13,7 @@ import { NavLink } from './nav-link';
 import { NavMenu } from './nav-menu';
 import { ThemeToggle } from './theme-toggle';
 import { Mark } from './ui/icons';
+import { Effects } from './ui/effects';
 import { Toasts } from './ui/toast';
 
 export const metadata: Metadata = {
@@ -33,7 +34,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         <meta name="color-scheme" content="dark light" />
-        <meta name="theme-color" content="#0a0e17" />
+        <meta name="theme-color" content="#0b0b0c" />
       </head>
       <body>
         <a className="skip" href="#main">Skip to content</a>
@@ -68,6 +69,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         </footer>
         <EarlyAccessHost />
         <Toasts />
+        <Effects />
       </body>
     </html>
   );

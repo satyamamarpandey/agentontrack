@@ -1,6 +1,6 @@
 import type { SVGProps } from 'react';
 
-// A small inline set, 24px grid, 1.75 stroke: no icon dependency, and nothing fetched.
+// A small inline set, 24px grid, 1.5 stroke: no icon dependency, and nothing fetched.
 const PATHS: Record<string, string> = {
   x: 'M6 6l12 12M18 6L6 18',
   check: 'M5 12.5l4.5 4.5L19 7.5',
@@ -34,8 +34,8 @@ const PATHS: Record<string, string> = {
 };
 
 export function Icon({ name, size = 20, ...rest }: { name: keyof typeof PATHS | string; size?: number } & SVGProps<SVGSVGElement>) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false" className="icon" {...rest}><path d={PATHS[name] ?? ''} /></svg>;
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false" className="icon" {...rest}><path d={PATHS[name] ?? ''} /></svg>;
 }
 
-/** The wordmark's mark: three rails and a point held on the line. */
-export const Mark = () => <span className="mark" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round"><path d="M4 7h11M4 12h16M4 17h8" /><circle cx="19" cy="7" r="2" fill="currentColor" stroke="none" /><circle cx="16" cy="17" r="2" fill="currentColor" stroke="none" /></svg></span>;
+/** The wordmark's mark: three rails and a point held on the line. The two points carry a class each so they can slide along their rails on hover. */
+export const Mark = () => <span className="mark" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><path d="M4 7h11M4 12h16M4 17h8" /><circle className="p1" cx="19" cy="7" r="2" fill="currentColor" stroke="none" /><circle className="p2" cx="16" cy="17" r="2" fill="currentColor" stroke="none" /></svg></span>;

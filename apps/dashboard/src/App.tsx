@@ -25,6 +25,8 @@ const SECTIONS: { name: string; icon: IconName; leaves: (typeof SCREENS)[number]
 ];
 const LABEL: Record<(typeof SCREENS)[number], string> = { Projects: 'My projects', Goals: 'Goals and tasks', Workspace: 'Workspace', Agents: 'Agents', Approvals: 'Approvals', Safety: 'Safety', Evidence: 'Records', Overview: 'Overview', Usage: 'Usage', Results: 'Results and evidence', Comparisons: 'Comparisons', Evaluations: 'Evaluations', Environment: 'Environment', Settings: 'Settings', Feedback: 'Feedback' };
 const sectionOf = (screen: (typeof SCREENS)[number]) => SECTIONS.find((x) => x.leaves.includes(screen))!;
+/** The letter that follows G to jump to each section, shown beside it in the rail. The key handler in App owns the behaviour; this is just the label. */
+const JUMP: Record<string, string> = { Projects: 'P', Workspace: 'W', Agents: 'A', Activity: 'V', Analytics: 'U', Settings: 'S' };
 type Screen = (typeof SCREENS)[number];
 type Reload = () => void;
 
@@ -546,11 +548,11 @@ export function App() {
       <a className="skip" href="#main">Skip to content</a>
       <aside className={menu ? 'open' : ''}>
         <div className="brand"><Logo /> AgentOnTrack
-          <button className="menu" aria-expanded={menu} aria-label="Menu" onClick={() => setMenu(!menu)}>☰</button>
+          <button className="menu" aria-expanded={menu} aria-label="Menu" onClick={() => setMenu(!menu)}><Icon name={menu ? 'x' : 'menu'} size={18} /></button>
         </div>
         <nav aria-label="Main">
           {SECTIONS.map((x) => { const on = route ? x.name === 'Projects' : sectionOf(screen).name === x.name; return (
-            <button key={x.name} className={on ? 'on' : ''} aria-current={on ? 'page' : undefined} onClick={() => go(x.leaves[0]!)}><Icon name={x.icon} />{x.name}</button>
+            <button key={x.name} className={on ? 'on' : ''} aria-current={on ? 'page' : undefined} aria-keyshortcuts={`g ${JUMP[x.name]!.toLowerCase()}`} onClick={() => go(x.leaves[0]!)}><Icon name={x.icon} />{x.name}<kbd aria-hidden="true">G {JUMP[x.name]}</kbd></button>
           ); })}
         </nav>
         <p className="live small" role="status" data-testid="live-status"><i className={live ? 'on' : ''} />{isDemo() ? 'Demo: not connected' : live ? 'Live: local record' : 'Reconnecting…'}</p>

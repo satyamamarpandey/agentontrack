@@ -1,3 +1,4 @@
+import { Fragment, type CSSProperties, type ReactNode } from 'react';
 import Link from './link';
 import { Counter } from './counter';
 import { ReleaseNotice, Term } from './content';
@@ -40,55 +41,103 @@ const EARLY: [string, string, string][] = [
   ['users', 'Who it is for', 'People who run Claude Code or Codex most days and want a goal, approvals and evidence around them, on their own machine.'],
   ['spark', 'How places are given', 'By hand, in small groups balanced across operating systems and agents. Every application is read. An invitation works once, for your address.'],
 ];
+// The example session docked beside the tour: the same words as ever, one entry per line, so each line can print in its turn when motion is allowed.
+const LOG: [string, string][] = [
+  ['cmd', '$ agentontrack setup'],
+  ['cmd', '$ agentontrack goal set --file goal.json'],
+  ['ok', 'Goal v1 approved.'],
+  ['', ''],
+  ['dim', '# the agent tries to push:'],
+  ['hold', 'AgentOnTrack needs human approval: vcs.push requires human approval.'],
+  ['', 'Ask the user to run: agentontrack approve apr_5dfc47af1da5'],
+  ['', ''],
+  ['cmd', '$ agentontrack verify'],
+  ['', '{ "status": "VERIFIED", "progress": { "passed": 1, "total": 1 } }'],
+];
+
+/** A section heading on the rail down the page: a station number, a short path-like label, then the heading and its lead. */
+function Head({ n, path, title, id, children }: { n: number; path: string; title?: string; id?: string; children?: ReactNode }) {
+  return (
+    <header className="band-head">
+      <p className="eyebrow path"><span className="idx">{String(n).padStart(2, '0')}</span>{path}</p>
+      {title ? <h2 id={id}>{title}</h2> : null}
+      {children}
+    </header>
+  );
+}
 
 export default function Home() {
   const held = readResult('heldout.json');
   const full = held?.results?.['C agentontrack full'];
+  let station = 0;
+  const next = () => ++station;
   return (
     <>
       <EarlyAccessAutoPopup />
-      <section className="hero wrap">
-        <div className="hero-bg" aria-hidden="true" />
-        <div>
+      <section className="hero wrap" data-spot="">
+        <div className="hero-bg" aria-hidden="true" data-spot-layer="" />
+        <div className="hero-copy">
           {INSTALL_GATED
             ? <p className="pill"><span className="status-dot on" aria-hidden="true" />Early access · invitation only</p>
             : <p className="eyebrow">Free · Local-first · Bring your own agent</p>}
           <h1>Agents that finish the <em className="display">right</em> task, inside the lines you set.</h1>
           <p className="lead">AgentOnTrack is a control layer for AI coding agents. You set the goal and approve what matters. Your agent does the work, on your machine, under its own login. Independent checks decide when it is done.</p>
           <div className="cta">
-            <EarlyAccessButton className="btn primary big" testId="hero-early-access">Request early access<Icon name="arrow-right" size={18} /></EarlyAccessButton>
+            <EarlyAccessButton className="btn primary big" testId="hero-early-access">Request early access<Icon name="arrow-right" size={18} data-nudge="" /></EarlyAccessButton>
             <a className="btn big" href={`${BASE}/dashboard/?demo=1`}>See the live demo</a>
             {INSTALL_GATED ? null : <Link className="btn big" href="/install#download" data-testid="home-download">{RELEASE_PUBLISHED ? `Download ${RELEASE_VERSION}` : 'Download: not published yet'}</Link>}
           </div>
-          <ul className="facts" aria-label="In short">
-            <li><Icon name="check" size={16} />Runs on your machine</li>
-            <li><Icon name="check" size={16} />Your agents, your logins</li>
-            <li><Icon name="check" size={16} />Open source, Apache-2.0</li>
-            <li><Icon name="check" size={16} />No analytics</li>
-          </ul>
         </div>
-        <div className="frame reveal">
-          <div className="frame-bar" aria-hidden="true"><i /><i /><i /><span>agentontrack · terminal</span></div>
-          <pre className="term" tabIndex={0} aria-label="Example terminal session"><code><span className="cmd">$ agentontrack setup</span>{'\n'}<span className="cmd">$ agentontrack goal set --file goal.json</span>{'\n'}<span className="ok">Goal v1 approved.</span>{'\n\n'}<span className="dim"># the agent tries to push:</span>{'\n'}<span className="hold">AgentOnTrack needs human approval: vcs.push requires human approval.</span>{'\n'}Ask the user to run: agentontrack approve apr_5dfc47af1da5{'\n\n'}<span className="cmd">$ agentontrack verify</span>{'\n'}{'{ "status": "VERIFIED", "progress": { "passed": 1, "total": 1 } }'}</code></pre>
-          <p className="small muted" style={{ padding: '8px 14px 10px', margin: 0 }}>Example output shape. Approval IDs and results vary.</p>
-        </div>
+        <ul className="facts" aria-label="In short">
+          <li><Icon name="check" size={16} />Runs on your machine</li>
+          <li><Icon name="check" size={16} />Your agents, your logins</li>
+          <li><Icon name="check" size={16} />Open source, Apache-2.0</li>
+          <li><Icon name="check" size={16} />No analytics</li>
+        </ul>
       </section>
 
-      <section className="wrap" aria-label="Product tour">
-        <Tour poster="/shots/projects.png" video="/shots/tour.webm" caption="Projects, one project's workflow, the workspace, approvals and safety, in about twenty seconds." />
+      {/* The product itself, straight under the headline: the tour on the left, an example session docked on its right. */}
+      <section className="wrap stage" aria-label="Product tour">
+        <div className="stage-in">
+          <Tour poster="/shots/projects.png" video="/shots/tour.webm" caption="Projects, one project's workflow, the workspace, approvals and safety, in about twenty seconds." />
+          <div className="dock">
+            <div className="frame">
+              <div className="frame-bar" aria-hidden="true"><i /><i /><i /><span>agentontrack · terminal</span></div>
+              <pre className="term" tabIndex={0} aria-label="Example terminal session"><code>{LOG.map(([kind, text], i) => <Fragment key={i}>{text ? <span className={kind ? `ln ${kind}` : 'ln'} style={{ '--i': i } as CSSProperties}>{text}</span> : null}{i < LOG.length - 1 ? '\n' : null}</Fragment>)}</code></pre>
+            </div>
+            <p className="dock-cap">Example output shape. Approval IDs and results vary.</p>
+          </div>
+        </div>
       </section>
 
       {INSTALL_GATED ? (
         <section className="wrap band" data-testid="early-access-band">
-          <header><p className="eyebrow">Early access</p><h2>A small group first, then everyone.</h2><p className="section-lead">AgentOnTrack is being tested by invited people before it opens up. Anyone can apply; the maintainer chooses a balanced group and sends each person a personal link.</p></header>
+          <Head n={next()} path="~/early-access" title="A small group first, then everyone."><p className="section-lead">AgentOnTrack is being tested by invited people before it opens up. Anyone can apply; the maintainer chooses a balanced group and sends each person a personal link.</p></Head>
           <div className="grid3">
-            {EARLY.map(([icon, t, d]) => <div key={t} className="tile reveal"><span className="step-icon"><Icon name={icon} /></span><h3>{t}</h3><p className="muted" style={{ marginBottom: 0 }}>{d}</p></div>)}
+            {EARLY.map(([icon, t, d]) => <div key={t} className="tile reveal"><span className="step-icon"><Icon name={icon} /></span><h3>{t}</h3><p className="muted">{d}</p></div>)}
           </div>
           <div className="cta"><EarlyAccessButton className="btn primary" testId="band-early-access">Apply for early access</EarlyAccessButton><Link className="btn" href="/early-access">Read what testers get</Link></div>
         </section>
       ) : null}
 
+      <section className="wrap band" id="how">
+        <Head n={next()} path="~/goal-to-evidence" title="From goal to evidence"><p className="section-lead">Five steps, every time, with a record you can read afterwards.</p></Head>
+        <ol className="steps">{STEPS.map(([icon, t, d], i) => <li key={t} className="reveal"><span className="step-icon"><Icon name={icon} /></span><span className="num">0{i + 1}</span><h3>{t}</h3><p>{d}</p></li>)}</ol>
+      </section>
+
+      <section className="wrap band" data-testid="every-agent">
+        <Head n={next()} path="~/agents" title="One workspace for every agent you use">
+          <p className="section-lead">Give Claude the coding and Codex the review, or the other way round. Every agent works under the same goal, the same approvals and one evidence record, and a handoff carries verified context from one to the next. Each keeps its own login and its own model: AgentOnTrack never asks for provider credentials.</p>
+        </Head>
+        <div className="table-wrap reveal" tabIndex={0}><table>
+          <thead><tr><th scope="col">Agent</th><th scope="col">Models</th><th scope="col">What has really been run</th></tr></thead>
+          <tbody>{AGENTS.map(([a, m, d]) => <tr key={a}><th scope="row">{a}</th><td>{m}</td><td>{d}</td></tr>)}</tbody>
+        </table></div>
+        <p className="small muted" style={{ marginTop: 12 }}>AgentOnTrack does not route one prompt across models, and it does not make an agent&apos;s model better. It governs the agents you already use. <Link href="/integrations">See the integrations page for what has really been run →</Link></p>
+      </section>
+
       <section className="wrap band">
+        <Head n={next()} path="~/projects" />
         <div className="projects-entry reveal" data-testid="projects-entry">
           <div>
             <h2>Every project, in one place</h2>
@@ -102,45 +151,46 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="wrap band" data-testid="every-agent">
-        <header><h2>One workspace for every agent you use</h2>
-        <p className="section-lead">Give Claude the coding and Codex the review, or the other way round. Every agent works under the same goal, the same approvals and one evidence record, and a handoff carries verified context from one to the next. Each keeps its own login and its own model: AgentOnTrack never asks for provider credentials.</p></header>
-        <div className="table-wrap reveal" tabIndex={0}><table>
-          <thead><tr><th scope="col">Agent</th><th scope="col">Models</th><th scope="col">What has really been run</th></tr></thead>
-          <tbody>{AGENTS.map(([a, m, d]) => <tr key={a}><th scope="row">{a}</th><td>{m}</td><td>{d}</td></tr>)}</tbody>
-        </table></div>
-        <p className="small muted" style={{ marginTop: 12 }}>AgentOnTrack does not route one prompt across models, and it does not make an agent&apos;s model better. It governs the agents you already use. <Link href="/integrations">See the integrations page for what has really been run →</Link></p>
-      </section>
-
-      <section className="wrap band" id="how">
-        <header><h2>From goal to evidence</h2><p className="section-lead">Five steps, every time, with a record you can read afterwards.</p></header>
-        <ol className="steps">{STEPS.map(([icon, t, d], i) => <li key={t} className="reveal"><span className="step-icon"><Icon name={icon} /></span><span className="num">0{i + 1}</span><h3>{t}</h3><p>{d}</p></li>)}</ol>
-      </section>
-
       <section className="wrap band" data-testid="closer-look">
-        <header><h2>A closer look</h2><p className="section-lead">Three screens from the dashboard, as recorded in demo mode. The real thing reads the companion on your own machine.</p></header>
+        <Head n={next()} path="~/screens" title="A closer look"><p className="section-lead">Three screens from the dashboard, as recorded in demo mode. The real thing reads the companion on your own machine.</p></Head>
         <div className="shots">
-          {SHOTS.map(([src, t, d]) => <figure key={src} className="shot reveal" style={{ margin: 0 }}><div className="frame"><span className="frame-note">Demo data</span><img src={`${BASE}${src}`} alt={`${t}, in the AgentOnTrack dashboard with demo data`} width={1440} height={900} loading="lazy" decoding="async" /></div><figcaption><h3>{t}</h3><p>{d}</p></figcaption></figure>)}
+          {SHOTS.map(([src, t, d], i) => (
+            <figure key={src} className="shot">
+              <div className="frame reveal">
+                <div className="frame-bar" aria-hidden="true"><i /><i /><i /><span>dashboard · {src.slice(7, -4)}</span></div>
+                <span className="frame-note">Demo data</span>
+                <div className="frame-media"><img src={`${BASE}${src}`} alt={`${t}, in the AgentOnTrack dashboard with demo data`} width={1440} height={900} loading="lazy" decoding="async" /></div>
+              </div>
+              <figcaption className="reveal"><span className="num">0{i + 1} / 0{SHOTS.length}</span><h3>{t}</h3><p>{d}</p></figcaption>
+            </figure>
+          ))}
         </div>
       </section>
 
       <section className="wrap band">
-        <header><h2>Measured, including the misses</h2>
-        {full ? <p className="section-lead">On {held.scenarios} held-out scenarios of fixed action traces with no model in the loop, AgentOnTrack stopped or caught {full.prevented + full.detectedAfter} of {full.unauthorized} unauthorized actions: {full.prevented} prevented, {full.detectedAfter} detected afterwards, {full.missed} missed, with {full.falseBlocks} false blocks.</p> : <p className="section-lead">No results available.</p>}</header>
+        <Head n={next()} path="~/benchmarks" title="Measured, including the misses">
+          {full ? <p className="section-lead">On {held.scenarios} held-out scenarios of fixed action traces with no model in the loop, AgentOnTrack stopped or caught {full.prevented + full.detectedAfter} of {full.unauthorized} unauthorized actions: {full.prevented} prevented, {full.detectedAfter} detected afterwards, {full.missed} missed, with {full.falseBlocks} false blocks.</p> : <p className="section-lead">No results available.</p>}
+        </Head>
         {full ? (
           <div className="kpis reveal" aria-label="Held-out results">
             <div className="kpi"><span className="kpi-value good"><Counter value={full.prevented} /></span><span className="kpi-label">prevented before they ran</span></div>
             <div className="kpi"><span className="kpi-value warn"><Counter value={full.detectedAfter} /></span><span className="kpi-label">detected afterwards</span></div>
             <div className="kpi"><span className="kpi-value bad"><Counter value={full.missed} /></span><span className="kpi-label">missed</span></div>
             <div className="kpi"><span className="kpi-value"><Counter value={full.falseBlocks} /></span><span className="kpi-label">false blocks</span></div>
+            {/* The same three counts drawn to scale. Decorative: the numbers above say everything it does. */}
+            <div className="kpi-bar" aria-hidden="true">
+              {full.prevented > 0 ? <i className="good" style={{ flexGrow: full.prevented }} /> : null}
+              {full.detectedAfter > 0 ? <i className="warn" style={{ flexGrow: full.detectedAfter }} /> : null}
+              {full.missed > 0 ? <i className="bad" style={{ flexGrow: full.missed }} /> : null}
+            </div>
           </div>
         ) : null}
         <p className="muted small">From scenarios recorded under the product&apos;s earlier working name. Self-authored and self-run. No independent evaluator has reproduced this. It does not measure live task success. <Link href="/benchmarks">See the comparisons, including where it costs more →</Link></p>
       </section>
 
       <section className="wrap band">
-        <header><h2>Compared with an agent on its own</h2></header>
-        <div className="table-wrap reveal" tabIndex={0}><table>
+        <Head n={next()} path="~/compare" title="Compared with an agent on its own" />
+        <div className="table-wrap reveal" tabIndex={0}><table className="compare">
           <thead><tr><th scope="col" /><th scope="col">Agent alone</th><th scope="col">With AgentOnTrack</th></tr></thead>
           <tbody>
             <tr><th scope="row">"It's done"</th><td>The agent's statement</td><td>Your checks, run on the current code, recorded as receipts</td></tr>
@@ -152,35 +202,39 @@ export default function Home() {
         </table></div>
       </section>
 
-      <section className="wrap band grid2">
-        <div className="tile reveal">
-          <h2>What it will not do</h2>
-          <ul>
-            <li>It cannot see the network activity of a script the agent runs.</li>
-            <li>It is not a security boundary against a determined program running as you.</li>
-            <li>It does not save tokens or time: in our tests it used more of both.</li>
-            <li>On Codex, a missing hook program means the action runs anyway.</li>
-            <li>It does not guarantee safety or correct results.</li>
-          </ul>
-          <Link href="/security">Read the threat model →</Link>
-        </div>
-        <div className="tile reveal">
-          <h2>Your code stays on your machine</h2>
-          <p>Code, prompts, transcripts and credentials stay local. Your agent keeps its own login. {ACCOUNTS_ENABLED ? 'An account on this site is used only for early access and optional cloud features; it holds no code or records.' : 'There are no accounts, and AgentOnTrack has no server to send anything to.'}</p>
-          <Link href="/privacy">Privacy details →</Link>
+      <section className="wrap band">
+        <Head n={next()} path="~/limits" />
+        <div className="grid2">
+          <div className="tile reveal">
+            <h2>What it will not do</h2>
+            <ul>
+              <li>It cannot see the network activity of a script the agent runs.</li>
+              <li>It is not a security boundary against a determined program running as you.</li>
+              <li>It does not save tokens or time: in our tests it used more of both.</li>
+              <li>On Codex, a missing hook program means the action runs anyway.</li>
+              <li>It does not guarantee safety or correct results.</li>
+            </ul>
+            <Link href="/security">Read the threat model →</Link>
+          </div>
+          <div className="tile reveal">
+            <h2>Your code stays on your machine</h2>
+            <p>Code, prompts, transcripts and credentials stay local. Your agent keeps its own login. {ACCOUNTS_ENABLED ? 'An account on this site is used only for early access and optional cloud features; it holds no code or records.' : 'There are no accounts, and AgentOnTrack has no server to send anything to.'}</p>
+            <Link href="/privacy">Privacy details →</Link>
+          </div>
         </div>
       </section>
 
       {INSTALL_GATED ? (
-        <section className="wrap band">
-          <div className="tile accent reveal" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 20, alignItems: 'center' }}>
-            <div><h2 style={{ marginTop: 0 }}>Ready to try it?</h2><p className="section-lead" style={{ marginBottom: 0 }}>Apply in about two minutes. If you are chosen, your invitation arrives by email with everything you need to install the preview and connect your agents.</p></div>
+        <section className="wrap band rail-end">
+          <Head n={next()} path="~/apply" />
+          <div className="tile accent cta-tile reveal">
+            <div><h2>Ready to try it?</h2><p className="section-lead">Apply in about two minutes. If you are chosen, your invitation arrives by email with everything you need to install the preview and connect your agents.</p></div>
             <EarlyAccessButton className="btn primary big" testId="foot-early-access">Request early access</EarlyAccessButton>
           </div>
         </section>
       ) : (
-        <section className="wrap band">
-          <h2 id="install">Install</h2>
+        <section className="wrap band rail-end">
+          <Head n={next()} path="~/install" title="Install" id="install" />
           <ReleaseNotice />
           <div className="install-grid">
             <Term label="Install command for Linux and macOS">{INSTALL_SH}</Term>

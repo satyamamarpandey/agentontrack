@@ -1,4 +1,4 @@
-// A small stroke-icon set (24px grid, 1.75 stroke), drawn for this product. No icon dependency.
+// A small stroke-icon set (24px grid, 1.5 stroke), drawn for this product. No icon dependency.
 const PATHS = {
   folder: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
   file: 'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5',
@@ -40,16 +40,17 @@ const PATHS = {
   external: 'M14 4h6v6m0-6-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5',
   more: 'M5 12h.01M12 12h.01M19 12h.01',
   refresh: 'M20 11a8 8 0 0 0-14-4L4 9m0-5v5h5M4 13a8 8 0 0 0 14 4l2-2m0 5v-5h-5',
+  menu: 'M4 7h16M4 12h16M4 17h16',
 } as const;
 
 export type IconName = keyof typeof PATHS;
 
 export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
   return (
-    <svg className="icon" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+    <svg className="icon" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
       <path d={PATHS[name]} />
     </svg>
   );
 }
 
-export const Logo = () => <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M4 12h16M4 18h7" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" /><circle cx="19" cy="6" r="2" fill="var(--accent)" /><circle cx="15" cy="18" r="2" fill="var(--accent)" /></svg>;
+export const Logo = () => <svg className="logo-mark" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M4 12h16M4 18h7" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" /><circle className="p1" cx="19" cy="6" r="2" fill="var(--accent)" /><circle className="p2" cx="15" cy="18" r="2" fill="var(--accent)" /></svg>;

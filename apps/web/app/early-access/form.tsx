@@ -175,7 +175,7 @@ export function EarlyAccessForm({ source, onDone, heading = true }: { source: 'p
           <div className="row" style={{ alignItems: 'center' }}>
             <span className="small muted">Step {step} of 3</span>
             {step < 3
-              ? <button type="submit" className="btn primary" data-testid="ea-next">Continue<Icon name="arrow-right" size={16} /></button>
+              ? <button type="submit" className="btn primary" data-testid="ea-next">Continue<Icon name="arrow-right" size={16} data-nudge="" /></button>
               : <button type="submit" className="btn primary" disabled={busy} data-testid="ea-submit">{busy ? 'Sending…' : 'Send application'}</button>}
           </div>
         </div>

@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const root = new URL('../../../', import.meta.url);
-const read = (p: string) => readFileSync(new URL(p, root), 'utf8');
+const read = (p: string) => readFileSync(new URL(p, root), 'utf8').replace(/\r\n/g, '\n'); // a checkout with CRLF line endings (Windows CI) must read the same
 const block = (css: string) => { const a = css.indexOf('/* tokens:start */'); const b = css.indexOf('/* tokens:end */'); expect(a).toBeGreaterThan(-1); expect(b).toBeGreaterThan(a); return css.slice(a, b); };
 
 describe('one design system for the site and the dashboard', () => {

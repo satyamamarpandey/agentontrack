@@ -39,6 +39,14 @@ jobs:
           agentontrack install claude-code
           echo '{"session_id":"s","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"agentontrack approve x"}}' | sh -c "$(grep -o '"command": "[^,]*hook claude-code' .claude/settings.local.json | head -1 | sed 's/"command": "//; s/\\"/"/g')" | grep -q '"permissionDecision":"deny"'
           agentontrack self uninstall
+      - name: Upgrade and rollback through the published installer
+        # The previous pre-release first, then this version, then back, then uninstall: the program must report the expected version after each
+        # step. Runs in a throwaway home with a clean environment (scripts/release/upgrade-rollback-check.mjs, fetched from the public main branch).
+        shell: bash
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          curl -fsSL https://raw.githubusercontent.com/satyamamarpandey/agentontrack/main/scripts/release/upgrade-rollback-check.mjs -o upgrade-rollback-check.mjs
+          node upgrade-rollback-check.mjs --from 1.0.0-rc.6 --to "$VERSION"
       - name: Install from the public site, then use it
         if: runner.os == 'Windows'
         shell: powershell

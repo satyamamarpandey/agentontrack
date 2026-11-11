@@ -70,7 +70,13 @@ test('deployed site, workspace composer: pair, connect, goal, task, denied and a
     // A new visitor: a welcome, with no port and no code in sight. They continue on this computer, and the page finds the helper by itself.
     await expect(page.getByRole('heading', { name: 'Keep your AI coding agents on track' })).toBeVisible();
     await expect(page.getByLabel('Pairing code')).toHaveCount(0);
-    await page.getByTestId('continue-local').click();
+    if (await page.getByTestId('gate-signed-out').isVisible()) {
+      // While early access lasts, the welcome page offers connecting only to signed-in approved testers. The Connect screen itself stays
+      // reachable at ?connect (the route a returning person takes after a companion restart); the chain from there on is the same.
+      await page.goto(`${SITE}/dashboard/?connect`);
+    } else {
+      await page.getByTestId('continue-local').click();
+    }
     await expect(page.getByTestId('probe-status')).toContainText('Found AgentOnTrack on this computer', { timeout: 30_000 });
     await page.getByLabel('Pairing code').fill('WRONGCOD');
     await c.newPairingCode();
@@ -152,7 +158,8 @@ test('deployed site, workspace composer: pair, connect, goal, task, denied and a
     await expect(page.getByTestId('demo-banner')).toHaveCount(0);
     await go(page, 'Settings');
     await page.getByRole('button', { name: 'Disconnect this browser' }).click();
-    await expect(page.getByRole('heading', { name: 'Keep your AI coding agents on track' })).toBeVisible();
+    // Disconnecting returns to the entry: the welcome, or the Connect screen when the address asked for it (?connect, above).
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(/Keep your AI coding agents on track|Connect this computer/);
 
     const p = new Project(root);
     const events = p.store.all();

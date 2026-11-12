@@ -337,6 +337,16 @@ test('a preview release is shown on its own, never as the stable download, and t
       await expect(sec).toContainText(`--version ${version}`);
       await expect(sec).toContainText(`AOT_VERSION = '${version}'`);
       await expect(page.getByTestId('preview-notes')).toHaveAttribute('href', `https://github.com/satyamamarpandey/agentontrack/releases/tag/v${version}`);
+      // Install and manual download are separate things: a command per system comes first, a ZIP is labelled an archive and not an installer, and an agent is required.
+      await expect(page.getByTestId('agent-required')).toContainText('does not include an AI agent');
+      await expect(sec.getByText('Downloading a ZIP or archive does not install anything')).toBeVisible();
+      for (const os of ['Windows (PowerShell)', 'macOS (Terminal)', 'Linux (terminal)']) await expect(sec.getByRole('heading', { name: os })).toBeVisible();
+      await expect(page.getByTestId('manual-note')).toContainText('archives, not installers');
+      const pre = await page.getByTestId('download-preview').evaluateAll((els) => els.map((e) => e.getAttribute('href') ?? ''));
+      expect(pre.length).toBe(6);
+      for (const h of pre) expect(h, h).toContain(`/releases/download/v${version}/`);
+      expect(pre.some((h) => h.endsWith(`agentontrack-${version}-windows-x64.zip`))).toBe(true);
+      expect(await page.locator('#preview').evaluate((el) => el.compareDocumentPosition(document.querySelector('#download')!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBeTruthy();
       // The stable table and the plain installer text are not changed by a preview.
       const hrefs = await page.getByTestId('download').evaluateAll((els) => els.map((e) => e.getAttribute('href') ?? ''));
       for (const h of hrefs) expect(h, h).not.toContain(version);

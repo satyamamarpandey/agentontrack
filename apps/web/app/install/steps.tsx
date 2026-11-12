@@ -11,32 +11,63 @@ export function InstallSteps() {
     <>
       <ReleaseNotice />
 
+      <section id="agent-needed" aria-labelledby="agent-h" data-testid="agent-required">
+        <h2 id="agent-h">Before you install: you need an AI agent</h2>
+        <p>AgentOnTrack does not include an AI agent and does not sign you in to one. It supervises an agent you already use, on your own computer. Install and log in to a supported agent first (for example Claude Code or Codex), using that maker&rsquo;s own instructions, then run <code>agentontrack setup</code> after installing. Without a logged-in agent, AgentOnTrack starts but has nothing to supervise.</p>
+      </section>
+
       {PREVIEW_PUBLISHED ? (
         <section id="preview" aria-labelledby="preview-h" data-testid="preview-release">
-          <h2 id="preview-h">Preview: {PREVIEW_VERSION} (a pre-release, not the stable release)</h2>
-          <p>A desktop preview for people who want to try newer work. It is published as a GitHub pre-release, so the plain installer above does not install it; spell the version out:</p>
-          <Term label="Install the preview on Linux and macOS">{`curl -fsSL https://pandeysatyam.com/agentontrack/install.sh | sh -s -- --version ${PREVIEW_VERSION}`}</Term>
+          <h2 id="preview-h">Install AgentOnTrack {PREVIEW_VERSION} (a pre-release, not the stable release)</h2>
+          <p>This is the build early-access testers use. It is a GitHub pre-release, so the plain installer further down does not install it; these commands name the version. <b>Downloading a ZIP or archive does not install anything.</b> Run the command for your system: it downloads the archive, checks it against the published checksum, puts the program in your user folder, adds it to your PATH and reports the version it installed. No administrator rights are needed.</p>
+          <h3 id="preview-windows">Windows (PowerShell)</h3>
           <Term label="Install the preview on Windows PowerShell">{`$env:AOT_VERSION = '${PREVIEW_VERSION}'; irm https://pandeysatyam.com/agentontrack/install.ps1 | iex`}</Term>
+          <h3 id="preview-macos">macOS (Terminal)</h3>
+          <Term label="Install the preview on macOS">{`curl -fsSL https://pandeysatyam.com/agentontrack/install.sh | sh -s -- --version ${PREVIEW_VERSION}`}</Term>
+          <h3 id="preview-linux">Linux (terminal)</h3>
+          <Term label="Install the preview on Linux">{`curl -fsSL https://pandeysatyam.com/agentontrack/install.sh | sh -s -- --version ${PREVIEW_VERSION}`}</Term>
+          <p className="muted small">Then open a <b>new</b> terminal, so the PATH change applies, and check it: <code>agentontrack --version</code> should print {PREVIEW_VERSION}. Next, in your project folder: <code>agentontrack setup</code>. You can read the scripts first: <a href="https://pandeysatyam.com/agentontrack/install.ps1">install.ps1</a> and <a href="https://pandeysatyam.com/agentontrack/install.sh">install.sh</a> are plain text.</p>
           <ul>
             <li>Desktop only. Phone control is switched off in this preview.</li>
             <li>Running several phases in a row, repeating a phase until its checks pass, and phone-started runs are refused for agents signed in with a subscription. They need your own API key in paid API mode and a time-limited grant you create with the terminal confirmation code.</li>
             <li>Whether the providers' terms allow every way a tool like this can start Claude Code and Codex has not been confirmed by either provider. A single run you start yourself uses your own login on your own computer.</li>
             <li>Not equal to Claude Code or Codex: there is no fork, reasoning-effort choice, mid-run steering or queueing, native audio, or subagent management. Voice dictation has not been verified with a real microphone.</li>
-            <li>Not code-signed, and tested by the project itself only.</li>
+            <li>Not code-signed, and tested by the project itself only. Windows or macOS may warn about an unknown publisher.</li>
           </ul>
-          <p><a data-testid="preview-notes" href={`${RELEASES}/tag/v${PREVIEW_VERSION}`}>Release notes, checksums and downloads for {PREVIEW_VERSION}</a>. The stable download below is unchanged.</p>
+          <p><a data-testid="preview-notes" href={`${RELEASES}/tag/v${PREVIEW_VERSION}`}>Release notes, checksums and downloads for {PREVIEW_VERSION}</a>. The stable release is unchanged and is the plain installer below.</p>
         </section>
       ) : null}
 
-      <h2 id="linux-macos">Linux and macOS</h2>
+      <h2 id="linux-macos">Stable release: Linux and macOS</h2>
       <Term label="Install command for Linux and macOS">{INSTALL_SH}</Term>
       <p className="muted small">Needs <code>curl</code>, <code>tar</code>, and <code>sha256sum</code> or <code>shasum</code>. Glibc only: Alpine and other musl systems are not supported. Installs to <code>~/.agentontrack/app</code> and adds it to your PATH. To read the script first, save <code>install.sh</code>, read it, then run it with <code>sh</code>. Options: <code>--version</code>, <code>--from</code>, <code>--no-path</code>.</p>
 
-      <h2 id="windows">Windows</h2>
+      <h2 id="windows">Stable release: Windows</h2>
       <Term label="Install command for Windows PowerShell">{INSTALL_PS1}</Term>
       <p className="muted small">In PowerShell. Installs to <code>.agentontrack\app</code> in your user folder and adds it to your user PATH. Options go through the environment: <code>AOT_VERSION</code>, <code>AOT_FROM</code>, <code>AOT_NO_PATH=1</code>. Windows on Arm uses the x64 build through emulation, which has not been tested.</p>
 
-      <h2 id="download">Manual download</h2>
+      <h2 id="download">Download a ZIP or archive manually (not an installer)</h2>
+      <p className="alert" role="note" data-testid="manual-note"><b>These files are archives, not installers.</b> Opening one installs nothing and does not touch your PATH. Use them only if you cannot run the commands above: check the file against <code>SHA256SUMS</code>, then run the install script on it as shown below.</p>
+      {PREVIEW_PUBLISHED ? (
+        <div data-testid="manual-preview">
+          <h3>{PREVIEW_VERSION} (pre-release, for early-access testers)</h3>
+          <div className="table-wrap" tabIndex={0}><table>
+            <thead><tr><th scope="col">System</th><th scope="col">File</th><th scope="col">Download</th></tr></thead>
+            <tbody>
+              {PLATFORMS.map((p) => { const file = assetName(p.id, p.ext, PREVIEW_VERSION); return <tr key={p.id}><th scope="row">{p.label}</th><td><code>{file}</code></td><td><a className="btn small" data-testid="download-preview" href={assetUrl(file, PREVIEW_VERSION)}>Download archive</a></td></tr>; })}
+              <tr><th scope="row">Checksums</th><td><code>SHA256SUMS</code></td><td><a className="btn small" data-testid="download-preview" href={assetUrl('SHA256SUMS', PREVIEW_VERSION)}>Download</a></td></tr>
+            </tbody>
+          </table></div>
+          <p>With the archive, <code>SHA256SUMS</code> and the install script in one folder, run these in it.</p>
+          <Term label="Verify and install the preview from a downloaded archive on Windows">{`(Get-FileHash agentontrack-${PREVIEW_VERSION}-windows-x64.zip -Algorithm SHA256).Hash.ToLower()
+Select-String windows-x64 SHA256SUMS   # the two hashes must match
+$env:AOT_FROM = (Get-Location).Path; $env:AOT_VERSION = '${PREVIEW_VERSION}'; .\\install.ps1`}</Term>
+          <Term label="Verify and install the preview from downloaded archives on Linux and macOS">{`sha256sum -c --ignore-missing SHA256SUMS      # Linux
+shasum -a 256 -c --ignore-missing SHA256SUMS  # macOS
+sh install.sh --from . --version ${PREVIEW_VERSION}`}</Term>
+          <h3>Stable release {RELEASE_PUBLISHED ? RELEASE_VERSION : ''}</h3>
+        </div>
+      ) : null}
       {RELEASE_PUBLISHED ? null : <p className="alert" role="note">{NOTICE} The files do not exist yet, so nothing in this table is a link.</p>}
       <div className="table-wrap" tabIndex={0}><table>
         <thead><tr><th scope="col">System</th><th scope="col">File</th><th scope="col">Download</th></tr></thead>

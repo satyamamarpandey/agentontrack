@@ -203,6 +203,8 @@ test('the applicant opens the link, creates the account with the invited address
 test('as a tester: the install steps, the account page, structured feedback, and the public-site dashboard with a saved summary', async () => {
   await tpage.goto(`${SITE}/install/`);
   await expect(tpage.getByTestId('install-steps')).toBeVisible({ timeout: 20_000 });
+  await expect(tpage.getByTestId('agent-required')).toContainText('AI agent');
+  await expect(tpage.getByTestId('manual-note')).toContainText('not installers');
   await expect(tpage.locator('main')).toContainText('curl -fsSL https://pandeysatyam.com/agentontrack/install.sh | sh');
   await tpage.goto(`${SITE}/account/`);
   await expect(tpage.getByTestId('access-status')).toContainText('Active tester', { timeout: 20_000 });

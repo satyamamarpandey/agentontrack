@@ -184,7 +184,8 @@ export async function downloadExport(): Promise<void> {
   URL.revokeObjectURL(url);
 }
 
-export interface Probe { state: 'found' | 'none' | 'blocked'; paired?: boolean }
+const PROBE_TIMEOUT_MS = 20_000;
+export interface Probe { state: 'found' | 'none' | 'blocked' | 'timeout'; paired?: boolean }
 
 /**
  * Looks for a companion on this computer, from a page on the public site. The browser may ask the person for permission first, and
@@ -193,12 +194,15 @@ export interface Probe { state: 'found' | 'none' | 'blocked'; paired?: boolean }
 export async function probeCompanion(port: string): Promise<Probe> {
   if (await localNetworkPermission() === 'denied') return { state: 'blocked' };
   const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), 4000);
+  // Long enough for a person to read the browser's permission question and answer it; a closed port is refused at once and does not wait for this.
+  const timer = setTimeout(() => ctl.abort(), PROBE_TIMEOUT_MS);
   try {
     const r = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: ctl.signal, headers: auth() });
     const h = await r.json() as { ok?: boolean; paired?: boolean };
     return h.ok ? { state: 'found', paired: !!h.paired } : { state: 'none' };
   } catch {
-    return { state: 'none' };
+    if (ctl.signal.aborted) return { state: 'timeout' };
+    // The person pressed Block on the browser's question: the request fails the same way a missing helper does, so ask the browser which it was.
+    return (await localNetworkPermission()) === 'denied' ? { state: 'blocked' } : { state: 'none' };
   } finally { clearTimeout(timer); }
 }

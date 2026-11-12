@@ -253,7 +253,7 @@ test('from the public site, source files stay closed until the terminal allows t
 });
 
 test('a slow first probe that finds nothing cannot overwrite a later probe that found the companion', async ({ page, env }, info) => {
-  // The page probes when it opens and again on Retry. Hold the first answer back and make it "nothing there"; the second is the real companion.
+  // The page probes when the person presses "Check for helper" and again on Retry. Hold the first answer back and make it "nothing there"; the second is the real companion.
   let n = 0;
   await page.route(/\/api\/health$/, async (route) => {
     if (++n === 1) { await new Promise((ok) => setTimeout(ok, 3000)); return route.abort('connectionrefused'); }
@@ -262,11 +262,32 @@ test('a slow first probe that finds nothing cannot overwrite a later probe that 
   await page.goto(DASHBOARD);
   if (!(await page.getByLabel('Companion port').isVisible())) await page.getByText('This computer uses a different port').click();
   await page.getByLabel('Companion port').fill(String(env.c.port));
-  await page.getByTestId('retry').click();
+  await page.getByTestId('retry').click(); // "Check for helper": this first probe is the held-back one
+  await page.getByTestId('retry').click(); // "Retry": the second, which reaches the real companion
   const status = page.getByTestId('probe-status');
   await expect(status).toContainText('Found', { timeout: 20_000 });
   await page.waitForTimeout(3500); // long enough for the held-back first answer to arrive; it must change nothing
   await expect(status).toContainText('Found');
   await expect(page.getByLabel('Pairing code')).toBeVisible();
   record(info, 'a stale probe answer does not replace a newer one', 'found stays found');
+});
+
+test('connect: opening the screen contacts nothing on this computer until "Check for helper" is pressed', async ({ page, env }) => {
+  const local: string[] = [];
+  page.on('request', (r) => { if (/^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])/.test(r.url()) && !r.url().startsWith(ORIGIN)) local.push(r.url()); });
+  await page.goto(`${ORIGIN}/agentontrack/dashboard/`);
+  await page.getByTestId('continue-local').click();
+  await expect(page.getByTestId('probe-intro')).toContainText('local network access');
+  await expect(page.getByTestId('probe-intro')).toContainText('Block');
+  await expect(page.getByTestId('probe-status')).toHaveCount(0);
+  await expect(page.getByLabel('Pairing code')).toHaveCount(0);
+  await page.waitForTimeout(1500);
+  expect(local, 'no request to this computer before the button').toEqual([]);
+  expect(env.codes).toEqual([]);
+  // The documentation and sign-in stay reachable without that permission.
+  await page.getByRole('button', { name: 'Back' }).click();
+  await expect(page.getByTestId('continue-local')).toBeVisible();
+  await page.getByTestId('continue-local').click();
+  await page.getByTestId('retry').click();
+  await expect(page.getByTestId('probe-status')).toBeVisible();
 });

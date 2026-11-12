@@ -96,7 +96,7 @@ export function EarlyAccessForm({ source, onDone, heading = true }: { source: 'p
         <ol>
           <li>We read every application and pick a balanced group across operating systems and agents.</li>
           <li>If you are chosen, you receive a personal invitation link by email from the maintainer. It works once, for your address only, and expires.</li>
-          <li>With it you create your account, install the desktop preview, and connect your own agents on your own machine.</li>
+          <li>With it you create your account, install the desktop preview with one command, and connect an AI agent you already have installed and logged in, on your own machine.</li>
         </ol>
         <p className="small muted">Nothing is sent to you unless you are invited{input.marketingConsent ? ', apart from the occasional update you asked for' : ''}. To withdraw, sign in later with this address or write to the maintainer through the <Link href="/feedback">feedback page</Link>.</p>
       </div>

@@ -96,18 +96,19 @@ function Connect({ onPaired, notice, onBack }: { onPaired: () => void; notice?: 
   const [error, setError] = useState('');
   const [probe, setProbe] = useState<Probe | null>(null);
   const [busy, setBusy] = useState(false);
+  const [asked, setAsked] = useState(false); // nothing talks to this computer until the person presses the button
   const lookSeq = useRef(0);
   const pub = onPublicSite();
 
   const look = useCallback(async () => {
     if (!pub) return;
+    setAsked(true);
     const mine = ++lookSeq.current; // answers can arrive out of order (mount probe vs a later Retry); only the newest one may set the result
     setProbe(null);
     try { setPort(port); } catch (e) { setError((e as Error).message); return; }
     const answer = await probeCompanion(port);
     if (mine === lookSeq.current) setProbe(answer);
   }, [pub, port]);
-  useEffect(() => { void look(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const submit = async (e: FormEvent) => {
     e.preventDefault(); setError(''); setBusy(true);
@@ -122,19 +123,31 @@ function Connect({ onPaired, notice, onBack }: { onPaired: () => void; notice?: 
       <p className="muted">AgentOnTrack runs a small helper on your computer. It reads your projects and starts your agents, and this page only talks to it. Connecting needs a one-time code that appears in your own terminal, so no website can connect on its own.</p>
       {notice && !error ? <div className="alert warn" role="status" data-testid="pair-notice">{notice}</div> : null}
 
-      {pub ? (
+      {pub && !asked ? (
+        <div className="alert" data-testid="probe-intro">
+          <p><b>Before you check.</b> Pressing the button makes this page look for the AgentOnTrack helper on your own computer, at <code>{localAddress()}</code>. Your browser (Chrome and Edge) will then ask whether this site may &ldquo;access other apps and services on this device&rdquo;, also called local network access.</p>
+          <ul>
+            <li><b>Allow</b> lets this page talk to the helper on your computer. Nothing is sent to this website.</li>
+            <li><b>Block</b> is fine too. Sign-in, early-access applications and the documentation do not need it, and the local address above works without any permission.</li>
+            <li>Safari and some browsers do not allow this from a secure page at all. Use the local address then.</li>
+          </ul>
+          <button className="btn primary" type="button" onClick={() => void look()} data-testid="retry">Check for helper</button>
+        </div>
+      ) : null}
+
+      {pub && asked ? (
         <div role="status" aria-live="polite" data-testid="probe-status" className={`probe ${probe?.state ?? 'look'}`}>
-          {probe === null ? 'Looking for AgentOnTrack on this computer…' : probe.state === 'found' ? 'Found AgentOnTrack on this computer.' : probe.state === 'blocked' ? 'Your browser is blocking this page from reaching your computer.' : 'AgentOnTrack was not found on this computer.'}
+          {probe === null ? 'Looking for AgentOnTrack on this computer… If your browser asks for permission, choose Allow or Block.' : probe.state === 'timeout' ? 'No answer yet. The permission question may still be open, or nothing is listening on this port. Press Retry.' : probe.state === 'found' ? 'Found AgentOnTrack on this computer.' : probe.state === 'blocked' ? 'Your browser is blocking this page from reaching your computer.' : 'AgentOnTrack was not found on this computer.'}
         </div>
       ) : null}
 
       {pub && probe?.state === 'blocked' ? (
         <div className="alert warn" data-testid="probe-blocked">
-          <p>Allow &ldquo;local network access&rdquo; for this site in your browser&apos;s site settings, then press Retry. Safari does not allow this from a secure page; use the local dashboard instead.</p>
+          <p>You chose Block, or your browser blocks it. That is fine: use the local address instead, or allow &ldquo;local network access&rdquo; for this site in your browser&apos;s site settings, then press Retry. Safari does not allow this from a secure page; use the local dashboard instead.</p>
         </div>
       ) : null}
 
-      {pub && probe?.state === 'none' ? (
+      {pub && (probe?.state === 'none' || probe?.state === 'timeout') ? (
         <ol className="steps big" data-testid="probe-steps">
           <li><b>Get AgentOnTrack.</b> It installs in one command and needs no administrator rights. <a href={`${SITE}install/`} data-testid="download-link">Download and install</a></li>
           <li><b>Start it.</b> In your project folder, run: <Copy text={START} /></li>
@@ -152,7 +165,7 @@ function Connect({ onPaired, notice, onBack }: { onPaired: () => void; notice?: 
       ) : null}
 
       <div className="row wrap">
-        {pub ? <button className="btn" type="button" onClick={() => void look()} data-testid="retry">Retry</button> : null}
+        {pub && asked ? <button className="btn" type="button" onClick={() => void look()} data-testid="retry">Retry</button> : null}
         {pub ? <a className="btn" href={localAddress()} data-testid="open-local">Open the local dashboard</a> : null}
         {pub && !found ? <a className="btn" href={`${SITE}install/`}>Download</a> : null}
       </div>
@@ -161,7 +174,7 @@ function Connect({ onPaired, notice, onBack }: { onPaired: () => void; notice?: 
           <label>Companion port<input value={port} onChange={(e) => setPortValue(e.target.value)} name="port" inputMode="numeric" /></label>
         </details>
       ) : <p className="muted small">Everything here stays on this machine. No account is needed.</p>}
-      {pub ? <p className="muted small">This page talks only to the helper on your own machine. Your data does not go to this website. If your browser asks about local network access, it must be allowed. The address the helper prints in your terminal, such as <code>{localAddress()}</code>, always works and asks for nothing.</p> : null}
+      {pub ? <p className="muted small">This page talks only to the helper on your own machine. Your data does not go to this website. If your browser asks about local network access, Allow is needed to use the helper from this page; Block leaves everything else on the site working. The address the helper prints in your terminal, such as <code>{localAddress()}</code>, always works and asks for nothing.</p> : null}
     </Frame>
   );
 }

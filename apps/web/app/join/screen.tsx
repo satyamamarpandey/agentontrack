@@ -64,9 +64,10 @@ export function JoinScreen() {
         <div className="stack" data-testid="join-done">
           <p className="badge good" style={{ alignSelf: 'flex-start' }}><Icon name="check" size={14} />You are in</p>
           <h2>Welcome to the early access group.</h2>
-          <p>Your account is active. Three steps from here:</p>
+          <p>Your account is active. Four steps from here:</p>
           <ol>
-            <li><Link href="/install">Install the desktop preview</Link> on your own computer. It needs no administrator rights.</li>
+            <li>Make sure an AI agent such as Claude Code or Codex is installed and logged in on your computer. AgentOnTrack supervises one; it does not provide one.</li>
+            <li><Link href="/install">Install the desktop preview</Link> with the command for your system on the install page. Downloading the ZIP by itself does not install it. No administrator rights are needed.</li>
             <li>Run <code>agentontrack setup</code> in a project folder to connect your Claude Code or Codex, then <code>agentontrack dashboard --allow-public-site</code> to use the dashboard from this site.</li>
             <li>Tell the maintainer what you find on the <Link href="/feedback">feedback page</Link>: bugs, ideas, and what felt wrong.</li>
           </ol>

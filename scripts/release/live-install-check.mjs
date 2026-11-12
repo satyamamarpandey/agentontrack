@@ -7,7 +7,7 @@
 // Not covered here: the PATH edit (needs the real profile; AOT_NO_PATH=1 is used), which the public-install workflow checks on five runners.
 //   node scripts/release/live-install-check.mjs [--version 1.0.0-rc.7] [--site https://pandeysatyam.com/agentontrack] [--out <file>]
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, appendFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 

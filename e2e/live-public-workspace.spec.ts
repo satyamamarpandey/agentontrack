@@ -67,7 +67,7 @@ test('deployed site, workspace composer: pair, connect, goal, task, denied and a
     await page.context().grantPermissions(['local-network-access'], { origin: new URL(SITE).origin });
     await page.goto(`${SITE}/dashboard/`);
     if (!process.env.SITE_URL) expect(new URL(page.url()).protocol).toBe('https:');
-    // A new visitor: a welcome, with no port and no code in sight. They continue on this computer, and the page finds the helper by itself.
+    // A new visitor: a welcome, with no port and no code in sight. They continue on this computer, and look for the helper by pressing a button.
     await expect(page.getByRole('heading', { name: 'Keep your AI coding agents on track' })).toBeVisible();
     await expect(page.getByLabel('Pairing code')).toHaveCount(0);
     if (await page.getByTestId('gate-signed-out').isVisible()) {
@@ -77,6 +77,10 @@ test('deployed site, workspace composer: pair, connect, goal, task, denied and a
     } else {
       await page.getByTestId('continue-local').click();
     }
+    // Nothing has looked for the helper yet: the page explains the browser's question first, and waits for the person to press the button.
+    await expect(page.getByTestId('probe-intro')).toContainText('local network access');
+    await expect(page.getByTestId('probe-status')).toHaveCount(0);
+    await page.getByTestId('retry').click();
     await expect(page.getByTestId('probe-status')).toContainText('Found AgentOnTrack on this computer', { timeout: 30_000 });
     await page.getByLabel('Pairing code').fill('WRONGCOD');
     await c.newPairingCode();

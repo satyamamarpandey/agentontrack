@@ -13,10 +13,10 @@ Status at 2026-11-12. "Verified" means run against production or the real releas
 | 7 | Upgrade, rollback, uninstall through the published installer | Verified (Windows) | `scripts/release/upgrade-rollback-check.mjs`, 2026-11-12 |
 | 8 | Connect: no contact with this computer until "Check for helper"; Allow, Block, missing helper, wrong port, timeout | Verified (Chromium; Edge and others in CI) | `e2e/public-pairing.spec.ts` |
 | 9 | Pairing and a real agent task through the deployed site (real Claude Code, approval, denial, VERIFIED) | Verified once | `e2e/live-public-workspace.spec.ts`, 2026-11-12, 1.1 min |
-| 10 | Email text: product name, sender name, subject, message | **Owner**: console steps in `EMAIL_SETUP.md`; then `firebase-email-templates.mjs check` |
-| 11 | Genuine email delivery after the new text | **Owner**: run `live-email-delivery.mjs send`, open the message, run `finish` |
+| 10 | Email text: product name, sender name, subject, message | **Owner, unconfirmed**: the live configuration read by API still shows Firebase defaults; the owner should open the received message and read the subject and sender, or re-save the templates in the console (`EMAIL_SETUP.md`) |
+| 11 | Genuine email delivery | Verified 2026-11-13 (received, opened, confirmed by the owner; 9/9 checks, cleanup done) | the maintainers' record "live-email-2026-11-13.json" (not published) |
 | 12 | Revoke, reinstate, leave account, old-token denial | Verified | live walkthroughs |
-| 13 | Public CI (7 jobs) and Pages deploy on the published commit | see PRODUCT_READINESS |
+| 13 | Public CI (7 jobs) and Pages deploy on the published commit | Verified: ci and pages green on public `f50f6af` | GitHub Actions |
 | 14 | Stable v1.0 | Not approved. rc.7 stays a pre-release; rc.3 stays the latest non-pre-release |
 
 Not available to this assistant: a second physical machine or phone, a real external applicant's inbox other than the owner's, Codex/Hermes logins, code signing, independent evaluation.

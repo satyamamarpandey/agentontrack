@@ -24,3 +24,4 @@ export * from './ask.js';
 export * from './attachments.js';
 export * from './sessions.js';
 export * from './envfile.js';
+export * from './pipeline.js';

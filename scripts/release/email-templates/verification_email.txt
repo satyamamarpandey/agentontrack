@@ -1,0 +1,16 @@
+AgentOnTrack: verify your email address
+
+Hello {{DISPLAY_NAME}},
+
+Confirm this email address to finish setting up your AgentOnTrack account. This helps us keep early-access invitations and account access secure.
+
+Verify email address:
+{{VERIFY_URL}}
+
+Didn't create an AgentOnTrack account? You can ignore this message. No action is needed.
+
+AgentOnTrack runs your coding agents locally. Email verification does not grant access to your computer or your projects.
+
+--
+AgentOnTrack - Local-first AI agent coordination
+This is a transactional email sent because an account verification was requested.

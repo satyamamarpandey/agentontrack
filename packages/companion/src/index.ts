@@ -6,7 +6,8 @@ import type { AddressInfo } from 'node:net';
 import { homedir, hostname } from 'node:os';
 import { basename, dirname, extname, relative, sep, isAbsolute, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { failoverOptions, runtimeFacts, coverageFor, PROVIDERS, providerInstalled, hooksInstalled, hookSelfTest, agentEnv, killTree, apiKeyVarsPresent, classifyClaudeMethod, classifyCodexStatus, mayStartUnder, type AuthMode, buildCodexExecArgs, mirrorHooksToWorktree, CodexAppServer, mapCodexTool, parseCodexLine, LineSplitter, codexUsageRecord, installHooks, probeLocalModel, uninstallHooks, discoverModels, describeAgents, type InitReport, type Seen } from '@agentontrack/adapters';
+import { failoverOptions, runtimeFacts, coverageFor, PROVIDERS, providerInstalled, hooksInstalled, hookSelfTest, agentEnv, killTree, apiKeyVarsPresent, classifyClaudeMethod, classifyCodexStatus, mayStartUnder, creditGuard, classifyModelBilling, type AuthMode, buildCodexExecArgs, mirrorHooksToWorktree, CodexAppServer, mapCodexTool, parseCodexLine, LineSplitter, codexUsageRecord, installHooks, probeLocalModel, uninstallHooks, discoverModels, describeAgents, type InitReport, type Seen } from '@agentontrack/adapters';
+import { newPipeline, authorizeStage, startStage, finishStage, PipelineError, PIPELINE_STAGES, CLAUDE_ROLE_SUGGESTIONS, unattendedChainAllowed, summary as pipelineSummary, type Pipeline } from '@agentontrack/core';
 import { isProviderSessionId, newSessionId, projectSessions, searchSessions, type SessionView } from '@agentontrack/core';
 import { planFacts as planFactsOf, planView as planViewOf } from './plan-view.js';
 import { makeExecutor, snapshotOf, stillTheSameFolder } from './remote-actions.js';
@@ -155,7 +156,7 @@ const changedBetween = (before: Map<string, string>, after: Map<string, string>)
 const claudeToolArgs = (policy: 'standard' | 'read-only'): string[] => policy === 'read-only'
   ? ['--tools', 'Read,Grep,Glob', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--allowedTools', 'Read,Grep,Glob', '--disallowedTools', 'Bash,PowerShell,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch', '--permission-mode', 'default']
   : ['--allowedTools', 'Bash,Write,Edit,Read,Grep,Glob', '--permission-mode', 'acceptEdits'];
-const RunInput = z.object({ runtime: z.enum(['claude-code', 'codex', 'hermes']), prompt: z.string().min(1).max(20_000).regex(/^[^-]/, 'A prompt cannot start with a hyphen').refine((s) => !s.includes('\0'), 'A prompt cannot contain a NUL character'), model: z.string().regex(/^\w[\w.:-]{0,79}$/).default('haiku'), maxBudgetUsd: z.number().positive().max(5).default(0.5), /** Provider-independent time limit; the companion stops the run's process tree when it is reached. */ maxMinutes: z.number().int().min(1).max(240).default(30), resumeRunId: z.string().regex(/^run_[a-z0-9]{1,40}$/).optional(), attachments: z.array(z.string().regex(/^[a-f0-9]{64}$/)).max(5).default([]), /** Run inside this worktree instead of the project folder. */ worktreeId: z.string().regex(/^wt_[a-z0-9]{1,40}$/).optional(), /** Continue this AgentOnTrack session (it resumes the provider session behind it). */ sessionId: z.string().regex(/^ses_[a-f0-9]{8,32}$/).optional(), /** A title for a NEW session. */ title: z.string().trim().max(120).optional(), /** What the agent may do. A policy can only NARROW the default: it never widens it. */ policy: z.enum(['standard', 'read-only']).default('standard') });
+const RunInput = z.object({ runtime: z.enum(['claude-code', 'codex', 'hermes']), prompt: z.string().min(1).max(20_000).regex(/^[^-]/, 'A prompt cannot start with a hyphen').refine((s) => !s.includes('\0'), 'A prompt cannot contain a NUL character'), model: z.string().regex(/^\w[\w.:-]{0,79}$/).default('haiku'), maxBudgetUsd: z.number().positive().max(5).default(0.5), /** Provider-independent time limit; the companion stops the run's process tree when it is reached. */ maxMinutes: z.number().int().min(1).max(240).default(30), resumeRunId: z.string().regex(/^run_[a-z0-9]{1,40}$/).optional(), attachments: z.array(z.string().regex(/^[a-f0-9]{64}$/)).max(5).default([]), /** Run inside this worktree instead of the project folder. */ worktreeId: z.string().regex(/^wt_[a-z0-9]{1,40}$/).optional(), /** Continue this AgentOnTrack session (it resumes the provider session behind it). */ sessionId: z.string().regex(/^ses_[a-f0-9]{8,32}$/).optional(), /** A title for a NEW session. */ title: z.string().trim().max(120).optional(), /** What the agent may do. A policy can only NARROW the default: it never widens it. */ policy: z.enum(['standard', 'read-only']).default('standard'), /** The person accepts that a credit-bearing model (for example Fable) may charge usage credits for THIS run. Never inferred, never remembered. */ acceptUsageCredits: z.boolean().default(false) });
 const HumanFields = { confirm: z.string(), passphrase: z.string().optional() };
 
 /** Only github.com over https, as owner/repo with an optional .git. Anything else, such as a local path or another scheme, is refused. */
@@ -331,6 +332,7 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
    * WHO MAY START AN AGENT, route by route. Authority is decided here on the companion, never by a flag the caller sends.
    *
    *   single, user-initiated (allowed):      POST /api/runs, POST /api/agent-sessions, POST /api/agent-sessions/:id/resume, POST /api/plan/phases/start,
+   *                                          POST /api/pipeline/start (one stage, only after its own POST /api/pipeline/authorize; nothing chains the next stage),
    *                                          POST /api/plan/continue and /api/plan/loop with one phase or one round.
    *   cross-review (CHAINED, gated):         POST /api/workflows/cross-review: two runs with nobody acting between them. Needs a grant for the project (it spends
    *                                          both runs) AND an API-key sign-in under paid API mode for both agents; otherwise 409. Off by default.
@@ -1071,13 +1073,14 @@ ${brief}`.slice(0, 19_900), model: o.reviewerModel, maxBudgetUsd: o.maxUsd }), {
     if (!hooksInstalled('claude-code', entry.root)) throw new HttpError(409, 'Connect Claude Code to this project first, so its hooks are in place');
     try { checkSlashCommand(input.prompt, reportedCommands('claude-code')); } catch (err) { if (err instanceof CommandRefused) throw new HttpError(409, err.message); throw err; }
     if (!opts.claudeCommand) { const g = mayStartUnder(classifyClaudeMethod(cachedClaudeAuth().method), paidApi); if (!g.ok) throw new HttpError(409, g.reason); }
+    { const cg = creditGuard({ runtime: 'claude-code', model: input.model, interactive: false, acceptUsageCredits: input.acceptUsageCredits }); if (!cg.ok) throw new HttpError(409, cg.reason); }
     const [cmd, ...pre] = opts.claudeCommand ?? ['claude'];
     const args = [...pre, '-p', input.prompt + attachmentNote(att), ...(att.length ? ['--add-dir', attachmentDir(p.stateDir)] : []), ...(resumeSession ? ['--resume', resumeSession] : []), '--model', input.model, ...(dollarCapAllowed('claude-code') ? ['--max-budget-usd', String(input.maxBudgetUsd)] : []), '--output-format', 'stream-json', '--verbose', ...claudeToolArgs(input.policy), '--setting-sources', 'project,local'];
     const where = runCwd(entry, p, input);
     const child = spawn(cmd!, args, { cwd: where.cwd, stdio: ['ignore', 'pipe', 'pipe'], env: { ...agentEnv(process.env, paidApi), ...envCfg.keysFor('claude-code') } });
     const run: Run = { id: `run_${randomBytes(5).toString('hex')}`, project: entry.id, child, started: Date.now(), events: newRunLines(), status: 'running' };
     runs.set(run.id, run);
-    p.store.append({ type: 'run.started', actor: { kind: 'human' }, payload: { id: run.id, runtime: input.runtime, ...(input.worktreeId ? { worktreeId: input.worktreeId } : {}), model: input.model, ...(dollarCapAllowed('claude-code') ? { maxBudgetUsd: input.maxBudgetUsd } : {}), maxMinutes: input.maxMinutes, ...(input.resumeRunId ? { resumedFrom: input.resumeRunId } : {}), ...(meta?.planId ? { planId: meta.planId, phaseId: meta.phaseId } : {}), ...(meta?.source ? { source: meta.source } : {}), promptSha256: hash(input.prompt), ...(input.policy !== 'standard' ? { policy: input.policy } : {}) } });
+    p.store.append({ type: 'run.started', actor: { kind: 'human' }, payload: { id: run.id, runtime: input.runtime, ...(input.worktreeId ? { worktreeId: input.worktreeId } : {}), model: input.model, ...(input.acceptUsageCredits ? { acceptedUsageCredits: true } : {}), ...(dollarCapAllowed('claude-code') ? { maxBudgetUsd: input.maxBudgetUsd } : {}), maxMinutes: input.maxMinutes, ...(input.resumeRunId ? { resumedFrom: input.resumeRunId } : {}), ...(meta?.planId ? { planId: meta.planId, phaseId: meta.phaseId } : {}), ...(meta?.source ? { source: meta.source } : {}), promptSha256: hash(input.prompt), ...(input.policy !== 'standard' ? { policy: input.policy } : {}) } });
     let buf = '';
     let result: any = null;
     child.stdout!.setEncoding('utf8').on('data', (d: string) => {
@@ -1476,6 +1479,47 @@ ${brief}`.slice(0, 19_900), model: o.reviewerModel, maxBudgetUsd: o.maxUsd }), {
       const b = z.object({ runId: z.string().regex(/^run_[a-z0-9]{1,40}$/), reviewer: z.enum(['claude-code', 'codex']), model: RunInput.shape.model, taskId: z.string().optional(), maxUsd: z.number().positive().max(5).default(0.5) }).parse(await readBody(req));
       const o = startOnce(req, key, '/api/workflows/review', [entry.id, b], () => ({ status: 200, body: reviewRun(entry, p, b) }));
       return json(res, o.status, o.body, o.replay ? { 'idempotent-replay': 'true' } : {});
+    }
+
+    /* ---------- Plan → Build → Review → Verify: each stage authorized on its own ---------- */
+    const pipePath = join(p.stateDir, 'pipeline.json');
+    const loadPipe = (): Pipeline | null => { try { return existsSync(pipePath) ? (JSON.parse(readFileSync(pipePath, 'utf8')) as Pipeline) : null; } catch { return null; } };
+    const savePipe = (pl: Pipeline) => { mkdirSync(p.stateDir, { recursive: true }); writeFileSync(pipePath, JSON.stringify(pl, null, 2)); };
+    /** A stage whose run has ended is finished from what the runtime reported: the model comes from the usage record, never from the choice. */
+    const reconcilePipe = (pl: Pipeline | null): Pipeline | null => {
+      if (!pl) return pl;
+      let out = pl;
+      for (const r of pl.stages) {
+        if (r.status !== 'running' || !r.runId) continue;
+        const run = runs.get(r.runId);
+        if (run?.status === 'running') continue;
+        const used = p.store.byType(['usage.recorded']).filter((e: any) => e.payload.runId === r.runId).map((e: any) => String(e.payload.model));
+        out = finishStage(out, r.stage, { ok: run?.status === 'finished', actualModel: used[0] ?? null, evidence: run ? [`run:${r.runId}:${run.status}`] : [], ...(run ? {} : { note: 'The companion restarted before this run ended, so its result is unknown.' }) });
+      }
+      if (out !== pl) savePipe(out);
+      return out;
+    };
+    const pipeView = (pl: Pipeline | null) => ({ pipeline: pl, summary: pl ? pipelineSummary(pl) : null, suggestions: CLAUDE_ROLE_SUGGESTIONS, unattended: unattendedChainAllowed() });
+    if (path === '/api/pipeline' && method === 'GET') return json(res, 200, pipeView(reconcilePipe(loadPipe())));
+    if (path === '/api/pipeline' && method === 'POST') {
+      const b = z.object({ goal: z.string().trim().min(1).max(2000) }).parse(await readBody(req));
+      const pl = newPipeline(`pipe_${randomBytes(4).toString('hex')}`, b.goal); savePipe(pl);
+      return json(res, 200, pipeView(pl));
+    }
+    if (path === '/api/pipeline/authorize' && method === 'POST') {
+      const b = z.object({ stage: z.enum(PIPELINE_STAGES), agent: z.enum(['claude-code', 'codex', 'hermes']), model: z.string().regex(/^\w[\w.:-]{0,79}$/), acceptUsageCredits: z.boolean().default(false) }).parse(await readBody(req));
+      const pl = reconcilePipe(loadPipe()); if (!pl) throw new HttpError(409, 'Start a pipeline with a goal first.');
+      try { const next = authorizeStage(pl, b.stage, { agent: b.agent, model: b.model }, 'dashboard session', Date.now(), { billing: classifyModelBilling(b.agent, b.model), acceptUsageCredits: b.acceptUsageCredits }); savePipe(next); return json(res, 200, pipeView(next)); }
+      catch (err) { if (err instanceof PipelineError) throw new HttpError(409, err.message); throw err; }
+    }
+    if (path === '/api/pipeline/start' && method === 'POST') {
+      const b = z.object({ stage: z.enum(PIPELINE_STAGES), prompt: z.string().min(1).max(20_000).regex(/^[^-]/, 'A prompt cannot start with a hyphen') }).parse(await readBody(req));
+      const pl = reconcilePipe(loadPipe()); if (!pl) throw new HttpError(409, 'Start a pipeline with a goal first.');
+      const r = pl.stages[PIPELINE_STAGES.indexOf(b.stage)]!;
+      if (r.status !== 'authorized' || !r.chosen) throw new HttpError(409, `${b.stage} has not been authorized, so it cannot start.`);
+      const run = startRun(entry, p, RunInput.parse({ runtime: r.chosen.agent, prompt: b.prompt, model: r.chosen.model, acceptUsageCredits: !!r.acceptedUsageCredits, policy: b.stage === 'build' ? 'standard' : 'read-only' }), { source: `pipeline:${b.stage}` });
+      const next = startStage(pl, b.stage, run.id); savePipe(next);
+      return json(res, 200, { ...pipeView(next), runId: run.id });
     }
 
     /* ---------- Phase plans ---------- */

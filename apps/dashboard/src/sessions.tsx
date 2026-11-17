@@ -2,7 +2,7 @@ import { DictationButton } from './dictation';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { get, isDemo, post, postStart } from './api';
 import { Icon } from './icons';
-import { ModelField, useDiscovery } from './model-field';
+import { ModelField, mayUseCredits, useDiscovery } from './model-field';
 import { FORK_UNSUPPORTED, STATUS_INFO, groupSessions, makeDrafts, resumeBlock, sourceLabel, statusOf, type SessionRow } from './sessions-model';
 import { Empty, Loading, useLoad } from './ui';
 import { DEFAULT_LIMITS, LimitFields, limitsBody, type RunLimits } from './limits';
@@ -41,7 +41,7 @@ function NewSession({ projectName, onStarted, onClose }: { projectName: string; 
   const [prompt, setPrompt, clearPrompt] = useDraft(NEW);
   const [title, setTitle] = useState('');
   const [runtime, setRuntime] = useState('claude-code');
-  const [model, setModel] = useState('haiku');
+  const [model, setModel] = useState('haiku'); const [credits, setCredits] = useState(false);
   const [mode, setMode] = useState<Mode>('standard');
   const [limits, setLimits] = useState<RunLimits>(DEFAULT_LIMITS);
   const [msg, setMsg] = useState('');
@@ -55,7 +55,7 @@ function NewSession({ projectName, onStarted, onClose }: { projectName: string; 
     if (prompt.startsWith('-')) { setMsg('A prompt cannot start with a hyphen.'); return; }
     setBusy(true); setMsg('');
     try {
-      const r = await postStart<{ sessionId: string }>('/api/agent-sessions', { runtime, prompt, model: model || undefined, ...limitsBody(limits, !!chosen?.dollarCap), policy: mode, ...(title.trim() ? { title: title.trim() } : {}) });
+      const r = await postStart<{ sessionId: string }>('/api/agent-sessions', { runtime, prompt, model: model || undefined, acceptUsageCredits: credits && mayUseCredits(runtime, model), ...limitsBody(limits, !!chosen?.dollarCap), policy: mode, ...(title.trim() ? { title: title.trim() } : {}) });
       clearPrompt(); onStarted(r.sessionId);
     } catch (e) { setMsg((e as Error).message); } finally { setBusy(false); }
   };
@@ -72,7 +72,7 @@ function NewSession({ projectName, onStarted, onClose }: { projectName: string; 
             {(runtimes.data ?? []).map((r) => <option key={r.id} value={r.id} disabled={!r.canStart}>{r.name}{r.canStart ? '' : ' (not available here)'}</option>)}
           </select>
         </label>
-        <ModelField agent={runtime} value={model} onChange={setModel} name="sess-model" models={disc.data?.models} width={140} placeholder="haiku" />
+        <ModelField agent={runtime} value={model} onChange={setModel} name="sess-model" models={disc.data?.models} width={140} credits={credits} onCredits={setCredits} placeholder="haiku" />
         <ModeField value={mode} onChange={setMode} name="sess-mode" />
         <LimitFields value={limits} onChange={setLimits} dollarCap={!!chosen?.dollarCap} name="sess" usdLabel="Budget (USD)" width={90} />
       </div>
@@ -93,7 +93,7 @@ function SessionDetail({ s, reload, listRef }: { s: SessionRow; reload: () => vo
   const [reviewModel, setReviewModel] = useState('');
   const disc = useDiscovery();
   const [prompt, setPrompt, clearPrompt] = useDraft(s.id);
-  const [model, setModel] = useState(s.model ?? '');
+  const [model, setModel] = useState(s.model ?? ''); const [credits, setCredits] = useState(false);
   const [mode, setMode] = useState<Mode>('standard');
   const [limits, setLimits] = useState<RunLimits>(DEFAULT_LIMITS);
   const [msg, setMsg] = useState('');
@@ -108,7 +108,7 @@ function SessionDetail({ s, reload, listRef }: { s: SessionRow; reload: () => vo
     if (block || !prompt.trim() || busy) return;
     setBusy(true); setMsg(''); setNote('');
     try {
-      const r = await postStart<{ runId: string }>(`/api/agent-sessions/${s.id}/resume`, { prompt, ...(model ? { model } : {}), ...limitsBody(limits, !!agentNow?.dollarCap), policy: mode });
+      const r = await postStart<{ runId: string }>(`/api/agent-sessions/${s.id}/resume`, { prompt, ...(model ? { model } : {}), acceptUsageCredits: credits && mayUseCredits(s.runtime, model), ...limitsBody(limits, !!agentNow?.dollarCap), policy: mode });
       clearPrompt(); setNote(`Continuing: run ${r.runId} started.`); reload(); d.reload();
     } catch (e) { setMsg((e as Error).message); } finally { setBusy(false); }
   };
@@ -168,7 +168,7 @@ function SessionDetail({ s, reload, listRef }: { s: SessionRow; reload: () => vo
       <form className="stack sess-resume" onSubmit={(e) => { e.preventDefault(); void resume(); }} aria-label="Continue this session">
         <label>Next prompt<textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} name="sess-resume-prompt" disabled={s.archived} onKeyDown={sendKey} aria-describedby="sess-resume-why" placeholder="What should the agent do next?" /></label><DictationButton onText={(t) => setPrompt((prompt && !/\s$/.test(prompt) ? prompt + ' ' : prompt) + t)} />
         <div className="row wrap">
-          <ModelField agent={s.runtime} value={model} onChange={setModel} name="sess-resume-model" models={disc.data?.models} width={140} placeholder="agent default" />
+          <ModelField agent={s.runtime} value={model} onChange={setModel} name="sess-resume-model" models={disc.data?.models} width={140} credits={credits} onCredits={setCredits} placeholder="agent default" />
           <ModeField value={mode} onChange={setMode} name="sess-resume-mode" />
           <LimitFields value={limits} onChange={setLimits} dollarCap={!!agentNow?.dollarCap} name="sess-resume" usdLabel="Budget (USD)" width={90} />
           <button className="btn small primary end-self" type="submit" disabled={!!block || !prompt.trim() || busy || s.archived} aria-describedby="sess-resume-why" data-testid="sess-resume">Resume <kbd>Ctrl ↵</kbd></button>

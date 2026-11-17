@@ -526,3 +526,4 @@ export function mirrorHooksToWorktree(mainRoot: string, wtPath: string): HookSel
   if (r.status === 0 && /"permissionDecision":"deny"/.test(r.stdout ?? '')) return { ok: true, detail: 'The hook program ran from the worktree and refused a test request' };
   return { ok: false, detail: `The hook program did not refuse a test request from the worktree (exit ${r.status ?? 'none'}): ${`${r.stderr ?? ''}${r.error?.message ?? ''}`.trim().slice(0, 200)}`, fix };
 }
+export * from './model-billing.js';

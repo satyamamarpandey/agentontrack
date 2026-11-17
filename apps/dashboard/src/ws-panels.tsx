@@ -3,7 +3,8 @@ import { get, post, postStart, stopRun, uploadAttachment, type UploadedFile } fr
 import { Modal, useHuman } from './human';
 import { Icon } from './icons';
 import { Badge, Empty, useLoad } from './ui';
-import { ModelField, useDiscovery } from './model-field';
+import { PipelinePanel } from './pipeline';
+import { ModelField, mayUseCredits, useDiscovery } from './model-field';
 import { DEFAULT_LIMITS, LimitFields, limitsBody, type RunLimits } from './limits';
 
 const ROLES = ['implement', 'review', 'debug', 'test', 'research', 'analyze', 'classify', 'verify'] as const;
@@ -17,7 +18,7 @@ export function AgentTab({ tick }: { tick: number }) {
   const runs = useLoad<any[]>(() => get('/api/runs'), [tick]);
   const [prompt, setPrompt] = useState('');
   const [runtime, setRuntime] = useState('claude-code');
-  const [model, setModel] = useState('haiku');
+  const [model, setModel] = useState('haiku'); const [credits, setCredits] = useState(false);
   const [limits, setLimits] = useState<RunLimits>(DEFAULT_LIMITS);
   const [msg, setMsg] = useState('');
   const [files, setFiles] = useState<UploadedFile[]>([]);
@@ -46,7 +47,7 @@ export function AgentTab({ tick }: { tick: number }) {
   const submit = async () => {
     setMsg('');
     try {
-      const r = await postStart<{ id: string }>('/api/runs', { runtime, prompt, model, ...limitsBody(limits, !!chosen?.dollarCap), ...(files.length ? { attachments: files.map((f) => f.id) } : {}), ...(resumeFrom ? { resumeRunId: resumeFrom } : {}) });
+      const r = await postStart<{ id: string }>('/api/runs', { runtime, prompt, model, acceptUsageCredits: credits && mayUseCredits(runtime, model), ...limitsBody(limits, !!chosen?.dollarCap), ...(files.length ? { attachments: files.map((f) => f.id) } : {}), ...(resumeFrom ? { resumeRunId: resumeFrom } : {}) });
       setSent((s) => ({ ...s, [r.id]: prompt }));
       setPrompt('');
       setFiles([]);
@@ -88,7 +89,7 @@ export function AgentTab({ tick }: { tick: number }) {
               {options.filter((r) => !r.canStart).length ? <optgroup label="Not available here">{options.filter((r) => !r.canStart).map((r) => <option key={r.id} value={r.id} disabled>{r.name}</option>)}</optgroup> : null}
             </select>
           </label>
-          <ModelField agent={runtime} value={model} onChange={setModel} name="model" models={disc.data?.models} width={150} placeholder="haiku" />
+          <ModelField agent={runtime} value={model} onChange={setModel} name="model" models={disc.data?.models} width={150} credits={credits} onCredits={setCredits} placeholder="haiku" />
           <LimitFields value={limits} onChange={setLimits} dollarCap={!!chosen?.dollarCap} name="limit" width={110} />
           <button className="btn primary end-self" type="submit" disabled={!canStart || !prompt.trim()} data-testid="ws-run"><Icon name="play" size={12} />Run <kbd>Ctrl ↵</kbd></button>
         </div>
@@ -253,11 +254,12 @@ function HandoffsPanel({ agents, state, tick }: { agents: any[]; state: any; tic
   );
 }
 
-export const RIGHT_TABS = ['Agents', 'Team', 'Approvals', 'Handoffs'] as const;
+export const RIGHT_TABS = ['Agents', 'Pipeline', 'Team', 'Approvals', 'Handoffs'] as const;
 export type RightTab = (typeof RIGHT_TABS)[number];
 
 export function RightPanel({ tab, agents, state, reloadAgents, reloadState, tick }: { tab: RightTab; agents: any[]; state: any; reloadAgents: () => void; reloadState: () => void; tick: number }) {
   if (tab === 'Agents') return <AgentsList agents={agents} team={state.team} reload={reloadAgents} />;
+  if (tab === 'Pipeline') return <PipelinePanel tick={tick} />;
   if (tab === 'Team') return <TeamPanel agents={agents} team={state.team} reload={reloadState} />;
   if (tab === 'Approvals') return <ApprovalsPanel state={state} reload={reloadState} />;
   return <HandoffsPanel agents={agents} state={state} tick={tick} />;

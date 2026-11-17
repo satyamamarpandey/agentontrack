@@ -44,3 +44,27 @@ The scripts never print or store the link or its code. If you paste the link to 
 
 - A link works once. Opening it again, or after Firebase's expiry window, shows Firebase's own "link expired or already used" page; the join page's "Send confirmation email" button sends a new one. The scripts check the used and damaged cases against the live API; an *expired* link cannot be produced on demand, so that case is covered by the same refusal path and is not separately timed.
 - `finish` no longer fails when the link was clicked before it ran: whether the address was confirmed at send time is read from what the send phase recorded.
+
+## Branded HTML email (optional, needs owner approval of a provider and a domain)
+
+Firebase's built-in sender cannot send a branded HTML layout, and its sender address stays `noreply@agentontrack-early-access.firebaseapp.com`. A designed email needs three things only the owner can provide. Nothing below is set up or tested end to end yet: **BLOCKED on the owner**.
+
+1. **A domain you own** (for example the one that serves the site). Pick one transactional provider you approve, with a free tier (Resend or Brevo are supported by the script). Do not buy anything without deciding that first.
+2. **DNS records** the provider shows when you add the domain, at your DNS host:
+   - **SPF**: one TXT record on the sending domain, `v=spf1 include:<provider's include> ~all` (if an SPF record exists, add the include to it; a domain may have only one).
+   - **DKIM**: the provider's CNAME or TXT records (usually named `<selector>._domainkey`), copied exactly.
+   - **DMARC**: a TXT record at `_dmarc.<your domain>`: `v=DMARC1; p=none; rua=mailto:<an inbox you read>`. Move to `p=quarantine` only after a week of clean reports.
+   - Press "Verify" in the provider until SPF and DKIM both show verified.
+3. **An API key and a verified sender**, set in the shell you run the script from only (never in the repository, GitHub Pages or a browser bundle):
+
+```
+$env:AOT_MAIL_PROVIDER = "resend"            # or "brevo"
+$env:AOT_MAIL_API_KEY  = "<key>"
+$env:AOT_MAIL_FROM     = "AgentOnTrack <access@your-domain>"
+node scripts/release/send-branded-email.mjs preview      # writes .local/email-preview/verification.html and .txt, fake link
+node scripts/release/send-branded-email.mjs send --project agentontrack-early-access --to <an account that exists> --name "<display name>"
+```
+
+The script generates the Firebase verification link on your computer with the Firebase CLI login (Identity Toolkit `accounts:sendOobCode` with `returnOobLink`), checks that it is https, on this project's Firebase host or the site, and carries an action code, renders `scripts/release/email-templates/verification_email.html` and `.txt` with every value escaped, and sends both parts with no tracking. It never prints or stores the link. Then check Gmail and Outlook (Inbox or Spam), a phone click, an already-used link, and a damaged link, as for the built-in email. Until this is done and recorded, the product keeps using the Firebase built-in emails.
+
+Tested without any provider (unit tests, `packages/cli/test/email-render.test.ts`): escaping, link validation (http, foreign host, host-suffix trick, missing code), name cleaning, text part. Not tested: any real send, SPF/DKIM/DMARC results, Outlook.

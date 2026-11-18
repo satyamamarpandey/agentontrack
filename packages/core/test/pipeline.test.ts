@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { authorizeStage, finishStage, newPipeline, sameModel, startStage, summary, unattendedChainAllowed, type Pipeline, type PipelineStage } from '../src/index.js';
+import { parsePipeline, authorizeStage, finishStage, newPipeline, sameModel, startStage, summary, unattendedChainAllowed, type Pipeline, type PipelineStage } from '../src/index.js';
 
 const claude = (model: string) => ({ agent: 'claude-code' as const, model });
 const done = (p: Pipeline, s: PipelineStage, model: string, actual = model, ev: string[] = ['x']) =>
@@ -50,5 +50,17 @@ describe('plan → build → review → verify', () => {
     expect(sameModel('sonnet', 'claude-sonnet-5-5')).toBe(true);
     expect(sameModel('opus', 'claude-sonnet-5-5')).toBe(false);
     expect(unattendedChainAllowed().ok).toBe(false);
+  });
+  it('refuses a pipeline file that was edited to skip authorization or order', () => {
+    const good = newPipeline('p', 'g');
+    expect(parsePipeline(JSON.parse(JSON.stringify(good)))).not.toBeNull();
+    const planned = authorizeStage(good, 'plan', claude('haiku'), 'o', 1);
+    expect(parsePipeline(JSON.parse(JSON.stringify(planned)))).not.toBeNull();
+    const forged = JSON.parse(JSON.stringify(good)); forged.stages[1] = { stage: 'build', status: 'authorized', chosen: claude('fable'), acceptedUsageCredits: true };
+    expect(parsePipeline(forged)).toBeNull();
+    const noChoice = JSON.parse(JSON.stringify(good)); noChoice.stages[0].status = 'authorized';
+    expect(parsePipeline(noChoice)).toBeNull();
+    expect(parsePipeline({ ...good, stages: good.stages.slice(0, 2) })).toBeNull();
+    expect(parsePipeline('nonsense')).toBeNull();
   });
 });

@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { CodexAppServer, mapNotification, parseApprovalRequest, type AppServerEvent, type ApprovalRequest } from '../src/index.js';
+import { CodexAppServer, codexModelIds, mapNotification, parseApprovalRequest, type AppServerEvent, type ApprovalRequest } from '../src/index.js';
 
 const FAKE = `
 import { createInterface } from 'node:readline';
@@ -16,6 +16,7 @@ createInterface({ input: process.stdin }).on('line', async (l) => {
   const m = JSON.parse(l);
   if (m.method === undefined && m.id !== undefined) { waiting.get(m.id)?.(m); return; }
   if (m.method === 'initialize') return out({ id: m.id, result: { userAgent: 'fake' } });
+  if (m.method === 'model/list') return out({ id: m.id, result: { data: [{ model: 'gpt-6.1-codex', visibility: 'list' }, { model: 'hidden-model', visibility: 'hide' }, { model: 'gpt-6.1-codex', visibility: 'list' }] } });
   if (m.method === 'thread/start' || m.method === 'thread/resume') {
     out({ id: m.id, result: { thread: { id: m.params.threadId ?? '0199a213-81c0-7800-8aa1-bbab2a035a53' } } });
     return;
@@ -47,6 +48,13 @@ const run = (mode: string, answer: (r: ApprovalRequest) => Promise<'accept' | 'd
 };
 
 describe('codex app-server client', () => {
+  it('lists catalog models without starting an inference thread and filters hidden models', async () => {
+    const { s, events } = run('normal', async () => 'decline');
+    expect(await s.listModels()).toEqual(['gpt-6.1-codex']);
+    expect(events).toEqual([]);
+    expect(codexModelIds({ data: [{ slug: 'codex-test', visibility: 'list' }, { model: '--evil' }, { id: 'hidden', visibility: 'hide' }] })).toEqual(['codex-test']);
+    expect(codexModelIds({ data: 'wrong shape' })).toEqual([]);
+  });
   it('never accepts an approval in a read-only run, even when the callback says accept, and does not even ask it', async () => {
     let asked = 0;
     const { s, events } = run('normal', async () => { asked++; return 'accept'; }, { sandbox: 'read-only' });

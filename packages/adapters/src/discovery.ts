@@ -6,7 +6,7 @@ import { join } from 'node:path';
  * Where a model name came from. None of these says the person may USE the model: a name seen in a config file or a past run is a fact about
  * this computer, and a plan or entitlement can change without it. `entitlement` is therefore always 'unknown' unless a run actually used it.
  */
-export type ModelSource = 'used-in-a-run' | 'runtime-default' | 'configured' | 'listed-by-local-server' | 'entered-by-user';
+export type ModelSource = 'used-in-a-run' | 'runtime-default' | 'configured' | 'listed-by-local-server' | 'entered-by-user' | 'listed-by-codex';
 
 export interface ModelEntry {
   id: string;
@@ -70,6 +70,8 @@ export async function localServerModels(fetchImpl: typeof fetch = fetch, bases =
 export interface DiscoverInput {
   seen: Seen[];
   inits: InitReport[];
+  /** Models returned by this computer's Codex app-server. Its catalog can be cached and is not proof of plan access. */
+  codexCatalog?: string[];
   home?: string;
   fetchImpl?: typeof fetch;
   localBases?: string[];
@@ -89,6 +91,7 @@ export async function discoverModels(i: DiscoverInput): Promise<ModelEntry[]> {
   for (const r of i.inits) { const id = clean(r.model); if (id) add({ id, agent: r.agent, source: 'runtime-default', entitlement: 'unknown', note: 'The runtime reported this as the model it started with. That does not show your plan allows others.' }); }
   const claude = claudeConfiguredModel(i.home); if (claude) add({ id: claude, agent: 'claude-code', source: 'configured', entitlement: 'unknown', note: 'Named in Claude Code’s settings on this computer.' });
   const codex = codexConfiguredModel(i.home); if (codex) add({ id: codex, agent: 'codex', source: 'configured', entitlement: 'unknown', note: 'Named in Codex’s config on this computer.' });
+  for (const raw of i.codexCatalog ?? []) { const id = clean(raw); if (id) add({ id, agent: 'codex', source: 'listed-by-codex', entitlement: 'unknown', note: 'Reported by Codex app-server model/list; it may use a cached catalog, and this is not proof of subscription access.' }); }
   if (i.probeLocal !== false) {
     for (const s of await localServerModels(i.fetchImpl, i.localBases)) for (const id of s.models) add({ id, agent: 'local-model', source: 'listed-by-local-server', entitlement: 'unknown', note: `Loaded in the server at ${s.base}. It is a model, not an agent: an agent program must be pointed at it.` });
   }

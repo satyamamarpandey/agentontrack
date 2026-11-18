@@ -49,7 +49,7 @@ describe('discovery', () => {
     expect(claude.commandsSource).toBe('not-reported');
     expect(d.agents.find((a: any) => a.id === 'codex').canStart).toBe(false);
     expect(d.models.filter((m: any) => m.entitlement === 'worked')).toEqual([]);
-    expect(d.note).toMatch(/not checked until a run uses it/);
+    expect(d.note).toMatch(/does not prove your subscription permits it; only a real successful run establishes that/);
   });
 
   it('learns the default model and the commands from a real session init, and marks as "worked" only the model a run used', async () => {

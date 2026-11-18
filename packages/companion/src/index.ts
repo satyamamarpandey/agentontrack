@@ -419,6 +419,27 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
   /** What this companion has seen runtimes report in this session. Nothing here is guessed or built in. */
   const inits: InitReport[] = [];
   const seenModels: Seen[] = [];
+  /** Codex model/list is read-only. Probe only after the local Codex login is recognized, cache for five minutes,
+   * and never infer subscription entitlement from a bundled/cached catalog. No thread or inference is started. */
+  let codexCatalogCache: { root: string; at: number; models: string[] } | null = null;
+  const codexCatalog = async (root: string): Promise<string[]> => {
+    const runtime = runtimeList(root, !!opts.claudeCommand, !!opts.codexCommand).find((r) => r.id === 'codex');
+    if (!runtime?.installed || runtime.authenticated !== true) return [];
+    if (codexCatalogCache && codexCatalogCache.root === root && Date.now() - codexCatalogCache.at < 300_000) return codexCatalogCache.models;
+    const server = new CodexAppServer({
+      command: opts.codexCommand ?? ['codex'], cwd: root, env: agentEnv(process.env, paidApi), rpcTimeoutMs: 5_000,
+      onApproval: async () => 'decline', onEvent: () => {},
+    });
+    try {
+      const models = await server.listModels();
+      codexCatalogCache = { root, at: Date.now(), models };
+      return models;
+    } catch {
+      // This is optional discovery: never launch an inference task or claim that a failed catalog proves no access.
+      codexCatalogCache = { root, at: Date.now(), models: [] };
+      return [];
+    } finally { server.kill(); }
+  };
   const reportedCommands = (agent: string): string[] | null => { const last = inits.filter((x) => x.agent === agent).at(-1); return last ? last.commands : null; };
   const waitFor = async (run: Run, me: Sequence, pollMs: number) => {
     const until = Date.now() + 30 * 60_000;
@@ -1273,7 +1294,7 @@ ${brief}`.slice(0, 19_900), model: o.reviewerModel, maxBudgetUsd: o.maxUsd }), {
     if (path === '/api/discovery' && method === 'GET') {
       const { entry, p } = projectFor(projectId);
       const used: Seen[] = p.store.byType(['usage.recorded']).map((e: any) => ({ agent: String(e.payload.runtime ?? 'claude-code'), model: String(e.payload.model ?? ''), worked: true }));
-      return json(res, 200, { agents: describeAgents(runtimeList(entry.root, !!opts.claudeCommand, !!opts.codexCommand), inits), models: await discoverModels({ seen: [...used, ...seenModels], inits }), note: 'A model listed here exists on this computer or was used by a run. Whether your plan allows it is not checked until a run uses it.' });
+      return json(res, 200, { agents: describeAgents(runtimeList(entry.root, !!opts.claudeCommand, !!opts.codexCommand), inits), models: await discoverModels({ seen: [...used, ...seenModels], inits, codexCatalog: await codexCatalog(entry.root) }), note: 'Models found in a Codex app-server catalog may be cached. Listing a model does not prove your subscription permits it; only a real successful run establishes that.' });
     }
     const agentAction = /^\/api\/agents\/(claude-code|codex)\/(connect|disconnect)$/.exec(path);
     if (agentAction && method === 'POST') {

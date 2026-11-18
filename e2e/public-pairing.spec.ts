@@ -272,6 +272,41 @@ test('a slow first probe that finds nothing cannot overwrite a later probe that 
   record(info, 'a stale probe answer does not replace a newer one', 'found stays found');
 });
 
+test('copying the setup command has a useful fallback if clipboard access is denied', async ({ page }) => {
+  await page.goto(`${ORIGIN}/agentontrack/dashboard/`);
+  await page.getByTestId('continue-local').click();
+  await page.getByText('This computer uses a different port').click();
+  await page.getByLabel('Companion port').fill('47999');
+  await page.getByTestId('retry').click();
+  await expect(page.getByTestId('probe-steps')).toBeVisible({ timeout: 20_000 });
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: async () => { throw new Error('Permission denied'); } },
+    });
+  });
+  await page.getByTestId('probe-steps').getByRole('button', { name: 'Copy' }).click();
+  await expect(page.getByRole('alert')).toContainText('Select and copy the command above manually.');
+});
+
+test('copying the setup command reports success and puts the exact command on the clipboard', async ({ page }) => {
+  await page.goto(`${ORIGIN}/agentontrack/dashboard/`);
+  await page.getByTestId('continue-local').click();
+  await page.getByText('This computer uses a different port').click();
+  await page.getByLabel('Companion port').fill('47999');
+  await page.getByTestId('retry').click();
+  await expect(page.getByTestId('probe-steps')).toBeVisible({ timeout: 20_000 });
+  const command = (await page.getByTestId('probe-steps').locator('code').first().innerText()).trim();
+  await page.evaluate(() => {
+    (window as unknown as { __copied: string }).__copied = '';
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (t: string) => { (window as unknown as { __copied: string }).__copied = t; } } });
+  });
+  await page.getByTestId('probe-steps').getByRole('button', { name: 'Copy' }).first().click();
+  await expect(page.getByTestId('probe-steps').getByRole('button', { name: 'Copied' })).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { __copied: string }).__copied)).toBe(command);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
 test('connect: opening the screen contacts nothing on this computer until "Check for helper" is pressed', async ({ page, env }) => {
   const local: string[] = [];
   page.on('request', (r) => { if (/^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])/.test(r.url()) && !r.url().startsWith(ORIGIN)) local.push(r.url()); });

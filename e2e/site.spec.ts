@@ -96,14 +96,22 @@ test('the home page has a clear way into projects, and the demo one is labelled'
   }
 });
 
-test('the main menu opens on a small screen, and every link in it is reachable', async ({ page }) => {
+test('mobile navigation closes after a link is followed and on Escape', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   await page.goto(`${SITE}/`);
   const nav = page.getByRole('navigation', { name: 'Main' });
+  const menu = page.getByRole('button', { name: 'Menu' });
   await expect(nav.getByRole('link', { name: 'Security' })).toBeHidden();
-  await page.getByRole('button', { name: 'Menu' }).click();
+  await menu.click();
+  await expect(menu).toHaveAttribute('aria-expanded', 'true');
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveAttribute('aria-expanded', 'false');
+  await expect(menu).toBeFocused();
+  await menu.click();
   await nav.getByRole('link', { name: 'Security' }).click();
   await expect(page).toHaveURL(/\/security\/$/);
+  await expect(menu).toHaveAttribute('aria-expanded', 'false');
+  await expect(nav.getByRole('link', { name: 'Security' })).toBeHidden();
 });
 
 test('with no config, there is no sign-in UI on any page', async ({ page }) => {

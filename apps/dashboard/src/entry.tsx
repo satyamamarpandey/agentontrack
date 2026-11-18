@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNod
 import { accountPage, accountsEnabled, checkAccess, connectGated, earlyAccessPage, signedInHere, signInPage } from './accounts';
 import { currentPort, enterDemo, localAddress, onPublicSite, pair, probeCompanion, setPort, type Probe } from './api';
 import { Icon, Logo } from './icons';
+import { CopyCommand as Copy } from './copy-command';
 
 const SITE = import.meta.env.BASE_URL.replace(/dashboard\/$/, '');
 const START = 'agentontrack dashboard --allow-public-site';
@@ -76,16 +77,6 @@ function Welcome({ onLocal, onDemo }: { onLocal: () => void; onDemo: () => void 
         <button className="btn big" onClick={onDemo} data-testid="explore-demo">Explore a demo <span className="badge warn">invented data</span></button>
       </div>
     </Frame>
-  );
-}
-
-function Copy({ text }: { text: string }) {
-  const [done, setDone] = useState(false);
-  return (
-    <div className="copybox">
-      <code>{text}</code>
-      <button type="button" className="btn small" onClick={() => { void navigator.clipboard?.writeText(text).then(() => { setDone(true); setTimeout(() => setDone(false), 1500); }); }}>{done ? 'Copied' : 'Copy'}</button>
-    </div>
   );
 }
 

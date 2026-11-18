@@ -2,7 +2,7 @@ import { Fragment, type CSSProperties, type ReactNode } from 'react';
 import Link from './link';
 import { Counter } from './counter';
 import { ReleaseNotice, Term } from './content';
-import { EarlyAccessAutoPopup, EarlyAccessButton } from './early-access/launcher';
+import { EarlyAccessButton } from './early-access/launcher';
 import { Tour } from './tour';
 import { Icon } from './ui/icons';
 import { ACCOUNTS_ENABLED, INSTALL_GATED } from '../lib/accounts-config';
@@ -73,7 +73,6 @@ export default function Home() {
   const next = () => ++station;
   return (
     <>
-      <EarlyAccessAutoPopup />
       <section className="hero wrap" data-spot="">
         <div className="hero-bg" aria-hidden="true" data-spot-layer="" />
         <div className="hero-copy">

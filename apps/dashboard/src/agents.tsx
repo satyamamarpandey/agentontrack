@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { get, isDemo, post } from './api';
 import { CATALOG, supportOf, SUPPORT, type Group, type Meta } from './catalog-data';
 import { Modal } from './human';
+import { CopyCommand as Copy } from './copy-command';
 import { Empty, Loading, Page, useLoad } from './ui';
 
 interface Cert { id: string; name: string; status: string; version: string; evidence: string; capabilities: string; ifGateFails: string; limitations: string; proof: string }
@@ -20,16 +21,6 @@ const CONTAINMENT: Record<string, string> = {
 const GROUPS: ('All' | Group)[] = ['All', 'Coding agents', 'Editors', 'Local models', 'Research'];
 
 type State = 'connected' | 'installed' | 'missing' | 'unsupported' | 'service' | 'demo';
-
-function Copy({ text }: { text: string }) {
-  const [done, setDone] = useState(false);
-  return (
-    <div className="copybox">
-      <code>{text}</code>
-      <button type="button" className="btn small" onClick={() => { void navigator.clipboard?.writeText(text).then(() => { setDone(true); setTimeout(() => setDone(false), 1500); }); }}>{done ? 'Copied' : 'Copy'}</button>
-    </div>
-  );
-}
 
 function Probe({ meta, onClose }: { meta: Meta; onClose: () => void }) {
   const [url, setUrl] = useState(meta.baseUrl ?? '');

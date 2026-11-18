@@ -50,13 +50,12 @@ const fullApplication = async (page: Page, email: string, name: string) => {
   await d.getByTestId('ea-submit').click();
 };
 
-test('a visitor applies from the home page popup, and the application is stored as pending under the hash of the address', async () => {
+test('a visitor opens the application from the home page by choice, and the application is stored as pending under the hash of the address', async () => {
   await tpage.goto(`${SITE}/`);
-  // The popup arrives by itself about five seconds after the page is ready.
-  await expect(tpage.locator('html')).toHaveAttribute('data-ea-popup', 'armed');
-  const armedAt = Date.now();
-  await expect(tpage.getByTestId('early-access-dialog')).toBeVisible({ timeout: 12_000 });
-  expect(Date.now() - armedAt).toBeGreaterThan(4000);
+  // Nothing opens by itself: the visitor presses the button.
+  await expect(tpage.getByTestId('early-access-dialog')).toHaveCount(0);
+  await tpage.getByTestId('hero-early-access').click();
+  await expect(tpage.getByTestId('early-access-dialog')).toBeVisible();
   await fullApplication(tpage, APPLICANT.toUpperCase(), 'Tester One');
   const sent = tpage.getByTestId('early-access-sent');
   await expect(sent).toBeVisible({ timeout: 20_000 });
@@ -64,7 +63,7 @@ test('a visitor applies from the home page popup, and the application is stored 
   const doc = await ownerRead(`applications/${APPLICANT_ID}`);
   expect(doc).toMatchObject({ name: 'Tester One', email: APPLICANT, os: ['windows'], tools: ['claude-code'], useCases: ['approvals', 'monitoring'], frequency: 'daily', status: 'pending', source: 'popup', privacyAccepted: true, marketingConsent: false, schema: 1 });
   expect(doc!.createdAt).toBeTruthy();
-  // Reopening the form says it already has the application, and the popup does not come back.
+  // Reopening the form says it already has the application, and nothing opens by itself.
   await tpage.reload();
   await tpage.getByTestId('nav-early-access').click();
   await expect(tpage.getByTestId('early-access-earlier')).toContainText(`AOT-${APPLICANT_ID.slice(0, 6).toUpperCase()}`);

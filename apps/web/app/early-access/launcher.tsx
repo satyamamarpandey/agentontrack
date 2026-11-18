@@ -2,8 +2,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import Link from '../link';
 import { Modal } from '../ui/modal';
-import { SIGNED_IN_FLAG } from '../../lib/accounts-config';
-import { appliedBefore, POPUP_DELAY_MS, rememberSeen, wasSeen } from '../../lib/early-access';
+import { rememberSeen } from '../../lib/early-access';
 import type { EarlyAccessForm } from './form';
 
 type Form = typeof EarlyAccessForm;
@@ -50,25 +49,3 @@ export function EarlyAccessHost() {
   );
 }
 
-/**
- * On the home page only: opens the application about five seconds after arrival, once per browser session, and never for someone who already
- * applied here, is signed in, or is busy typing. Dismissing it is remembered for the session.
- */
-export function EarlyAccessAutoPopup({ delayMs = POPUP_DELAY_MS }: { delayMs?: number }) {
-  useEffect(() => {
-    let signedIn = false;
-    try { signedIn = localStorage.getItem(SIGNED_IN_FLAG) === '1'; } catch { /* storage may be blocked */ }
-    const armed = !(wasSeen() || appliedBefore() || signedIn);
-    document.documentElement.dataset.eaPopup = armed ? 'armed' : 'off'; // visible to tests and to anyone debugging why it did or did not appear
-    if (!armed) return undefined;
-    const warm = setTimeout(() => void loadForm().catch(() => undefined), Math.max(0, delayMs - 1500)); // the chunk is in before the dialog is due
-    const t = setTimeout(() => {
-      const el = document.activeElement;
-      if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return; // they are doing something; do not interrupt
-      if (document.querySelector('[role="dialog"]')) return;
-      openEarlyAccess();
-    }, delayMs);
-    return () => { clearTimeout(warm); clearTimeout(t); };
-  }, [delayMs]);
-  return null;
-}

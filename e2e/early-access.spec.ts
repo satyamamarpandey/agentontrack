@@ -6,59 +6,35 @@ import { expect, test, type Page } from '@playwright/test';
 const SITE = 'http://127.0.0.1:4199/agentontrack';
 const dialog = (page: Page) => page.getByTestId('early-access-dialog');
 
-test('the application opens by itself about five seconds after arriving on the home page, once per session, and can be dismissed', async ({ page, browser }) => {
+test('the application never interrupts first-time or returning visitors on its own', async ({ page, browser }) => {
   await page.clock.install();
   await page.goto(`${SITE}/`);
-  await expect(page.locator('html')).toHaveAttribute('data-ea-popup', 'armed'); // the page has hydrated and the timer is set
   await expect(dialog(page)).toHaveCount(0);
-  await page.clock.fastForward(4500);
+  await page.clock.fastForward(10_000);
   await expect(dialog(page)).toHaveCount(0);
-  await page.clock.fastForward(800);
+  // A new browser session is equally interruption-free.
+  const fresh = await browser.newContext();
+  try {
+    const p2 = await fresh.newPage();
+    await p2.clock.install();
+    await p2.goto(`${SITE}/`);
+    await p2.clock.fastForward(10_000);
+    await expect(dialog(p2)).toHaveCount(0);
+  } finally {
+    await fresh.close();
+  }
+});
+
+test('the early-access form opens only by choice and closes accessibly', async ({ page }) => {
+  await page.goto(`${SITE}/`);
+  await page.getByTestId('hero-early-access').click();
   await expect(dialog(page)).toBeVisible();
-  await expect(dialog(page).getByRole('heading', { name: 'Get early access to AgentOnTrack' })).toBeVisible();
-  // Focus is inside it, and the page behind cannot be used.
   await expect(dialog(page).locator(':focus')).toHaveCount(1);
   await expect(page.locator('main')).toHaveAttribute('inert', '');
   await page.keyboard.press('Escape');
   await expect(dialog(page)).toHaveCount(0);
   await expect(page.locator('main')).not.toHaveAttribute('inert', '');
-  // Dismissed once, it stays away for the session, even on a later visit to the home page.
-  await page.goto(`${SITE}/features/`);
-  await page.goto(`${SITE}/`);
-  await expect(page.locator('html')).toHaveAttribute('data-ea-popup', 'off');
-  await page.clock.fastForward(8000);
-  await expect(dialog(page)).toHaveCount(0);
-  // A new session sees it again.
-  const fresh = await browser.newContext();
-  const p2 = await fresh.newPage();
-  await p2.clock.install();
-  await p2.goto(`${SITE}/`);
-  await expect(p2.locator('html')).toHaveAttribute('data-ea-popup', 'armed');
-  await p2.clock.fastForward(5500);
-  await expect(dialog(p2)).toBeVisible();
-  await fresh.close();
-});
-
-test('it never interrupts someone who already applied here, is signed in, or is typing', async ({ page }) => {
-  await page.clock.install();
-  await page.goto(`${SITE}/features/`);
-  await page.evaluate(() => localStorage.setItem('aot-ea-applied', 'AOT-TEST01'));
-  await page.goto(`${SITE}/`);
-  await expect(page.locator('html')).toHaveAttribute('data-ea-popup', 'off');
-  await page.clock.fastForward(7000);
-  await expect(dialog(page)).toHaveCount(0);
-  await page.evaluate(() => { localStorage.removeItem('aot-ea-applied'); localStorage.setItem('aot-signed-in', '1'); });
-  await page.reload();
-  await expect(page.locator('html')).toHaveAttribute('data-ea-popup', 'off');
-  await page.clock.fastForward(7000);
-  await expect(dialog(page)).toHaveCount(0);
-  // Someone with a field focused is left alone.
-  await page.evaluate(() => { localStorage.removeItem('aot-signed-in'); sessionStorage.removeItem('aot-ea-seen'); });
-  await page.reload();
-  await expect(page.locator('html')).toHaveAttribute('data-ea-popup', 'armed');
-  await page.evaluate(() => { const i = document.createElement('input'); i.id = 'busy'; document.body.append(i); i.focus(); });
-  await page.clock.fastForward(7000);
-  await expect(dialog(page)).toHaveCount(0);
+  await expect(page.getByTestId('hero-early-access')).toBeFocused();
 });
 
 test('the navigation and the hero open the same form; each step is checked; a copy with no backend says so instead of pretending', async ({ page }) => {

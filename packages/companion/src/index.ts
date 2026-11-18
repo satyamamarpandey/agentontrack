@@ -7,7 +7,7 @@ import { homedir, hostname } from 'node:os';
 import { basename, dirname, extname, relative, sep, isAbsolute, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { failoverOptions, runtimeFacts, coverageFor, PROVIDERS, providerInstalled, hooksInstalled, hookSelfTest, agentEnv, killTree, apiKeyVarsPresent, classifyClaudeMethod, classifyCodexStatus, mayStartUnder, creditGuard, classifyModelBilling, type AuthMode, buildCodexExecArgs, mirrorHooksToWorktree, CodexAppServer, mapCodexTool, parseCodexLine, LineSplitter, codexUsageRecord, installHooks, probeLocalModel, uninstallHooks, discoverModels, describeAgents, type InitReport, type Seen } from '@agentontrack/adapters';
-import { newPipeline, authorizeStage, startStage, finishStage, PipelineError, PIPELINE_STAGES, CLAUDE_ROLE_SUGGESTIONS, unattendedChainAllowed, summary as pipelineSummary, type Pipeline } from '@agentontrack/core';
+import { newPipeline, parsePipeline, authorizeStage, startStage, finishStage, PipelineError, PIPELINE_STAGES, CLAUDE_ROLE_SUGGESTIONS, unattendedChainAllowed, summary as pipelineSummary, type Pipeline } from '@agentontrack/core';
 import { isProviderSessionId, newSessionId, projectSessions, searchSessions, type SessionView } from '@agentontrack/core';
 import { planFacts as planFactsOf, planView as planViewOf } from './plan-view.js';
 import { makeExecutor, snapshotOf, stillTheSameFolder } from './remote-actions.js';
@@ -419,6 +419,27 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
   /** What this companion has seen runtimes report in this session. Nothing here is guessed or built in. */
   const inits: InitReport[] = [];
   const seenModels: Seen[] = [];
+  /** Codex model/list is read-only. Probe only after the local Codex login is recognized, cache for five minutes,
+   * and never infer subscription entitlement from a bundled/cached catalog. No thread or inference is started. */
+  let codexCatalogCache: { root: string; at: number; models: string[] } | null = null;
+  const codexCatalog = async (root: string): Promise<string[]> => {
+    const runtime = runtimeList(root, !!opts.claudeCommand, !!opts.codexCommand).find((r) => r.id === 'codex');
+    if (!runtime?.installed || runtime.authenticated !== true) return [];
+    if (codexCatalogCache && codexCatalogCache.root === root && Date.now() - codexCatalogCache.at < 300_000) return codexCatalogCache.models;
+    const server = new CodexAppServer({
+      command: opts.codexCommand ?? ['codex'], cwd: root, env: agentEnv(process.env, paidApi), rpcTimeoutMs: 5_000,
+      onApproval: async () => 'decline', onEvent: () => {},
+    });
+    try {
+      const models = await server.listModels();
+      codexCatalogCache = { root, at: Date.now(), models };
+      return models;
+    } catch {
+      // This is optional discovery: never launch an inference task or claim that a failed catalog proves no access.
+      codexCatalogCache = { root, at: Date.now(), models: [] };
+      return [];
+    } finally { server.kill(); }
+  };
   const reportedCommands = (agent: string): string[] | null => { const last = inits.filter((x) => x.agent === agent).at(-1); return last ? last.commands : null; };
   const waitFor = async (run: Run, me: Sequence, pollMs: number) => {
     const until = Date.now() + 30 * 60_000;
@@ -1273,7 +1294,7 @@ ${brief}`.slice(0, 19_900), model: o.reviewerModel, maxBudgetUsd: o.maxUsd }), {
     if (path === '/api/discovery' && method === 'GET') {
       const { entry, p } = projectFor(projectId);
       const used: Seen[] = p.store.byType(['usage.recorded']).map((e: any) => ({ agent: String(e.payload.runtime ?? 'claude-code'), model: String(e.payload.model ?? ''), worked: true }));
-      return json(res, 200, { agents: describeAgents(runtimeList(entry.root, !!opts.claudeCommand, !!opts.codexCommand), inits), models: await discoverModels({ seen: [...used, ...seenModels], inits }), note: 'A model listed here exists on this computer or was used by a run. Whether your plan allows it is not checked until a run uses it.' });
+      return json(res, 200, { agents: describeAgents(runtimeList(entry.root, !!opts.claudeCommand, !!opts.codexCommand), inits), models: await discoverModels({ seen: [...used, ...seenModels], inits, codexCatalog: await codexCatalog(entry.root) }), note: 'Models found in a Codex app-server catalog may be cached. Listing a model does not prove your subscription permits it; only a real successful run establishes that.' });
     }
     const agentAction = /^\/api\/agents\/(claude-code|codex)\/(connect|disconnect)$/.exec(path);
     if (agentAction && method === 'POST') {
@@ -1483,7 +1504,7 @@ ${brief}`.slice(0, 19_900), model: o.reviewerModel, maxBudgetUsd: o.maxUsd }), {
 
     /* ---------- Plan → Build → Review → Verify: each stage authorized on its own ---------- */
     const pipePath = join(p.stateDir, 'pipeline.json');
-    const loadPipe = (): Pipeline | null => { try { return existsSync(pipePath) ? (JSON.parse(readFileSync(pipePath, 'utf8')) as Pipeline) : null; } catch { return null; } };
+    const loadPipe = (): Pipeline | null => { try { return existsSync(pipePath) ? parsePipeline(JSON.parse(readFileSync(pipePath, 'utf8'))) : null; } catch { return null; } };
     const savePipe = (pl: Pipeline) => { mkdirSync(p.stateDir, { recursive: true }); writeFileSync(pipePath, JSON.stringify(pl, null, 2)); };
     /** A stage whose run has ended is finished from what the runtime reported: the model comes from the usage record, never from the choice. */
     const reconcilePipe = (pl: Pipeline | null): Pipeline | null => {
@@ -1507,7 +1528,7 @@ ${brief}`.slice(0, 19_900), model: o.reviewerModel, maxBudgetUsd: o.maxUsd }), {
       return json(res, 200, pipeView(pl));
     }
     if (path === '/api/pipeline/authorize' && method === 'POST') {
-      const b = z.object({ stage: z.enum(PIPELINE_STAGES), agent: z.enum(['claude-code', 'codex', 'hermes']), model: z.string().regex(/^\w[\w.:-]{0,79}$/), acceptUsageCredits: z.boolean().default(false) }).parse(await readBody(req));
+      const b = z.object({ stage: z.enum(PIPELINE_STAGES), agent: z.enum(['claude-code', 'codex']), model: z.string().regex(/^\w[\w.:-]{0,79}$/), acceptUsageCredits: z.boolean().default(false) }).parse(await readBody(req));
       const pl = reconcilePipe(loadPipe()); if (!pl) throw new HttpError(409, 'Start a pipeline with a goal first.');
       try { const next = authorizeStage(pl, b.stage, { agent: b.agent, model: b.model }, 'dashboard session', Date.now(), { billing: classifyModelBilling(b.agent, b.model), acceptUsageCredits: b.acceptUsageCredits }); savePipe(next); return json(res, 200, pipeView(next)); }
       catch (err) { if (err instanceof PipelineError) throw new HttpError(409, err.message); throw err; }

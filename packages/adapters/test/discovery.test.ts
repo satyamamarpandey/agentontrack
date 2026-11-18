@@ -40,6 +40,10 @@ describe('model discovery', () => {
     expect(by['failed-model']).toBeUndefined();
     expect(got.filter((m) => m.entitlement === 'worked')).toHaveLength(1);
   });
+  it('treats Codex model/list entries as discoverable but not proven plan entitlements', async () => {
+    const list = await discoverModels({ seen: [], inits: [], home, probeLocal: false, codexCatalog: ['gpt-6.1-codex', 'gpt-6.1-codex', '--unsafe'] });
+    expect(list).toEqual([{ id: 'gpt-6.1-codex', agent: 'codex', source: 'listed-by-codex', entitlement: 'unknown', note: expect.stringMatching(/cached catalog/) }]);
+  });
   it('lists what local servers say they have loaded (Ollama and OpenAI-compatible), as models and not agents', async () => {
     const got = await localServerModels(fakeFetch({ 'http://127.0.0.1:11434/api/tags': { models: [{ name: 'llama-test:8b' }] }, 'http://127.0.0.1:1234/v1/models': { data: [{ id: 'qwen-test' }] } }));
     expect(got).toEqual([{ base: 'http://127.0.0.1:11434', models: ['llama-test:8b'] }, { base: 'http://127.0.0.1:1234', models: ['qwen-test'] }]);

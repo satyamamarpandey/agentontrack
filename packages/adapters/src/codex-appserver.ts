@@ -106,6 +106,21 @@ export function parseApprovalRequest(method: string, params: any): ApprovalReque
   return null;
 }
 
+/** IDs reported by Codex app-server model/list. A catalog entry does NOT establish account entitlement. */
+export function codexModelIds(result: unknown): string[] {
+  const response = result as { data?: unknown; models?: unknown } | null;
+  const entries = Array.isArray(response?.data) ? response.data : Array.isArray(response?.models) ? response.models : [];
+  const ids = new Set<string>();
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object') continue;
+    const model = entry as { model?: unknown; slug?: unknown; id?: unknown; visibility?: unknown };
+    if (model.visibility && model.visibility !== 'list') continue;
+    const id = [model.model, model.slug, model.id].find((v) => typeof v === 'string') as string | undefined;
+    if (id && MODEL.test(id)) ids.add(id);
+  }
+  return [...ids];
+}
+
 export interface TurnInput { prompt: string; images?: string[] }
 
 export class CodexAppServer {
@@ -180,10 +195,9 @@ export class CodexAppServer {
     this.send({ id, result: { decision: answer === 'accept' ? 'accept' : 'decline' } });
   }
 
-  /** Starts the process and the thread (or resumes one). Rejects if the server does not follow the handshake. */
-  async start(resumeThreadId?: string): Promise<string> {
-    if (this.o.model !== undefined && !MODEL.test(this.o.model)) throw new Error('Not a model name');
-    if (resumeThreadId !== undefined && !THREAD.test(resumeThreadId)) throw new Error('Not a session id');
+  /** Start only the transport and handshake. A model catalog read never creates a thread or performs inference. */
+  private async openTransport(): Promise<void> {
+    if (this.child) throw new Error('Codex app-server is already connected');
     const [cmd, ...pre] = this.o.command;
     this.child = spawn(cmd!, [...pre, 'app-server'], { cwd: this.o.cwd, stdio: ['pipe', 'pipe', 'pipe'], env: this.o.env ?? process.env });
     this.child.stdout!.setEncoding('utf8').on('data', (d: string) => { for (const l of this.split.push(d)) this.onLine(l); });
@@ -192,6 +206,20 @@ export class CodexAppServer {
     this.child.on('close', (code) => { this.exitCode = code; this.closed = true; this.fail(new Error('Codex exited')); this.turnDone?.('failed'); });
     await this.request('initialize', { clientInfo: { name: 'agentontrack', title: 'AgentOnTrack', version: '1.0.0' } });
     this.send({ method: 'initialized', params: {} });
+  }
+
+  /** Read-only model discovery, bounded by rpcTimeoutMs. Does not start a thread or use inference. */
+  async listModels(): Promise<string[]> {
+    await this.openTransport();
+    try { return codexModelIds(await this.request('model/list', {})); }
+    finally { this.kill(); }
+  }
+
+  /** Starts the process and the thread (or resumes one). Rejects if the server does not follow the handshake. */
+  async start(resumeThreadId?: string): Promise<string> {
+    if (this.o.model !== undefined && !MODEL.test(this.o.model)) throw new Error('Not a model name');
+    if (resumeThreadId !== undefined && !THREAD.test(resumeThreadId)) throw new Error('Not a session id');
+    await this.openTransport();
     // `untrusted` makes Codex ask before anything it does not know to be safe; `workspace-write` keeps the OS sandbox on as a second layer.
     const common = { cwd: this.o.cwd, approvalPolicy: 'untrusted', sandbox: this.o.sandbox ?? 'workspace-write', ...(this.o.model && this.o.model !== 'default' ? { model: this.o.model } : {}) };
     const r = resumeThreadId ? await this.request('thread/resume', { threadId: resumeThreadId, ...common }) : await this.request('thread/start', common);

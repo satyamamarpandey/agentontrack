@@ -51,8 +51,15 @@ export function PipelinePanel({ tick }: { tick: number }) {
             {r.note ? <p className="muted small">{r.note}</p> : null}
             {open && earlierDone ? (
               <>
+                <label>Agent
+                  <select aria-label={`Agent for ${LABEL[r.stage].toLowerCase()}`} name={`pipe-${r.stage}-agent`} value={pick.agent} onChange={(e) => set({ agent: e.target.value, model: '', credits: false })}>
+                    <option value="claude-code">Claude Code</option>
+                    <option value="codex">Codex</option>
+                  </select>
+                </label>
+                {disc.data?.agents.find((a) => a.id === pick.agent)?.canStart === false ? <p className="alert warn small" role="status">{pick.agent === 'codex' ? 'Codex' : 'Claude Code'} is not ready on this computer. Connect and sign in with that agent before starting a stage.</p> : null}
                 <ModelField agent={pick.agent} value={pick.model} onChange={(m) => set({ model: m, credits: false })} name={`pipe-${r.stage}-model`} models={disc.data?.models} width={170} credits={pick.credits} onCredits={(c) => set({ credits: c })} />
-                <button className="btn" data-testid={`pipe-auth-${r.stage}`} disabled={!pick.model || (mayUseCredits(pick.agent, pick.model) && !pick.credits)} onClick={() => void act(() => post('/api/pipeline/authorize', { stage: r.stage, agent: pick.agent, model: pick.model, acceptUsageCredits: pick.credits && mayUseCredits(pick.agent, pick.model) }))}>Authorize {LABEL[r.stage].toLowerCase()} with this model</button>
+                <button className="btn" data-testid={`pipe-auth-${r.stage}`} disabled={!pick.model || disc.data?.agents.find((a) => a.id === pick.agent)?.canStart === false || (mayUseCredits(pick.agent, pick.model) && !pick.credits)} onClick={() => void act(() => post('/api/pipeline/authorize', { stage: r.stage, agent: pick.agent, model: pick.model, acceptUsageCredits: pick.credits && mayUseCredits(pick.agent, pick.model) }))}>Authorize {LABEL[r.stage].toLowerCase()} with this model</button>
               </>
             ) : open ? <p className="muted small">Waiting for the stage before it to finish.</p> : null}
             {r.status === 'authorized' ? (

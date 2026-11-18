@@ -17,7 +17,7 @@ export const CLAUDE_ROLE_SUGGESTIONS: Record<PipelineStage, string[]> = {
 };
 
 const Model = z.string().regex(/^\w[\w.:-]{0,79}$/);
-export const PipelineStageChoiceSchema = z.object({ agent: z.enum(['claude-code', 'codex', 'hermes']), model: Model, effort: z.string().max(20).optional() });
+export const PipelineStageChoiceSchema = z.object({ agent: z.enum(['claude-code', 'codex']), model: Model, effort: z.string().max(20).optional() });
 export type PipelineStageChoice = z.infer<typeof PipelineStageChoiceSchema>;
 
 export type PipelineStageStatus = 'not-started' | 'authorized' | 'running' | 'done' | 'failed';
@@ -32,6 +32,26 @@ export interface PipelineStageRecord {
   note?: string;
 }
 export interface Pipeline { id: string; goal: string; stages: PipelineStageRecord[] }
+
+const StageRecordSchema = z.object({
+  stage: z.enum(PIPELINE_STAGES), status: z.enum(['not-started', 'authorized', 'running', 'done', 'failed']), chosen: PipelineStageChoiceSchema.optional(),
+  authorizedBy: z.string().max(100).optional(), authorizedAt: z.number().optional(), actualModel: z.string().max(100).nullable().optional(), runId: z.string().max(60).optional(),
+  evidence: z.array(z.string().max(200)).max(20).optional(), acceptedUsageCredits: z.boolean().optional(), substituted: z.boolean().optional(), note: z.string().max(300).optional(),
+});
+const PipelineSchema = z.object({ id: z.string().max(40), goal: z.string().min(1).max(2000), stages: z.array(StageRecordSchema).length(4) });
+
+/** A pipeline read back from disk. Anything malformed, or out of order (a stage past not-started while an earlier one is not done, or authorized without a choice), is refused: null. */
+export function parsePipeline(raw: unknown): Pipeline | null {
+  const r = PipelineSchema.safeParse(raw);
+  if (!r.success) return null;
+  const st = r.data.stages;
+  for (let i = 0; i < 4; i++) {
+    if (st[i]!.stage !== PIPELINE_STAGES[i]) return null;
+    if (st[i]!.status !== 'not-started' && !st[i]!.chosen) return null;
+    if (st[i]!.status !== 'not-started' && st.slice(0, i).some((p) => p.status !== 'done')) return null;
+  }
+  return r.data as Pipeline;
+}
 
 export class PipelineError extends Error {}
 

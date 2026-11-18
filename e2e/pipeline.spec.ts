@@ -20,10 +20,14 @@ test('each stage needs its own authorization, and Fable needs consent', async ({
 
   // Fable: the authorize button stays disabled until usage credits are accepted for this stage.
   const plan = page.getByTestId('pipe-plan');
-  await plan.getByRole('combobox').fill('claude-fable-5-2');
+  await expect(plan.getByLabel('Agent for plan')).toHaveValue('claude-code');
+  await plan.getByLabel('Agent for plan').selectOption('codex');
+  await expect(plan.getByRole('combobox', { name: 'Model' })).toHaveValue('');
+  await plan.getByLabel('Agent for plan').selectOption('claude-code');
+  await plan.getByRole('combobox', { name: 'Model' }).fill('claude-fable-5-2');
   await expect(plan.getByTestId('credit-consent')).toBeVisible();
   await expect(page.getByTestId('pipe-auth-plan')).toBeDisabled();
-  await plan.getByRole('combobox').fill('haiku');
+  await plan.getByRole('combobox', { name: 'Model' }).fill('haiku');
   await expect(plan.getByTestId('credit-consent')).toHaveCount(0);
   await page.getByTestId('pipe-auth-plan').click();
 

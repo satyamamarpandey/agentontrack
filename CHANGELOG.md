@@ -30,6 +30,7 @@ A security release. Every item is from a self-run audit (`docs/security/AUDIT-20
 - A wrapper no longer hides the command inside it: `cmd /c`, `Start-Process`, PowerShell `-EncodedCommand` (decoded and read; unreadable text is held), `timeout 5 ...`, `sudo -u x ...`, `xargs` feeding a known program, `git rebase -x`, `git submodule foreach`.
 - More tools are recognised: `gh gist create`, `gh repo edit|delete|fork`, `gh workflow run`, `yarn npm publish`, `rsync` to another host, `rclone`, `gsutil`, `azcopy`, `ftp`, `tftp`, `bitsadmin /upload`, `git send-email`.
 - This makes the gate ask more often than before for git commands that use a personal alias (`git co`) or change a remote. That is the cost of not guessing.
+- The gate cannot be made slow. A command built to take a long time to read (a very long run of digits, thousands of parts) is decided in milliseconds or held without being parsed: a command of more than 50,000 characters outside here-document bodies, or with more than 200 separate effects, is held for approval. Some agents run the action when the gate does not answer in time, so this closes a way round it.
 
 **The local dashboard**
 
@@ -39,6 +40,7 @@ A security release. Every item is from a self-run audit (`docs/security/AUDIT-20
 - **Hooks.** AgentOnTrack records the exact hook command it writes for each project. A hook file that came with a cloned repository, or that was changed afterwards, is never run by AgentOnTrack and no longer shows as "connected": press Connect to replace it. A project connected by an earlier version is recognised without that step when its hooks are exactly the command this installation writes.
 - A project folder is judged on its real location: the home folder, a folder that contains it, AgentOnTrack's own data folder and folders of keys and sign-ins are refused under any spelling.
 - With a valid code, acknowledging a mismatch or accepting test changes for something that does not exist is refused instead of being written to the record.
+- `agentontrack run` on Windows no longer passes arguments through a shell where it can avoid one, and escapes fully where it cannot: a prompt containing `" & command & "` is passed as text, not run. The pairing code draws each symbol uniformly.
 - The public-site dashboard refuses to run inside another site's frame.
 
 **The phone link (still switched off in this release)**

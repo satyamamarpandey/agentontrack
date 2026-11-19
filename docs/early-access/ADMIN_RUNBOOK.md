@@ -13,7 +13,7 @@ For the owner. How applications arrive, how to invite someone, how to take acces
 
 ## The flow, in order
 
-1. **Someone applies.** The form on the home page (popup after about five seconds, the Early access button, or `/early-access/`) writes one document to `applications`, keyed by the SHA-256 of their lower-cased email, with `status: pending`. One per address: a second attempt for the same address is refused by the rules.
+1. **Someone applies.** The form (the Early access button on any page, or `/early-access/`; nothing opens by itself) writes one document to `applications`, keyed by the SHA-256 of their lower-cased email, with `status: pending`. One per address: a second attempt for the same address is refused by the rules.
 2. **You review.** On the review page, filter by operating system, agent tool and status, open a row, read the answers, add a private note. **Approve** or **Reject**. Both are written to `audit`.
 3. **You invite.** In the drawer, choose how long the link should live (7, 14 or 30 days) and press **Create invitation link**. The link appears once. Copy it and send it yourself, by email or chat, to the address on the application. Nothing is emailed by the site. The database holds only a hash of the link's code, the address, and the expiry. Pressing it again makes a new link and revokes the old one.
 4. **They join.** The link opens `/join/`. They sign in or create an account **with the invited address**, confirm the address if it is an email-and-password account (Google addresses arrive confirmed), and the invitation is used: in one transaction it becomes `redeemed` and their `members/{uid}` record is created with `status: active`. Expired, revoked, used or misaddressed links fail every rule.

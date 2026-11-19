@@ -373,11 +373,24 @@ function classifySegment(seg: Segment, cwdPrefix: string, out: Effect[]): boolea
   }
 }
 
+/**
+ * A command too long to read is held for a person, not parsed: reading it could take long enough for a host to give up on the gate, and some
+ * hosts then run the action. The first limit is on the whole text. The second is on what is left once here-document bodies are removed, so
+ * writing a large file with `cat <<EOF` is not affected.
+ */
+export const MAX_COMMAND_CHARS = 1_000_000;
+export const MAX_CLASSIFIED_CHARS = 50_000;
+/** More effects than this in one command is not something a person could review. */
+export const MAX_EFFECTS = 200;
+const tooLong = (command: string): Classification => ({ effects: [{ kind: 'exec.dynamic', target: `${command.slice(0, 200)}… (${command.length} characters: too long to read)` }], opaque: true });
+
 export function classifyCommand(command: string): Classification {
   const effects: Effect[] = [];
   let opaque = false;
-  if (STATE_REF.test(command) || SELF_CMD.test(command)) effects.push({ kind: 'self.tamper', target: command });
+  if (command.length > MAX_COMMAND_CHARS) return tooLong(command);
   const { text: withoutBodies, dynamicBody } = stripHeredocs(command);
+  if (withoutBodies.length > MAX_CLASSIFIED_CHARS) return tooLong(command);
+  if (STATE_REF.test(command) || SELF_CMD.test(command)) effects.push({ kind: 'self.tamper', target: command });
   const { segments, substitution: sub0 } = lex(withoutBodies);
   const substitution = sub0 || dynamicBody;
   if (substitution) {
@@ -393,6 +406,13 @@ export function classifyCommand(command: string): Classification {
       continue;
     }
     if (classifySegment(seg, cwdPrefix, effects)) opaque = true;
+  }
+  // A command built to have thousands of parts would have each part judged and recorded. Past a sane number it is reduced to one effect of
+  // each kind (so nothing that needs approval is lost) and held as something nobody can read in full.
+  if (effects.length > MAX_EFFECTS) {
+    const first = new Map<string, Effect>();
+    for (const e of effects) if (!first.has(e.kind)) first.set(e.kind, e);
+    return { effects: [...first.values(), { kind: 'exec.dynamic', target: `${command.slice(0, 200)}… (${effects.length} separate effects: too many to read)` }], opaque: true };
   }
   return { effects, opaque };
 }

@@ -64,7 +64,14 @@ export function checkPathScope(state: ProjectState, path: string, insideRoot: bo
 
 /** Output redirection is judged by its own fs.write effect, so it does not change which program this is. */
 const allowKey = (target: string) => {
-  let rest = target.replace(/\s*\d*>.*$/, '').trim();
+  // Everything from the first redirect on is dropped, with the digits and spaces just before it ("2>", " >"). Done by hand in one pass: the
+  // regular expression that used to do it took quadratic time on a long run of digits, and a gate that is slow enough fails open on some hosts.
+  let cut = target.indexOf('>');
+  if (cut >= 0) {
+    while (cut > 0 && target.charCodeAt(cut - 1) >= 48 && target.charCodeAt(cut - 1) <= 57) cut--;
+    while (cut > 0 && (target[cut - 1] === ' ' || target[cut - 1] === '\t' || target[cut - 1] === '\n' || target[cut - 1] === '\r')) cut--;
+  }
+  let rest = (cut >= 0 ? target.slice(0, cut) : target).trim();
   // A harmless variable does not change which program runs. These can, so they keep the command off the allow-list.
   const unsafe = /^(NODE_|LD_|DYLD_|PATH=|PYTHON|PERL|RUBY|BASH_ENV|ENV=|GIT_|npm_config_)/i;
   for (let m = /^([A-Za-z_]\w*=\S*)\s+/.exec(rest); m && !unsafe.test(m[1]!); m = /^([A-Za-z_]\w*=\S*)\s+/.exec(rest)) rest = rest.slice(m[0].length);

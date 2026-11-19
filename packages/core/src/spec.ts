@@ -17,6 +17,8 @@ const SECTIONS: [string, RegExp, string][] = [
   ['files', /^#{1,4}\s+.*(files?|changes?|modules?|touch|affected)/im, 'a section that lists the exact files to change'],
 ];
 const VAGUE = /\b(tbd|todo|etc\.?|and so on|as needed|as appropriate|somehow|maybe|figure out|to be decided|various)\b/i;
+/** A design document longer than this is checked on its first part only, for the two whole-text patterns. */
+const MAX_SCANNED = 400_000;
 const SIGNATURE = /(?:\b(?:function|def|fn|func|async function)\s+[A-Za-z_]\w*\s*\(|\b[A-Za-z_]\w*\s*\([^()\n]*\)\s*(?::|->|=>)\s*[\w<[{]|\([^()\n]*\)\s*:\s*[A-Za-z_][\w<>[\]| ]*\s*(?:\{|=>))/;
 const STRUCTURE = /\b(?:interface|type|struct|class|enum|schema|table|record|dataclass)\s+[A-Za-z_]\w*|\{\s*[A-Za-z_]\w*\??\s*:\s*[A-Za-z_]/;
 const PATH = /`([A-Za-z0-9_.@-]+(?:\/[A-Za-z0-9_.@-]+)+|[A-Za-z0-9_-]+\.[A-Za-z]{1,6})`/g;
@@ -41,8 +43,11 @@ export function checkSpec(markdown: string, root: string): SpecCheck {
   if (!paths.length) findings.push({ code: 'no-paths', severity: 'missing', message: 'No file path is named. Name the exact files to change, in backticks.' });
   for (const p of paths) if (!p.exists && !p.markedNew) findings.push({ code: 'unknown-path', severity: 'unclear', message: `\`${p.path}\` does not exist in the project and is not marked as new. Say whether it is new, or correct the path.` });
 
-  if (!STRUCTURE.test(markdown)) findings.push({ code: 'no-data-structures', severity: 'missing', message: 'No data structure is defined (a type, interface, schema or table with its fields).' });
-  if (!SIGNATURE.test(markdown)) findings.push({ code: 'no-signatures', severity: 'missing', message: 'No function signature is written out, with its parameters and return type.' });
+  // These two patterns can take a long time on very long lines, and this runs in the companion's one thread: they see lines of ordinary length only.
+  const scanned = markdown.length > MAX_SCANNED ? markdown.slice(0, MAX_SCANNED) : markdown;
+  const bounded = scanned.split('\n').filter((l) => l.length <= 2000).join('\n');
+  if (!STRUCTURE.test(bounded)) findings.push({ code: 'no-data-structures', severity: 'missing', message: 'No data structure is defined (a type, interface, schema or table with its fields).' });
+  if (!SIGNATURE.test(bounded)) findings.push({ code: 'no-signatures', severity: 'missing', message: 'No function signature is written out, with its parameters and return type.' });
 
   let inFence = false;
   lines.forEach((line, i) => {

@@ -1,5 +1,5 @@
 import { execFile, spawn, spawnSync } from 'node:child_process';
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -1913,7 +1913,8 @@ ${brief}`.slice(0, 19_900), model: o.reviewerModel, maxBudgetUsd: o.maxUsd }), {
     newPairingCode() {
       // Unambiguous alphabet; 8 chars with a 5-try limit and a 5-minute life.
       const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-      const value = [...randomBytes(8)].map((b) => alphabet[b % alphabet.length]).join('');
+      // randomInt, not a byte taken modulo 31: 256 is not a multiple of 31, so a modulo would make eight of the symbols slightly more likely.
+      const value = Array.from({ length: 8 }, () => alphabet[randomInt(alphabet.length)]).join('');
       code = { value, expires: Date.now() + CODE_TTL_MS, failures: 0 };
       return value;
     },

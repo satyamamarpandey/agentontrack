@@ -6,6 +6,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { approvalView, checkAnchor, isPendingLive, PhasePlanSchema, phaseViews, planSha, Project, pushAnchor, registerProject, routeIntent, suggestNext, type ProjectState } from '@agentontrack/core';
+import { spawnAgent } from './spawn-agent.js';
 import { adoptHookTrust, coverageFor, handleHookSafely, handleProviderHookSafely, installMcpClient, isProvider, MCP_CLIENTS, perplexityMcpConfig, PROVIDERS, providerInstalled, providerSelfTest, hermesHookConfig, hookSelfTest, hooksInstalled, installHooks, probeLocalModel, uninstallHooks, discoverModels, type RuntimeId } from '@agentontrack/adapters';
 import { runSelf, stableCommand, VERSION } from './self.js';
 import { resolveProject, workspaceCommand } from './workspace-cmds.js';
@@ -240,8 +241,8 @@ async function main(): Promise<void> {
         const a = PROVIDERS[sub!]!;
         const test = providerSelfTest(a, root);
         if (!test.ok) { console.error(`Refusing to start ${a.name}: ${test.detail}`); process.exit(78); }
-        const quoted = [...(a.runArgs ?? []), ...argv.slice(2)].map((x) => (process.platform === 'win32' ? `"${x.replace(/%/g, '%%').replace(/"/g, '\\"')}"` : x));
-        const r = spawnSync(a.bin, quoted, { stdio: 'inherit', shell: process.platform === 'win32', cwd: root, env: { ...process.env, AGENTONTRACK_ROOT: root, PWD: root } });
+        // No shell reads these arguments: see spawn-agent.ts.
+        const r = spawnAgent(a.bin, [...(a.runArgs ?? []), ...argv.slice(2)], { stdio: 'inherit', cwd: root, env: { ...process.env, AGENTONTRACK_ROOT: root, PWD: root } });
         if (r.error) throw new Error(`Could not start ${a.name}: ${r.error.message}`);
         process.exitCode = r.status ?? 1;
         return;
@@ -251,9 +252,9 @@ async function main(): Promise<void> {
       if (!check.ok) { console.error(`Refusing to start ${sub}: ${check.detail}. ${check.fix ?? ''}`); process.exit(78); }
       const passthrough = argv.slice(2).filter((a) => a !== '--allow-network');
       const pre = sub === 'codex' ? ['--sandbox', 'workspace-write', '-c', `sandbox_workspace_write.network_access=${has('allow-network')}`, '-c', 'sandbox_workspace_write.exclude_slash_tmp=true', '-c', 'sandbox_workspace_write.exclude_tmpdir_env_var=true'] : [];
-      // On Windows these are .cmd shims that need a shell, and a shell would otherwise read & or | in a prompt as commands.
-      const quote = (x: string) => (process.platform === 'win32' ? `"${x.replace(/%/g, '%%').replace(/"/g, '\\"')}"` : x);
-      const r = spawnSync(sub === 'codex' ? 'codex' : 'claude', (sub === 'codex' && passthrough[0] === 'exec' ? ['exec', ...pre, ...passthrough.slice(1)] : [...pre, ...passthrough]).map(quote), { stdio: 'inherit', shell: process.platform === 'win32', cwd: root, env: { ...process.env, AGENTONTRACK_ROOT: root } });
+      // On Windows these can be .cmd files, and a shell would read & or | or a quote in a prompt as its own syntax. spawnAgent avoids the shell
+      // where it can and escapes fully where it cannot.
+      const r = spawnAgent(sub === 'codex' ? 'codex' : 'claude', sub === 'codex' && passthrough[0] === 'exec' ? ['exec', ...pre, ...passthrough.slice(1)] : [...pre, ...passthrough], { stdio: 'inherit', cwd: root, env: { ...process.env, AGENTONTRACK_ROOT: root } });
       if (r.error) throw new Error(`Could not start ${sub}: ${r.error.message}`);
       process.exitCode = r.status ?? 1;
       return;

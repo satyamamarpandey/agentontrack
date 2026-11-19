@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { classifyCommand, PolicySchema, Project } from '../src/index.js';
+import { classifyCommand, MAX_CLASSIFIED_CHARS, MAX_EFFECTS, PolicySchema, Project } from '../src/index.js';
 
 const kinds = (c: string) => classifyCommand(c).effects.map((e) => e.kind);
 const NEEDS_APPROVAL = new Set<string>(PolicySchema.parse({}).approvalRequired);
@@ -80,5 +80,55 @@ describe('the decision, not only the label', () => {
   });
   it('ordinary work under the same goal is still allowed', () => {
     for (const cmd of ['git status', 'git commit -m x', 'git add -A']) expect(decide(cmd), cmd).toBe('allow');
+  });
+});
+
+describe('a command built to be slow, or too long to read, is decided quickly and never allowed through by being slow', () => {
+  // Some hosts run the action when the gate does not answer in time, so a slow gate is a way round it. Found by static analysis on 2026-11-19.
+  let dir: string; let p: Project;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'aot-slow-')); process.env.AGENTONTRACK_HOME = join(dir, 'home');
+    const root = join(dir, 'repo'); mkdirSync(join(root, 'src'), { recursive: true });
+    p = new Project(root);
+    p.human.setGoal({ statement: 'Fix the parser', scope: { include: ['**'] } });
+    p.human.createTask({ id: 't', title: 't', criteria: [] });
+  });
+  afterEach(() => { try { p.close(); } catch { /* closed */ } try { rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }); } catch { /* temp */ } });
+  const N = 49_000;
+  const timed = (command: string) => {
+    const t = performance.now();
+    const c = classifyCommand(command);
+    const decision = p.preAction({ runtime: 'claude-code', tool: 'Bash', effects: c.effects, opaque: c.opaque, coverage: 'enforced', rawInput: command }).decision;
+    return { ms: performance.now() - t, decision, effects: c.effects.length };
+  };
+  it.each([
+    ['a long run of digits', `echo ${'9'.repeat(N)}`],
+    ['a long run of spaces', `echo${' '.repeat(N)}x`],
+    ['thousands of quotes', `echo ${'"'.repeat(N)}`],
+    ['thousands of assignments', `${'A=1 '.repeat(N / 4)}ls`],
+    ['thousands of substitutions', `echo ${'$('.repeat(N / 2)}`],
+    ['thousands of pipes', 'a|'.repeat(N / 2)],
+    ['thousands of redirects', `ls ${'2>'.repeat(N / 2)}`],
+    ['thousands of backslashes', `echo ${String.fromCharCode(92).repeat(N)}`],
+  ])('%s', (_name, command) => {
+    const r = timed(command);
+    expect(r.ms, `took ${Math.round(r.ms)} ms`).toBeLessThan(5000);
+    expect(r.effects).toBeLessThanOrEqual(MAX_EFFECTS + 20);
+  });
+  it('a push hidden behind a slow prefix is still held, and quickly', () => {
+    for (const command of [`${'9'.repeat(N)} ; git push`, `echo ${'9'.repeat(N)} && git.exe push origin main`, `${'a|'.repeat(300)} git push`]) {
+      const r = timed(command);
+      expect(r.decision, command.slice(-30)).not.toBe('allow');
+      expect(r.ms).toBeLessThan(5000);
+    }
+  });
+  it('a command too long to read is held without being parsed, but a large file written with a here-document is read normally', () => {
+    const long = `${'x'.repeat(MAX_CLASSIFIED_CHARS + 10)}; git push`;
+    expect(kinds(long)).toEqual(['exec.dynamic']);
+    expect(timed(long).decision).not.toBe('allow');
+    const heredoc = `cat > src/big.txt <<EOF\n${'line of text\n'.repeat(40_000)}EOF`;
+    expect(heredoc.length).toBeGreaterThan(MAX_CLASSIFIED_CHARS);
+    expect(kinds(heredoc)).toEqual(['fs.write']);
+    expect(timed(heredoc).decision).toBe('allow');
   });
 });

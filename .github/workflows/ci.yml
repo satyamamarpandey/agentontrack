@@ -27,7 +27,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 50 # the UAT sweep adds about ten minutes to the browser step; 30 was reached once on Linux (run 44478878149)
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

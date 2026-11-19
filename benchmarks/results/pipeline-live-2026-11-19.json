@@ -1,0 +1,51 @@
+{
+  "at": "2026-11-19T06:59:53.528Z",
+  "runtime": "real Claude Code, subscription login",
+  "stages": [
+    {
+      "stage": "plan",
+      "chosen": "haiku",
+      "authorizeStatus": 200,
+      "startStatus": 200,
+      "status": "done",
+      "reportedModel": "claude-haiku-5-5",
+      "substituted": false
+    },
+    {
+      "stage": "build",
+      "chosen": "sonnet",
+      "authorizeStatus": 200,
+      "startStatus": 200,
+      "status": "done",
+      "reportedModel": "claude-sonnet-5-5",
+      "substituted": false
+    },
+    {
+      "stage": "review",
+      "chosen": "opus",
+      "authorizeStatus": 200,
+      "startStatus": 200,
+      "status": "done",
+      "reportedModel": "claude-opus-5-5",
+      "substituted": false
+    },
+    {
+      "stage": "verify",
+      "chosen": "haiku",
+      "authorizeStatus": 200,
+      "startStatus": 200,
+      "status": "done",
+      "reportedModel": "claude-haiku-5-5",
+      "substituted": false
+    }
+  ],
+  "fable": {
+    "withoutConsentStatus": 409,
+    "body": "fable may charge usage credits: the person must accept that for this stage"
+  },
+  "summary": {
+    "next": null,
+    "verified": true,
+    "substitutions": []
+  }
+}

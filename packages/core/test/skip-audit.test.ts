@@ -33,6 +33,7 @@ const AUDITED: Record<string, { count: number; why: string }> = {
   'e2e/site.spec.ts': { count: 10, why: 'build-variant conditions (accounts or not, installs gated or not, release published or not) and axe once; each variant has its own assertions in the same file, so a skip here is always paired with a test that runs' },
   'e2e/workspace.spec.ts': { count: 3, why: 'desktop/mobile split and axe once' },
   'e2e/pipeline.spec.ts': { count: 1, why: 'runs in desktop Chromium only; the shared Workspace suite covers the panel in other browsers' },
+  'e2e/uat-sweep.spec.ts': { count: 1, why: 'the sweep sets its own widths (320 to 1920) and both themes, so it runs once, in desktop Chromium' },
 };
 
 const walk = (dir: string, out: string[] = []): string[] => {

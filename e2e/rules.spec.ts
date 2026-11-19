@@ -152,3 +152,79 @@ test('two accounts stay apart, an owner can delete everything, and removing a co
   expect((await write(aliceComputer, `${A()}/presence/main`, { version: 'x' }, ['lastSeen'])).status, 'after removal').toBe(403);
   expect((await read(aliceComputer, `${A()}/devices/p1`)).status, 'after removal').toBe(403);
 });
+
+// ---------- Negative regressions from the 2026-11-19 audit ----------
+
+test('audit: a revoked member\'s computer account stops with them, and an account cannot name itself as its own computer', async () => {
+  const dave = await signUp('dave@example.com'); const daveComputer = await signUp('computer-d@agentontrack.invalid');
+  await grantMembership('dave@example.com');
+  const D = `users/${dave.uid}/computers/c1`;
+  const record = (computerUid: string) => write(dave, D, { name: 'Dave laptop', computerUid, pub: PUB, fingerprint: 'DDDD' }, ['createdAt']);
+  expect((await record(dave.uid)).status, 'own account named as the computer').toBe(403);
+  expect((await record(daveComputer.uid)).status, 'a separate computer account').toBe(200);
+  const response = (rid: string) => write(daveComputer, `${D}/responses/${rid}`, envelope(dave.uid, 'c1', rid, { kind: 'response' }));
+  const snapshot = () => write(daveComputer, `${D}/snapshots/p1__abc`, envelope(dave.uid, 'c1', 'snap', { kind: 'snapshot' }));
+  const presence = () => write(daveComputer, `${D}/presence/main`, { version: 'x' }, ['lastSeen']);
+  expect((await response('r1')).status, 'while a member').toBe(200);
+  expect((await snapshot()).status).toBe(200);
+  expect((await presence()).status).toBe(200);
+  expect((await write(dave, `${D}/requests/q1`, envelope(dave.uid, 'c1', 'q1'))).status).toBe(200);
+
+  await grantMembership('dave@example.com', { status: 'revoked' });
+  expect((await response('r2')).status, 'revoked: a new answer').toBe(403);
+  expect((await response('r1')).status, 'revoked: overwriting an old answer').toBe(403);
+  expect((await snapshot()).status, 'revoked: a snapshot').toBe(403);
+  expect((await presence()).status, 'revoked: presence').toBe(403);
+  for (const path of [D, `${D}/responses/r1`, `${D}/requests/q1`, `${D}/snapshots/p1__abc`, `${D}/presence/main`]) expect((await read(daveComputer, path)).status, `revoked: read ${path}`).toBe(403);
+  expect((await write(daveComputer, `${D}/devices/p1`, { status: 'trusted' }, [], ['status'])).status, 'revoked: trusting a phone').toBe(403);
+  // The refused answer was never stored, and access returns only with membership.
+  await grantMembership('dave@example.com');
+  expect((await read(daveComputer, `${D}/responses/r2`)).status, 'the refused answer was never stored').toBe(404);
+  expect((await response('r2')).status, 'a member again').toBe(200);
+});
+
+test('audit: every relay field is typed and bounded, so the size limit cannot be sidestepped', async () => {
+  const eve = await signUp('eve@example.com'); const eveComputer = await signUp('computer-e@agentontrack.invalid');
+  await grantMembership('eve@example.com');
+  const E = `users/${eve.uid}/computers/c1`;
+  expect((await write(eve, E, { name: 'Eve laptop', computerUid: eveComputer.uid, pub: PUB, fingerprint: 'EEEE' }, ['createdAt'])).status).toBe(200);
+  const big = 'x'.repeat(300_000);
+  expect((await write(eveComputer, `${E}/presence/main`, { version: big }, ['lastSeen'])).status, 'a huge presence version').toBe(403);
+  expect((await write(eveComputer, `${E}/presence/main`, { version: 7 }, ['lastSeen'])).status, 'a presence version that is not text').toBe(403);
+  expect((await write(eveComputer, `${E}/presence/main`, { version: 'companion' }, ['lastSeen'])).status, 'an ordinary presence').toBe(200);
+  const snap = (over: Record<string, unknown>) => write(eveComputer, `${E}/snapshots/p1__abc`, envelope(eve.uid, 'c1', 'snap', { kind: 'snapshot', ...over }));
+  for (const [field, value] of [['sig', big], ['iv', big], ['kind', big], ['did', big], ['rid', big], ['ctr', -1], ['exp', Date.now() + 86_400_000], ['v', 2]] as const) expect((await snap({ [field]: value })).status, `snapshot ${field}`).toBe(403);
+  expect((await snap({})).status, 'an ordinary snapshot').toBe(200);
+  const resp = (over: Record<string, unknown>) => write(eveComputer, `${E}/responses/r1`, envelope(eve.uid, 'c1', 'r1', { kind: 'response', ...over }));
+  expect((await resp({ expireAt: big })).status, 'an expiry that is not a time').toBe(403);
+  expect((await resp({})).status, 'an ordinary answer').toBe(200);
+});
+
+test('audit: usage counts hold short agent ids only, whoever writes them', async () => {
+  const week = '2026-W47';
+  const body = (installId: string, runtimes: unknown[]) => ({
+    writes: [{
+      update: { name: `${DB}/telemetry/${installId}_${week}`, fields: { week: { stringValue: week }, version: { stringValue: '1' }, installId: { stringValue: installId }, tasksVerified: { integerValue: '0' }, tasksTotal: { integerValue: '0' }, activeDays: { integerValue: '0' }, runtimesConnected: { arrayValue: { values: runtimes.map((r) => (typeof r === 'string' ? { stringValue: r } : { integerValue: String(r) })) } } } },
+      updateTransforms: [{ fieldPath: 'createdAt', setToServerValue: 'REQUEST_TIME' }],
+    }],
+  });
+  const send = (installId: string, runtimes: unknown[]) => fetch(`${DOCS}:commit`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body(installId, runtimes)) });
+  expect((await send('aud1', Array.from({ length: 12 }, () => 'x'.repeat(80_000)))).status, 'twelve very long entries').toBe(403);
+  expect((await send('aud2', ['x'.repeat(500)])).status, 'one long entry').toBe(403);
+  expect((await send('aud3', ['D:\\work\\project'])).status, 'a path').toBe(403);
+  expect((await send('aud4', ['claude code <script>'])).status, 'markup').toBe(403);
+  expect((await send('aud5', Array.from({ length: 13 }, () => 'a'))).status, 'too many entries').toBe(403);
+  expect((await send('aud6', ['claude-code', 'codex', 'gemini-cli'])).status, 'ordinary agent ids').toBe(200);
+  expect((await send('aud7', [])).status, 'none connected').toBe(200);
+  for (const id of ['aud1', 'aud2', 'aud3', 'aud4', 'aud5']) expect((await fetch(`${DOCS}/telemetry/${id}_${week}`, { headers: { authorization: 'Bearer owner' } })).status, `${id} was not stored`).toBe(404);
+});
+
+test('audit: the review record is read and written by the administrator only', async () => {
+  const mallory = await signUp('mallory@example.com');
+  expect((await read(mallory, 'audit/x')).status, 'a signed-in stranger reads an entry').toBe(403);
+  expect((await read(null, 'audit/x')).status, 'nobody reads an entry').toBe(403);
+  expect((await fetch(`${DOCS}/audit`, { headers: { authorization: `Bearer ${mallory.token}` } })).status, 'listing').toBe(403);
+  expect((await write(mallory, 'audit/forged', { action: 'approve', target: 'application:x', by: mallory.uid }, ['at'])).status, 'forging an entry').toBe(403);
+  expect((await write(alice, 'audit/forged', { action: 'approve', target: 'application:x', by: alice.uid }, ['at'])).status, 'a member forging an entry').toBe(403);
+  expect((await fetch(`${DOCS}/audit/forged`, { headers: { authorization: 'Bearer owner' } })).status).toBe(404);
+});

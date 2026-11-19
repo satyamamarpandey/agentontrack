@@ -6,7 +6,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { approvalView, checkAnchor, isPendingLive, PhasePlanSchema, phaseViews, planSha, Project, pushAnchor, registerProject, routeIntent, suggestNext, type ProjectState } from '@agentontrack/core';
-import { coverageFor, handleHookSafely, handleProviderHookSafely, installMcpClient, isProvider, MCP_CLIENTS, perplexityMcpConfig, PROVIDERS, providerInstalled, providerSelfTest, hermesHookConfig, hookSelfTest, hooksInstalled, installHooks, probeLocalModel, uninstallHooks, discoverModels, type RuntimeId } from '@agentontrack/adapters';
+import { adoptHookTrust, coverageFor, handleHookSafely, handleProviderHookSafely, installMcpClient, isProvider, MCP_CLIENTS, perplexityMcpConfig, PROVIDERS, providerInstalled, providerSelfTest, hermesHookConfig, hookSelfTest, hooksInstalled, installHooks, probeLocalModel, uninstallHooks, discoverModels, type RuntimeId } from '@agentontrack/adapters';
 import { runSelf, stableCommand, VERSION } from './self.js';
 import { resolveProject, workspaceCommand } from './workspace-cmds.js';
 import { planProjectFiles, applyProjectFiles } from './init.js';
@@ -126,6 +126,11 @@ const ALL_COMMANDS = ['setup', 'doctor', 'providers', 'mcp-config', 'research', 
 
 async function main(): Promise<void> {
   const [cmd, sub, arg] = argv;
+  // A project connected by an earlier version: if its hooks are exactly the command this installation writes, they are recorded as its own, so
+  // upgrading does not ask the person to connect again. Not on the hook path itself, which runs for every tool call and must stay fast.
+  if (cmd && !['hook', 'mcp', 'self', 'version', '--version', 'help', '--help'].includes(cmd)) {
+    for (const rt of ['claude-code', 'codex'] as const) { try { adoptHookTrust(rt, root, [selfCommand()]); } catch { /* a missing or unreadable hook file is simply not adopted */ } }
+  }
   switch (cmd) {
     case 'hook': {
       if (isProvider(sub)) {

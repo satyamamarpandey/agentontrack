@@ -13,7 +13,8 @@ function globToRegExp(glob: string): RegExp {
     } else if (c === '?') re += '[^/]';
     else re += c.replace(/[.+^${}()|[\]\\]/g, '\\$&');
   }
-  return new RegExp(`^${re}$`, process.platform === 'win32' ? 'i' : '');
+  // Windows and macOS open .CLAUDE/Settings.json as .claude/settings.json, so a name is matched in any case there.
+  return new RegExp(`^${re}$`, process.platform === 'win32' || process.platform === 'darwin' ? 'i' : '');
 }
 
 export function matchesAny(path: string, globs: string[]): boolean {

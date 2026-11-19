@@ -154,7 +154,8 @@ export function makeExecutor(deps: ExecDeps): Executor {
       return got;
     };
     // Every action that can start an agent (directly, or by continuing or looping a plan) is refused unless the owner allowed it at the computer. This is checked before anything else happens, including an idempotency record.
-    const STARTS_AGENT = new Set<string>(['run.start', 'session.new', 'plan.loop']);
+    // plan.verify starts no agent, but it runs the plan's check commands on this computer, and those run project code an agent may have changed. It is execution started from a phone, so it is held to the same setting.
+    const STARTS_AGENT = new Set<string>(['run.start', 'session.new', 'plan.loop', 'plan.verify']);
     if (STARTS_AGENT.has(action) || (action === 'plan.continue' && !a.stop)) {
       if (!(deps.allowMobileExecution?.() ?? false)) throw new Refusal('mobile-execution-off', MOBILE_EXECUTION_OFF);
     }
@@ -174,11 +175,15 @@ export function makeExecutor(deps: ExecDeps): Executor {
         if (!MARKDOWN.test(a.path)) throw new Refusal('not-markdown', 'A phone reads Markdown and plain text only.');
         if (p.isProtectedPath(String(a.path).replaceAll('\\', '/').replace(/^\.\//, ''))) throw new Refusal('protected', 'That file is protected and is not shown on a phone.');
         const f = p.readWorkspaceFile(a.path);
+        // Checked again on the file that was actually opened, after links and other spellings of the name have been resolved.
+        if (f.protected || !MARKDOWN.test(f.path)) throw new Refusal('protected', 'That file is protected and is not shown on a phone.');
         return { path: f.path, size: f.size, hash: f.hash, content: clip(f.content, MAX_FILE), truncated: f.content.length > MAX_FILE };
       }
       case 'diff.read': {
         const { p } = where();
         const d = p.worktreeFileDiff(a.worktree, a.path);
+        // A diff shows the content of both versions, so a protected file (keys, .env, agent hooks, the goal) is not shown this way either.
+        if (p.isProtectedPath(String(a.path)) || p.isProtectedPath(d.path)) throw new Refusal('protected', 'That file is protected and is not shown on a phone.');
         return { path: d.path, before: d.before === null ? null : clip(d.before, MAX_DIFF), after: d.after === null ? null : clip(d.after, MAX_DIFF) };
       }
       case 'models.list': return deps.models();

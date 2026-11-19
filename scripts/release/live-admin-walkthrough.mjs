@@ -169,7 +169,9 @@ try {
     await drawer.getByTestId('save-notes').click();
     await shot(pAdmin, 'review-drawer');
   });
-  check('approve', 'the stored application is approved, reviewed by the administrator\'s uid, with the note', (await oGet(`applications/${A_ID}`)) ? (({ status, reviewedBy, notes: n }) => `${status}/${reviewedBy === adm.uid}/${n}`)(await oGet(`applications/${A_ID}`)) : 'missing', 'approved/true/Live walk-through note.', 'owner read');
+  made.docs.add(`applicationNotes/${A_ID}`);
+  const noteDoc = await oGet(`applicationNotes/${A_ID}`).catch(() => null);
+  check('approve', 'the stored application is approved and reviewed by the administrator\'s uid; the private note is kept apart from it, where the applicant cannot read it', (await oGet(`applications/${A_ID}`)) ? (({ status, reviewedBy, notes: n }) => `${status}/${reviewedBy === adm.uid}/${n === undefined ? 'no note inside' : 'NOTE INSIDE'}/${noteDoc?.notes}`)(await oGet(`applications/${A_ID}`)) : 'missing', 'approved/true/no note inside/Live walk-through note.', 'owner read');
   let inviteLink = ''; let inviteHash = '';
   await ui('invite', 'create an invitation link on the review page; it is shown once', async () => {
     await drawer.getByTestId('create-invite').click();

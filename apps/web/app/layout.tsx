@@ -27,7 +27,8 @@ const NAV = [['/features', 'Features'], ['/how-it-works', 'How it works'], ['/in
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
 const FOOT = [['/early-access', 'Early access'], ['/benchmarks', 'Benchmarks'], ['/pricing', 'Pricing'], ['/community', 'Community'], ['/roadmap', 'Roadmap'], ['/changelog', 'Changelog'], ['/feedback', 'Feedback'], ['/privacy', 'Privacy'], ['/terms', 'Terms']];
 // Set before first paint, so a saved light theme does not flash dark.
-const THEME_SCRIPT = "try{var t=localStorage.getItem('bl-theme');if(t)document.documentElement.dataset.theme=t}catch(e){}";
+// Also: a static host cannot send frame-ancestors, so a page shown inside another site's frame hides itself (its forms could be clicked through).
+const THEME_SCRIPT = "try{var t=localStorage.getItem('bl-theme');if(t)document.documentElement.dataset.theme=t}catch(e){}try{if(window.top!==window.self)document.documentElement.style.display='none'}catch(e){document.documentElement.style.display='none'}";
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (

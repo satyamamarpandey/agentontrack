@@ -1,8 +1,9 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { classifyCommand, type Coverage, type Effect, type Project } from '@agentontrack/core';
+import { dirname, join, resolve } from 'node:path';
+import { agentontrackHome, classifyCommand, type Coverage, type Effect, type Project } from '@agentontrack/core';
 import * as z from 'zod/v4';
 
 export type RuntimeId = 'claude-code' | 'codex' | 'hermes';
@@ -344,6 +345,64 @@ function configPath(runtime: 'claude-code' | 'codex', root: string): string {
 
 const isOurs = (h: any) => typeof h?.command === 'string' && HOOK_COMMAND.test(h.command);
 
+/*
+ * Which hook command AgentOnTrack itself wrote, per project and agent. A hook file is part of the project, so a repository that was cloned, or an
+ * agent whose write was approved, can put any command there that merely looks like ours. Such a command is never run by AgentOnTrack and never
+ * counts as "connected": only the exact command recorded here, in AgentOnTrack's own data folder (which agents are denied), does.
+ */
+const trustFile = () => join(agentontrackHome(), 'hook-trust.json');
+const fold = (p: string) => {
+  let r: string;
+  try { r = realpathSync.native(resolve(p)); } catch { r = resolve(p); }
+  r = r.split('\\').join('/');
+  return process.platform === 'win32' || process.platform === 'darwin' ? r.toLowerCase() : r;
+};
+const trustKey = (runtime: string, root: string) => `${runtime} ${fold(root)}`;
+const digest = (command: string) => createHash('sha256').update(command, 'utf8').digest('hex');
+function readTrust(): Record<string, string> {
+  try { const t = JSON.parse(readFileSync(trustFile(), 'utf8')); return t && typeof t === 'object' && !Array.isArray(t) ? t : {}; } catch { return {}; }
+}
+function recordHookTrust(runtime: string, root: string, command: string | null): void {
+  const t = readTrust();
+  if (command === null) delete t[trustKey(runtime, root)]; else t[trustKey(runtime, root)] = digest(command);
+  mkdirSync(agentontrackHome(), { recursive: true });
+  const tmp = `${trustFile()}.${process.pid}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(t, null, 1)}\n`);
+  renameSync(tmp, trustFile());
+}
+/** The AgentOnTrack hook command in this project's hook file, but only if it is the one AgentOnTrack wrote there on this computer. */
+function trustedHookCommand(runtime: 'claude-code' | 'codex', root: string): { command: string | null; present: boolean } {
+  const path = configPath(runtime, root);
+  if (!existsSync(path)) return { command: null, present: false };
+  let ours: string[];
+  try {
+    ours = Object.values<any>(JSON.parse(readFileSync(path, 'utf8')).hooks ?? {}).flatMap((groups) => (Array.isArray(groups) ? groups : []).flatMap((g: any) => g?.hooks ?? [])).filter(isOurs).map((h: any) => h.command as string);
+  } catch { return { command: null, present: false }; }
+  if (!ours.length) return { command: null, present: false };
+  const want = readTrust()[trustKey(runtime, root)];
+  return { command: want && ours.every((c) => digest(c) === want) ? ours[0]! : null, present: true };
+}
+const UNTRUSTED = 'This project has a hook file that AgentOnTrack did not write on this computer, so its command was not run';
+
+/**
+ * A project connected by an earlier version has hooks but no record of who wrote them. If every AgentOnTrack-looking hook in its file is
+ * EXACTLY a command this installation itself writes (`ownCommands`), running it can only start this installation's own program, so it is
+ * recorded as trusted and the person does not have to connect again after upgrading. Anything else stays untrusted until they press Connect.
+ * Returns true when it adopted.
+ */
+export function adoptHookTrust(runtime: 'claude-code' | 'codex', root: string, ownCommands: string[]): boolean {
+  const path = configPath(runtime, root);
+  if (!existsSync(path) || readTrust()[trustKey(runtime, root)]) return false;
+  let ours: string[];
+  try {
+    ours = Object.values<any>(JSON.parse(readFileSync(path, 'utf8')).hooks ?? {}).flatMap((groups) => (Array.isArray(groups) ? groups : []).flatMap((g: any) => g?.hooks ?? [])).filter(isOurs).map((h: any) => h.command as string);
+  } catch { return false; }
+  const first = ours[0];
+  if (!first || !ours.every((c) => c === first) || !ownCommands.some((own) => `${own} hook ${runtime}` === first)) return false;
+  recordHookTrust(runtime, root, first);
+  return true;
+}
+
 export function installHooks(runtime: 'claude-code' | 'codex', root: string, cliCommand: string, opts: { sandbox?: boolean } = {}): { path: string; before: string; after: string } {
   const path = configPath(runtime, root);
   const before = existsSync(path) ? readFileSync(path, 'utf8') : '';
@@ -365,6 +424,7 @@ export function installHooks(runtime: 'claude-code' | 'codex', root: string, cli
   const after = `${JSON.stringify(cfg, null, 2)}\n`;
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, after);
+  recordHookTrust(runtime, root, `${cliCommand} hook ${runtime}`);
   if (runtime === 'codex') writeCodexSandbox(root);
   return { path, before, after };
 }
@@ -402,14 +462,14 @@ export function hookSelfTest(runtime: 'claude-code' | 'codex', root: string): Ho
   const path = configPath(runtime, root);
   const fix = `Run: agentontrack install ${runtime}`;
   if (!existsSync(path)) return { ok: false, detail: `No hook file at ${path}`, fix };
-  let command: string | undefined;
-  try {
-    const cfg = JSON.parse(readFileSync(path, 'utf8'));
-    command = (cfg.hooks?.PreToolUse ?? []).flatMap((g: any) => g.hooks ?? []).find(isOurs)?.command;
-  } catch (err) { return { ok: false, detail: `Hook file is not valid JSON: ${(err as Error).message}`, fix }; }
-  if (!command) return { ok: false, detail: 'The hook file has no AgentOnTrack PreToolUse hook', fix };
+  try { JSON.parse(readFileSync(path, 'utf8')); } catch (err) { return { ok: false, detail: `Hook file is not valid JSON: ${(err as Error).message}`, fix }; }
+  const t = trustedHookCommand(runtime, root);
+  if (!t.present) return { ok: false, detail: 'The hook file has no AgentOnTrack PreToolUse hook', fix };
+  if (!t.command) return { ok: false, detail: `${UNTRUSTED}. Connect the agent again to replace it.`, fix };
+  const command = t.command;
   const input = JSON.stringify({ session_id: 'agentontrack-selftest', cwd: root, hook_event_name: 'PreToolUse', tool_name: runtime === 'codex' ? 'shell' : 'Bash', tool_input: { command: 'agentontrack approve selftest' } });
-  const r = spawnSync(command, { shell: true, input, encoding: 'utf8', timeout: 30_000, cwd: root, env: { ...process.env, AGENTONTRACK_ROOT: root } });
+  // NoDefaultCurrentDirectoryInExePath: on Windows, a program of the same name placed in the project folder must not be found before the real one.
+  const r = spawnSync(command, { shell: true, input, encoding: 'utf8', timeout: 30_000, cwd: root, env: { ...process.env, AGENTONTRACK_ROOT: root, NoDefaultCurrentDirectoryInExePath: '1' } });
   if (r.status === 0 && /"permissionDecision":"deny"/.test(r.stdout ?? '')) return { ok: true, detail: 'The hook program ran and refused a test request' };
   return { ok: false, detail: `The hook program did not refuse a test request (exit ${r.status ?? 'none'}): ${`${r.stderr ?? ''}${r.error?.message ?? ''}`.trim().slice(0, 200)}`, fix };
 }
@@ -425,6 +485,7 @@ export function uninstallHooks(runtime: 'claude-code' | 'codex', root: string): 
   if (cfg.hooks && Object.keys(cfg.hooks).length === 0) delete cfg.hooks;
   writeFileSync(path, `${JSON.stringify(cfg, null, 2)}\n`);
   if (runtime === 'codex') removeCodexSandbox(root);
+  recordHookTrust(runtime, root, null);
   return true;
 }
 
@@ -433,7 +494,8 @@ export function hooksInstalled(runtime: 'claude-code' | 'codex', root: string): 
   if (!existsSync(path)) return false;
   try {
     const cfg = JSON.parse(readFileSync(path, 'utf8'));
-    return EVENTS[runtime].every((e) => (cfg.hooks?.[e] ?? []).some((g: any) => (g.hooks ?? []).some(isOurs)));
+    // A hook that only looks like ours is not a connection: the agent would run under a gate nobody checked.
+    return EVENTS[runtime].every((e) => (cfg.hooks?.[e] ?? []).some((g: any) => (g.hooks ?? []).some(isOurs))) && trustedHookCommand(runtime, root).command !== null;
   } catch { return false; }
 }
 
@@ -504,13 +566,12 @@ export const WORKTREE_HOOK_FILE = '.claude/settings.local.json';
 export function mirrorHooksToWorktree(mainRoot: string, wtPath: string): HookSelfTest {
   const fix = 'Connect Claude Code to this project first, then retry';
   const src = configPath('claude-code', mainRoot);
-  let hooks: any; let command: string | undefined;
-  try {
-    const cfg = JSON.parse(readFileSync(src, 'utf8'));
-    hooks = cfg.hooks;
-    command = (hooks?.PreToolUse ?? []).flatMap((g: any) => g.hooks ?? []).find(isOurs)?.command;
-  } catch { return { ok: false, detail: `No readable hook file at ${src}`, fix }; }
-  if (!command) return { ok: false, detail: 'The project has no AgentOnTrack hooks to copy', fix };
+  let hooks: any;
+  try { hooks = JSON.parse(readFileSync(src, 'utf8')).hooks; } catch { return { ok: false, detail: `No readable hook file at ${src}`, fix }; }
+  const t = trustedHookCommand('claude-code', mainRoot);
+  if (!t.present) return { ok: false, detail: 'The project has no AgentOnTrack hooks to copy', fix };
+  if (!t.command) return { ok: false, detail: `${UNTRUSTED}, and it was not copied to the worktree`, fix };
+  let command = t.command;
   // The agent's own project folder is the worktree, so the command must say which project's record to use.
   const flag = ` --root "${mainRoot.split('\\').join('/')}"`;
   for (const g of Object.values<any>(hooks)) for (const grp of g as any[]) for (const h of grp.hooks ?? []) if (isOurs(h) && typeof h.command === 'string' && !h.command.includes(' --root ')) h.command += flag;
@@ -522,7 +583,7 @@ export function mirrorHooksToWorktree(mainRoot: string, wtPath: string): HookSel
   mkdirSync(dirname(dst), { recursive: true });
   writeFileSync(dst, `${JSON.stringify(cur, null, 2)}\n`);
   const input = JSON.stringify({ session_id: 'agentontrack-selftest', cwd: wtPath, hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'agentontrack approve selftest' } });
-  const r = spawnSync(command, { shell: true, input, encoding: 'utf8', timeout: 30_000, cwd: wtPath, env: { ...process.env, AGENTONTRACK_ROOT: mainRoot } });
+  const r = spawnSync(command, { shell: true, input, encoding: 'utf8', timeout: 30_000, cwd: wtPath, env: { ...process.env, AGENTONTRACK_ROOT: mainRoot, NoDefaultCurrentDirectoryInExePath: '1' } });
   if (r.status === 0 && /"permissionDecision":"deny"/.test(r.stdout ?? '')) return { ok: true, detail: 'The hook program ran from the worktree and refused a test request' };
   return { ok: false, detail: `The hook program did not refuse a test request from the worktree (exit ${r.status ?? 'none'}): ${`${r.stderr ?? ''}${r.error?.message ?? ''}`.trim().slice(0, 200)}`, fix };
 }

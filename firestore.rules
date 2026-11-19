@@ -53,10 +53,12 @@ service cloud.firestore {
         && d.status == 'pending' && d.schema == 1
         && d.createdAt == request.time;
     }
+    // The applicant can read their own application, so the administrator's private notes are not kept in it. An older application may still
+    // carry a `notes` field: a review may remove it (it is moved to applicationNotes), and can no longer set it.
     function adminReview(before, after) {
       return after.diff(before).affectedKeys().hasOnly(['status', 'notes', 'reviewedAt', 'reviewedBy'])
         && after.status in ['pending', 'approved', 'rejected']
-        && (!('notes' in after) || isString(after.notes, 2000))
+        && !('notes' in after)
         && (!('reviewedAt' in after) || after.reviewedAt == request.time)
         && (!('reviewedBy' in after) || after.reviewedBy == request.auth.uid);
     }
@@ -67,6 +69,16 @@ service cloud.firestore {
       allow list: if isAdmin();
       allow update: if isAdmin() && adminReview(resource.data, request.resource.data);
       allow delete: if isAdmin() || (verifiedEmail() && id == emailHash(myEmail()));
+    }
+    // The administrator's private notes about an application. Only the administrator reads or writes them; the applicant never can.
+    match /applicationNotes/{id} {
+      allow get, list, delete: if isAdmin();
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasOnly(['notes', 'updatedAt', 'updatedBy'])
+        && request.resource.data.keys().hasAll(['notes', 'updatedAt', 'updatedBy'])
+        && isString(request.resource.data.notes, 2000)
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.updatedBy == request.auth.uid;
     }
 
     function validInvite(d) {
@@ -228,6 +240,8 @@ service cloud.firestore {
         && isString(d.version, 30) && isString(d.installId, 64)
         && id == d.installId + '_' + d.week
         && d.runtimesConnected is list && d.runtimesConnected.size() <= 12
+        // The list holds short agent ids and nothing else. Without this, each entry could be a megabyte of anything, written by anyone.
+        && d.runtimesConnected.join(',').size() <= 400 && d.runtimesConnected.join(',').matches('^[A-Za-z0-9._,-]*$')
         && isCount(d.tasksVerified) && isCount(d.tasksTotal) && isCount(d.activeDays) && d.activeDays <= 7
         && d.createdAt == request.time;
     }
@@ -235,20 +249,30 @@ service cloud.firestore {
     // Everything the phone and a computer exchange is encrypted and signed by keys Firestore never sees, so these rules do not decide what is
     // allowed. They keep accounts apart, keep each principal to its own kind of write, and bound size and lifetime. The person's own account
     // (the phone) writes requests. A second, limited account made for the computer writes answers and snapshots. Neither can do the other's job.
-    // The computer's account is not a member: it is named in the person's own computer document, and that is what admits it.
+    // The computer's account is not a member: it is named in the person's own computer document, and that is what admits it. It acts for
+    // that person, so it is admitted only while they are: when a member is revoked, their computer's account stops with them.
+    function ownerEntitled(uid) {
+      return (exists(/databases/$(database)/documents/members/$(uid)) && memberStatus(uid) == 'active') || exists(/databases/$(database)/documents/admins/$(uid));
+    }
     function isComputer(uid, cid) {
       return request.auth != null
-        && request.auth.uid == get(/databases/$(database)/documents/users/$(uid)/computers/$(cid)).data.computerUid;
+        && request.auth.uid == get(/databases/$(database)/documents/users/$(uid)/computers/$(cid)).data.computerUid
+        && ownerEntitled(uid);
     }
     function validPub(p) { return p is map && p.keys().hasOnly(['sign', 'agree']) && shortString(p.sign, 200) && shortString(p.agree, 200); }
-    function validEnvelope(d, id) {
-      return d.keys().hasOnly(['v', 'uid', 'cid', 'did', 'rid', 'kind', 'ctr', 'iat', 'exp', 'iv', 'ct', 'sig', 'expireAt'])
-        && d.keys().hasAll(['v', 'uid', 'cid', 'did', 'rid', 'kind', 'ctr', 'iat', 'exp', 'iv', 'ct', 'sig'])
-        && d.v == 1 && d.rid == id
-        && shortString(d.uid, 128) && shortString(d.cid, 64) && shortString(d.did, 64) && shortString(d.kind, 40)
+    // Every field has a type and a size, so the bound on the encrypted part cannot be sidestepped by filling another field.
+    function envelopeFields(d) {
+      return d.v == 1
+        && shortString(d.uid, 128) && shortString(d.cid, 64) && shortString(d.did, 64) && shortString(d.rid, 200) && shortString(d.kind, 40)
         && d.ctr is int && d.ctr >= 0 && d.iat is number && d.exp is number
         && d.exp - d.iat <= 600000 && d.exp > d.iat
         && shortString(d.iv, 40) && shortString(d.sig, 200) && d.ct is string && d.ct.size() > 0 && d.ct.size() <= 260000;
+    }
+    function validEnvelope(d, id) {
+      return d.keys().hasOnly(['v', 'uid', 'cid', 'did', 'rid', 'kind', 'ctr', 'iat', 'exp', 'iv', 'ct', 'sig', 'expireAt'])
+        && d.keys().hasAll(['v', 'uid', 'cid', 'did', 'rid', 'kind', 'ctr', 'iat', 'exp', 'iv', 'ct', 'sig'])
+        && d.rid == id && envelopeFields(d)
+        && (!('expireAt' in d) || (d.expireAt is timestamp && d.expireAt <= request.time + duration.value(3, 'h')));
     }
 
     match /users/{uid}/computers/{cid} {
@@ -260,6 +284,8 @@ service cloud.firestore {
         && request.resource.data.keys().hasAll(['name', 'computerUid', 'pub', 'fingerprint', 'createdAt'])
         && shortString(request.resource.data.name, 60) && shortString(request.resource.data.computerUid, 128)
         && validPub(request.resource.data.pub) && shortString(request.resource.data.fingerprint, 40)
+        // The computer's account is a separate, limited one. Naming one's own account here would give it the computer's rights as well.
+        && request.resource.data.computerUid != uid
         && request.resource.data.createdAt == request.time;
       allow update: if canUseAccount(uid) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name']) && shortString(request.resource.data.name, 60);
       allow delete: if canUseAccount(uid) || isAdmin();
@@ -286,11 +312,12 @@ service cloud.firestore {
       match /snapshots/{sid} {
         allow create, update: if isComputer(uid, cid) && request.resource.data.keys().hasOnly(['v', 'uid', 'cid', 'did', 'rid', 'kind', 'ctr', 'iat', 'exp', 'iv', 'ct', 'sig'])
           && request.resource.data.keys().hasAll(['v', 'uid', 'cid', 'did', 'rid', 'kind', 'ctr', 'iat', 'exp', 'iv', 'ct', 'sig'])
-          && request.resource.data.uid == uid && request.resource.data.cid == cid && request.resource.data.ct is string && request.resource.data.ct.size() <= 260000;
+          && request.resource.data.uid == uid && request.resource.data.cid == cid && envelopeFields(request.resource.data);
         allow read, delete: if canUseAccount(uid) || isComputer(uid, cid) || isAdmin();
       }
       match /presence/{pid} {
-        allow create, update: if isComputer(uid, cid) && request.resource.data.keys().hasOnly(['lastSeen', 'version']) && request.resource.data.lastSeen == request.time;
+        allow create, update: if isComputer(uid, cid) && request.resource.data.keys().hasOnly(['lastSeen', 'version']) && request.resource.data.lastSeen == request.time
+          && (!('version' in request.resource.data) || isString(request.resource.data.version, 40));
         allow read: if canUseAccount(uid) || isComputer(uid, cid);
         allow delete: if canUseAccount(uid) || isAdmin();
       }

@@ -51,6 +51,22 @@ export function saveRemote(f: RemoteFile, path = remotePath()): void {
   renameSync(tmp, path);
 }
 
+/**
+ * Ends trust on the stored state itself: one phone, or every phone when no id is given. Used when the link service is not running (revoking
+ * must never depend on being online) and when unlinking. Returns how many phones lost trust.
+ */
+export function revokeInFile(f: RemoteFile, did?: string, now = Date.now()): number {
+  let n = 0;
+  for (const d of f.devices) if (!d.revokedAt && (did === undefined || d.did === did)) { d.revokedAt = new Date(now).toISOString(); n++; }
+  return n;
+}
+/** Unlinking: every phone loses trust and the link is removed. Always applied to the state as it is on disk now, never to an older copy. */
+export function unlinkFile(f: RemoteFile, now = Date.now()): RemoteFile {
+  revokeInFile(f, undefined, now);
+  delete f.link;
+  return f;
+}
+
 export async function newRemoteFile(name: string): Promise<RemoteFile> {
   const id = await createIdentity(true);
   return { computerId: newId(9).replace(/[^A-Za-z0-9]/g, 'x'), name, identity: await exportIdentity(id), devices: [], cache: [], seen: {}, maxUsdPerRun: 1 };

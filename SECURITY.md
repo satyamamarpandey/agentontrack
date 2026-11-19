@@ -54,6 +54,10 @@ Release archives list a SHA-256 in `SHA256SUMS`, and the installers refuse a mis
 
 **For 1.0.0-rc.7 specifically:** the binaries were built by GitHub Actions in this public repository from the commit the release tag points to, and GitHub recorded a build attestation for each file (`gh attestation verify <file> -R satyamamarpandey/agentontrack`). There is no code signing, so Windows and macOS may warn, and checksums catch a damaged download, not someone replacing both the file and the list. Nobody has rebuilt the files independently to compare. Earlier releases: rc.5 had no attestation; rc.6 was built in a private repository (an attestation exists there that the public cannot verify).
 
+## Audit of 2026-11-19
+
+A self-run audit found five high and twelve medium findings and no critical one. All are fixed in source, each with a test that fails without the fix; the fixes to the desktop program are in 1.0.0-rc.8 and are **not in rc.7 or earlier**. In short: on Windows a program name with a suffix (`git.exe push`) and several other spellings of a push passed the gate without approval; a page served by another local program could use the dashboard session; unlinking a phone left it trusted. The record, with the threat model, every finding, its fix and its test, is `docs/security/AUDIT-2026-11-19.md`. It is the project's own work, not an independent review.
+
 ## Known security-relevant limitations of this release candidate
 
 - **Codex fails open** if its hook program is missing: Codex then runs the action. `agentontrack run codex` refuses to start unless the hook answers a test request; starting `codex` directly skips that check.

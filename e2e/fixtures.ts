@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test as base, expect, type Page } from '@playwright/test';
@@ -27,6 +27,17 @@ export interface Env {
   pair: (page: Page) => Promise<void>;
 }
 
+/**
+ * With AOT_ROUTE_LOG set to a file, every companion API request a browser test makes is appended to it (method and path only). The inventory
+ * (scripts/uat/build-inventory.mjs --routes) uses it to show which routes the browser tests really exercised, not only which they name.
+ */
+const logRoutes = (page: Page) => {
+  const file = process.env.AOT_ROUTE_LOG;
+  if (!file) return;
+  page.on('request', (r) => { try { const u = new URL(r.url()); if (u.pathname.startsWith('/api/')) appendFileSync(file, `${r.method()} ${u.pathname}
+`); } catch { /* not a URL */ } });
+};
+
 /** The real companion and engine in a disposable folder. No API is mocked. */
 export const test = base.extend<{ env: Env; fakeAgent: boolean }>({
   fakeAgent: [false, { option: true }],
@@ -47,6 +58,7 @@ export const test = base.extend<{ env: Env; fakeAgent: boolean }>({
         input: JSON.stringify({ session_id: 'e2e', cwd: root, hook_event_name: 'PreToolUse', tool_name: tool, tool_input: { command } }),
       }).stdout,
       pair: async (page) => {
+        logRoutes(page);
         await page.goto(c.url);
         await page.getByLabel('Pairing code').fill(c.newPairingCode());
         await page.getByRole('button', { name: 'Pair', exact: true }).click();

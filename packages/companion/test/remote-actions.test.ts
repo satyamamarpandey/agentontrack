@@ -67,6 +67,13 @@ describe('starting an agent from a phone needs the owner to allow it at the comp
     expect(await refused('plan.continue', { project: 'proj1', maxPhases: 3 })).toBe('mobile-execution-off');
     expect(await refused('plan.loop', { project: 'proj1', phaseId: p.state().plan!.doc.phases[0].id, rounds: 3 })).toBe('mobile-execution-off');
   });
+  it('running the check commands of a plan from a phone is execution too, and is refused while it is off (audit 2026-11-19)', async () => {
+    p.human.approvePlan(p.savePlan(decompose('Fix a bug', facts)).sha, 1);
+    mobile = false;
+    const events = p.store.all().length;
+    expect(await refused('plan.verify', { project: 'proj1', phaseId: p.state().plan!.doc.phases[0].id })).toBe('mobile-execution-off');
+    expect(p.store.all().length).toBe(events);
+  });
   it('viewing, stopping a run and stopping a sequence from the phone still work while it is off', async () => {
     mobile = false;
     expect(await refused('project.snapshot', { project: 'proj1' })).toBe('ran');
@@ -114,6 +121,30 @@ describe('reading', () => {
       const got = await refused('file.read', { project: 'proj1', path });
       expect(got.startsWith(code), `${path} -> ${got}`).toBe(true);
     }
+  });
+
+  it('a protected file is not shown under another spelling of its name, as a file or as a diff (audit 2026-11-19)', async () => {
+    for (const path of ['./GOAL.md', './/GOAL.md', 'src/../GOAL.md', '.\\GOAL.md', 'GOAL.md.', 'GOAL.md::$DATA']) {
+      const got = await refused('file.read', { project: 'proj1', path });
+      expect(/^(protected|error:|not-markdown)/.test(got), `${path} -> ${got}`).toBe(true);
+      expect(got).not.toContain('private goal text');
+    }
+    // A diff carries both versions of a file. An unknown worktree is refused anyway; a protected path is refused before the worktree is even looked up.
+    for (const path of ['.env', './.env', 'GOAL.md', '.claude/settings.local.json']) {
+      const got = await refused('diff.read', { project: 'proj1', worktree: 'wt_000000000000', path });
+      expect(got.startsWith('protected') || got.startsWith('error:'), `${path} -> ${got}`).toBe(true);
+      expect(got).not.toContain('TOKEN=abc');
+    }
+  });
+
+  it('models.list and agents.list are reads: they answer from what this computer reports, start nothing and give out no folder path (audit 2026-11-19)', async () => {
+    mobile = false; // reads must work while starting an agent from a phone is off
+    const models = await run('models.list');
+    const agents = await run('agents.list', { project: 'proj1' }) as any;
+    expect(Array.isArray(models)).toBe(true);
+    expect(Array.isArray(agents.agents)).toBe(true);
+    expect(JSON.stringify([models, agents])).not.toContain('secret-folder-name');
+    expect(calls.filter((c) => /^start|continuePlan|loopPhase/.test(c.fn))).toEqual([]);
   });
 
   it('cuts a very large file instead of sending it all', async () => {

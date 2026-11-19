@@ -62,7 +62,7 @@ async function startRun(page: Page, name: string) {
   return Number(readFileSync(join(root, `${name}.pid`), 'utf8'));
 }
 /** The page's own list, as the companion has it, read without the page's help. */
-const serverRuns = (page: Page) => page.evaluate(async () => (await (await fetch('/api/runs')).json()) as { id: string; status: string }[]);
+const serverRuns = (page: Page) => page.evaluate(async () => (await (await fetch('/api/runs', { headers: { 'x-agentontrack-csrf': localStorage.getItem('aot-csrf') ?? '' } })).json()) as { id: string; status: string }[]);
 /** From now on the page is told every run is still running, however long ago it ended: a list that has gone stale. Returns how many times it asked. */
 async function goStale(page: Page) {
   const asked = { n: 0 };

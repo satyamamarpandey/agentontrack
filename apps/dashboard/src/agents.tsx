@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { get, isDemo, post } from './api';
 import { CATALOG, supportOf, SUPPORT, type Group, type Meta } from './catalog-data';
-import { Modal } from './human';
+import { Modal, useHuman } from './human';
 import { CopyCommand as Copy } from './copy-command';
 import { Empty, Loading, Page, useLoad } from './ui';
 
@@ -49,6 +49,7 @@ export function AgentCatalog({ tick }: { tick: number }) {
   const [open, setOpen] = useState<string | null>(null);
   const [probe, setProbe] = useState<Meta | null>(null);
   const [err, setErr] = useState<Record<string, string>>({});
+  const human = useHuman(() => { core.reload(); prov.reload(); rt.reload(); });
 
   const rows = useMemo(() => CATALOG.map((m) => {
     const c = core.data?.find((a) => a.id === m.id);
@@ -71,6 +72,7 @@ export function AgentCatalog({ tick }: { tick: number }) {
   return (
     <Page title="Agents" intro="Every agent AgentOnTrack knows about, and what has really been tested. Installing an agent does not let AgentOnTrack control it: you press Connect, per project, and your own sign-in stays with the agent.">
       {probe ? <Probe meta={probe} onClose={() => setProbe(null)} /> : null}
+      {human.dialog}
       <div className="toolbar" role="search">
         <label className="sr-only" htmlFor="agent-search">Search agents</label>
         <input id="agent-search" type="search" placeholder="Search agents, editors and models" value={q} onChange={(e) => setQ(e.target.value)} name="agent-search" data-testid="agent-search" />
@@ -118,7 +120,7 @@ export function AgentCatalog({ tick }: { tick: number }) {
                   {state === 'missing' ? <button className="btn" onClick={reload}>Check again</button> : null}
                   {state === 'installed' && (m.id === 'claude-code' || m.id === 'codex') ? <button className="btn primary" onClick={async () => { setErr((x) => ({ ...x, [m.id]: '' })); try { await post(`/api/agents/${m.id}/connect`); reload(); } catch (e) { setErr((x) => ({ ...x, [m.id]: `Could not connect: ${(e as Error).message}` })); } }}>Connect</button> : null}
                   {state === 'installed' && !(m.id === 'claude-code' || m.id === 'codex') ? <button className="btn primary" onClick={() => setOpen(open === m.id ? null : m.id)} aria-expanded={open === m.id}>Connect</button> : null}
-                  {state === 'connected' && (m.id === 'claude-code' || m.id === 'codex') ? <button className="btn" onClick={async () => { await post(`/api/agents/${m.id}/disconnect`); reload(); }}>Disconnect</button> : null}
+                  {state === 'connected' && (m.id === 'claude-code' || m.id === 'codex') ? <button className="btn" onClick={() => human.ask({ title: `Disconnect ${m.name}`, detail: 'Its hooks are removed from this project, so AgentOnTrack no longer checks what it does here.', path: `/api/agents/${m.id}/disconnect` })}>Disconnect</button> : null}
                   {state === 'connected' && !(m.id === 'claude-code' || m.id === 'codex') ? <span className="muted small">Connected to this project. To remove it: <code>agentontrack uninstall {m.id}</code></span> : null}
                   {m.kind === 'model' ? <button className="btn primary" onClick={() => setProbe(m)}>Configure</button> : null}
                   {m.kind === 'editor' || m.kind === 'research' ? <button className="btn" onClick={() => setOpen(open === m.id ? null : m.id)} aria-expanded={open === m.id}>Set up</button> : null}

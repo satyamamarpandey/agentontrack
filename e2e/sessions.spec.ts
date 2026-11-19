@@ -157,7 +157,7 @@ test('sessions: rename, pin and archive are recorded by the companion; archived 
   await expect(page.getByTestId('sess-resume')).toBeDisabled();
   await expect(page.getByTestId('sess-resume-why')).toContainText('Unarchive');
   // the same change, read back from the companion without the page's help
-  const row = await page.evaluate(async () => ((await (await fetch('/api/agent-sessions?archived=1')).json()).sessions as any[]).find((s) => s.title === 'Renamed one'));
+  const row = await page.evaluate(async () => ((await (await fetch('/api/agent-sessions?archived=1', { headers: { 'x-agentontrack-csrf': localStorage.getItem('aot-csrf') ?? '' } })).json()).sessions as any[]).find((s) => s.title === 'Renamed one'));
   expect(row).toMatchObject({ archived: true, pinned: true, titleSource: 'user' });
   expect(errors).toEqual([]);
 });
@@ -246,7 +246,7 @@ test.describe('default project for mobile sessions', () => {
     await confirmDialog(page);
     await expect(card(page).getByTestId('dp-valid')).toHaveText('available');
     const shown = (await card(page).getByTestId('dp-path').textContent())!;
-    const real = await page.evaluate(async () => (await (await fetch('/api/remote/status')).json()).defaultProject);
+    const real = await page.evaluate(async () => (await (await fetch('/api/remote/status', { headers: { 'x-agentontrack-csrf': localStorage.getItem('aot-csrf') ?? '' } })).json()).defaultProject);
     expect(real).toMatchObject({ valid: true, path: shown });
     expect(shown.toLowerCase()).toContain('repo');
     await shot(page, 'default-project-set');
@@ -254,7 +254,7 @@ test.describe('default project for mobile sessions', () => {
     await page.getByTestId('dp-clear').click();
     await confirmDialog(page);
     await expect(card(page).getByTestId('dp-current')).toContainText('No default project is set');
-    expect(await page.evaluate(async () => (await (await fetch('/api/remote/status')).json()).defaultProject)).toBeNull();
+    expect(await page.evaluate(async () => (await (await fetch('/api/remote/status', { headers: { 'x-agentontrack-csrf': localStorage.getItem('aot-csrf') ?? '' } })).json()).defaultProject)).toBeNull();
     expect(errors).toEqual([]);
   });
 
@@ -269,7 +269,7 @@ test.describe('default project for mobile sessions', () => {
     await dialog.getByRole('button', { name: 'Confirm' }).click();
     await expect(dialog.getByRole('alert')).toBeVisible();
     await dialog.getByRole('button', { name: 'Cancel' }).click();
-    expect(await page.evaluate(async () => (await (await fetch('/api/remote/status')).json()).defaultProject ?? null)).toBeNull();
+    expect(await page.evaluate(async () => (await (await fetch('/api/remote/status', { headers: { 'x-agentontrack-csrf': localStorage.getItem('aot-csrf') ?? '' } })).json()).defaultProject ?? null)).toBeNull();
     expect(errors).toEqual([]);
   });
 
@@ -281,10 +281,10 @@ test.describe('default project for mobile sessions', () => {
     await confirmDialog(page);
     await expect(card(page).getByTestId('dp-valid')).toHaveText('available');
     // archive the project through the companion's own route, as the Projects screen does
-    const id = await page.evaluate(async () => (await (await fetch('/api/remote/status')).json()).defaultProject.projectId as string);
+    const id = await page.evaluate(async () => (await (await fetch('/api/remote/status', { headers: { 'x-agentontrack-csrf': localStorage.getItem('aot-csrf') ?? '' } })).json()).defaultProject.projectId as string);
     expect(id).toMatch(/^[a-f0-9]{24}$/);
     const archived = await page.evaluate(async (pid) => {
-      const csrf = (await (await fetch('/api/session')).json()).csrf as string;
+      const csrf = localStorage.getItem('aot-csrf') ?? '';
       return (await fetch('/api/projects/update', { method: 'POST', headers: { 'content-type': 'application/json', 'x-agentontrack-csrf': csrf }, body: JSON.stringify({ id: pid, archived: true }) })).status;
     }, id);
     test.skip(archived !== 200, `archiving needs a proof on this build (answered ${archived}); the unavailable wording is covered by the companion's tests`);

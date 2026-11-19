@@ -97,8 +97,8 @@ describe('a run inside an isolated worktree', () => {
   it('refuses to start when the hooks would not run from the worktree', async () => {
     const s = await pair();
     const wt = await (await api(s, '/api/worktrees', { taskId: 't', agent: 'claude-code' })).json();
-    const f = join(root, '.claude', 'settings.local.json');
-    writeFileSync(f, readFileSync(f, 'utf8').replaceAll(CLI.replaceAll('\\', '\\\\'), join(dir, 'missing.js').replaceAll('\\', '\\\\')));
+    // The hooks AgentOnTrack wrote, but pointing at a program that is not there: a genuine, broken connection.
+    installHooks('claude-code', root, `"${process.execPath}" "${join(dir, 'missing.js')}"`);
     const r = await startRun(s, { worktreeId: wt.id });
     expect(r.status).toBe(409);
     expect((await r.json()).error).toMatch(/Not started in the worktree/);

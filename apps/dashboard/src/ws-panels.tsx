@@ -103,8 +103,10 @@ export function AgentTab({ tick }: { tick: number }) {
 /* ---------- Right panel ---------- */
 
 function AgentsList({ agents, team, reload }: { agents: any[]; team: any; reload: () => void }) {
+  const { ask, dialog } = useHuman(reload);
   return (
     <>
+      {dialog}
       <p className="muted small" data-testid="one-system">Every agent here reports to one record, under one goal and one set of approvals. Each keeps its own login and model: AgentOnTrack never asks for provider credentials.</p>
       {agents.map((a) => {
         const roles = team.members.filter((m: any) => m.agent === a.id).map((m: any) => m.role);
@@ -115,7 +117,7 @@ function AgentsList({ agents, team, reload }: { agents: any[]; team: any; reload
             <div className="small">{roles.length ? <>Role: {roles.join(', ')}</> : <span className="muted">No role assigned</span>}</div>
             <div className="small muted">{a.coverage.hostFailMode === 'open' ? 'If its hook cannot run, the action runs anyway.' : 'If its hook cannot run, the action is blocked.'}</div>
             {a.provider ? <p className="muted small">Connect in your terminal, so you can review the files it writes: <code>{a.connect}</code></p> : a.id !== 'hermes' ? <div className="row">{a.hooksInstalled
-              ? <button className="btn small" onClick={async () => { await post(`/api/agents/${a.id}/disconnect`); reload(); }}>Disconnect</button>
+              ? <button className="btn small" onClick={() => ask({ title: `Disconnect ${a.name}`, detail: 'Its hooks are removed from this project, so AgentOnTrack no longer checks what it does here.', path: `/api/agents/${a.id}/disconnect` })}>Disconnect</button>
               : <button className="btn small primary" disabled={!a.installed} onClick={async () => { await post(`/api/agents/${a.id}/connect`); reload(); }}>Connect</button>}</div>
               : <p className="muted small">Hermes hooks live in your own config. Run <code>agentontrack install hermes</code>.</p>}
           </div>

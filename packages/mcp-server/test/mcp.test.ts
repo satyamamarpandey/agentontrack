@@ -85,6 +85,32 @@ describe.each(['legacy', 'auto'] as const)('MCP over stdio, %s negotiation', (mo
     await client.close();
   });
 
+  it('every tool an agent can call is one of the known ones, and each reads or proposes without changing what is allowed (audit 2026-11-19)', async () => {
+    const client = await connect();
+    const names = (await client.listTools()).tools.map((t) => t.name).sort();
+    expect(names).toEqual(['approvals.list', 'decision.propose', 'decisions.list', 'evidence.claim', 'evidence.list', 'goal.history', 'goal.propose', 'handoff.prepare', 'project.status', 'runtime.diagnostics', 'safety.coverage', 'usage.summary', 'workflow.suggest']);
+    const call = async (name: string, args: Record<string, unknown> = {}) => JSON.parse(((await client.callTool({ name, arguments: args })) as any).content[0].text);
+    const snapshot = () => { const p = new Project(root); try { const s = p.state(); return JSON.stringify({ goal: s.goal?.statement, goalVersion: s.goal?.version, policy: s.policy, policyVersion: s.policyVersion, tasks: [...s.tasks.keys()], approved: [...s.approvals.values()].filter((a) => a.status === 'granted').length, decisions: s.decisions.length }); } finally { p.close(); } };
+    const before = snapshot();
+    // safety.coverage: a read of what was recorded.
+    expect(Array.isArray(await call('safety.coverage'))).toBe(true);
+    // decision.propose: recorded as a proposal, never as a decision.
+    const proposed = await call('decision.propose', { title: 'Turn off approvals', rationale: 'Faster' });
+    expect(proposed.effective).toBe(false);
+    const decisions = await call('decisions.list');
+    expect(decisions.approved).toEqual([]);
+    expect(decisions.open.some((x: any) => x.kind === 'decision' && x.summary === 'Turn off approvals')).toBe(true);
+    // handoff.prepare: a packet for the next agent. It carries no usable approval.
+    const handoff = await call('handoff.prepare', { taskId: 't' });
+    expect(JSON.stringify(handoff)).not.toMatch(/"status":"granted"/);
+    // usage.summary: totals as recorded.
+    const usage = await call('usage.summary');
+    expect(typeof usage).toBe('object');
+    // Nothing a person decides has moved: same goal, policy, tasks, approvals and decisions.
+    expect(snapshot()).toBe(before);
+    await client.close();
+  });
+
   it('a claim cannot verify a task', async () => {
     const client = await connect();
     await client.callTool({ name: 'evidence.claim', arguments: { taskId: 't', text: 'done' } });

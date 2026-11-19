@@ -104,8 +104,12 @@ if (url && code) {
   const paired = await fetch(`${url}/api/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code }) });
   const cookie = paired.headers.get('set-cookie')?.split(';')[0];
   check('The right pairing code works', paired.status === 200 && cookie);
-  const st = await fetch(`${url}/api/state`, { headers: { cookie } });
+  const csrf = (await paired.json().catch(() => ({}))).csrf ?? '';
+  const st = await fetch(`${url}/api/state`, { headers: { cookie, 'x-agentontrack-csrf': csrf } });
   check('Paired dashboard reads the real record', st.status === 200 && (await st.json()).integrity.ok);
+  // From 1.0.0-rc.8: the session cookie alone reads nothing (a browser sends it to every local port). An older build still answers 200 here, which is reported, not failed.
+  const bare = await fetch(`${url}/api/state`, { headers: { cookie } });
+  console.log(`  cookie-only read answered ${bare.status} (${bare.status === 403 ? 'refused, as from rc.8' : 'accepted: a build before rc.8'})`);
 }
 // Ctrl+C on Unix, as a person would. A console control event on a Windows runner ended this test from outside, silently, so there it stops the program's own process tree. Ctrl+C on Windows was checked on a desktop machine.
 if (win) sh('taskkill', ['/F', '/T', '/PID', String(term.pid)]);

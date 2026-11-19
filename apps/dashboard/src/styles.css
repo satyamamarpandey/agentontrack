@@ -177,6 +177,8 @@ details summary { cursor: pointer; color: var(--link); font-size: 12px; min-heig
 details ul { margin: 2px 0; padding-left: 16px; }
 
 .table-wrap { overflow-x: auto; }
+/* A long unbroken line (a command, a path, a hash) wraps inside its card instead of making the whole page scroll sideways on a phone. */
+.card li, .card p, .card dd { overflow-wrap: anywhere; }
 table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
 th { text-align: left; color: var(--muted); font: 500 10.5px/1.4 var(--font-mono); border-bottom: 1px solid var(--border); padding: 7px 8px; white-space: nowrap; text-transform: uppercase; letter-spacing: 0.06em; }
 td { border-bottom: 1px solid var(--border); padding: 7px 8px; vertical-align: top; }

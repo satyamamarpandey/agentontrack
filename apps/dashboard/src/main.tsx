@@ -24,7 +24,12 @@ try { document.documentElement.dataset.theme = localStorage.getItem('bl-theme') 
 
 const phone = new URLSearchParams(location.search).get('m') === '1';
 const root = createRoot(document.getElementById('root')!);
-if (phone) {
+// A static host cannot send frame-ancestors, so the page itself refuses to work inside another site's frame, where clicks could be steered.
+let framed = false;
+try { framed = window.top !== window.self; } catch { framed = true; }
+if (framed) {
+  root.render(<p className="center" role="alert" data-testid="framed">AgentOnTrack does not run inside another page. <a href={location.href} target="_top" rel="noopener noreferrer">Open it in its own tab</a>.</p>);
+} else if (phone) {
   void Promise.all([import('./mobile'), import('./mobile.css')]).then(([m]) => root.render(<m.MobileApp />));
 } else {
   root.render(<Root />);

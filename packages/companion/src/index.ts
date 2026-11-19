@@ -6,14 +6,15 @@ import type { AddressInfo } from 'node:net';
 import { homedir, hostname } from 'node:os';
 import { basename, dirname, extname, relative, sep, isAbsolute, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { failoverOptions, runtimeFacts, coverageFor, PROVIDERS, providerInstalled, hooksInstalled, hookSelfTest, agentEnv, killTree, apiKeyVarsPresent, classifyClaudeMethod, classifyCodexStatus, mayStartUnder, creditGuard, classifyModelBilling, type AuthMode, buildCodexExecArgs, mirrorHooksToWorktree, CodexAppServer, mapCodexTool, parseCodexLine, LineSplitter, codexUsageRecord, installHooks, probeLocalModel, uninstallHooks, discoverModels, describeAgents, type InitReport, type Seen } from '@agentontrack/adapters';
+import { failoverOptions, runtimeFacts, coverageFor, PROVIDERS, providerInstalled, hooksInstalled, hookSelfTest, agentEnv, killTree, apiKeyVarsPresent, classifyClaudeMethod, classifyCodexStatus, mayStartUnder, adoptHookTrust, creditGuard, classifyModelBilling, type AuthMode, buildCodexExecArgs, mirrorHooksToWorktree, CodexAppServer, mapCodexTool, parseCodexLine, LineSplitter, codexUsageRecord, installHooks, probeLocalModel, uninstallHooks, discoverModels, describeAgents, type InitReport, type Seen } from '@agentontrack/adapters';
 import { newPipeline, parsePipeline, authorizeStage, startStage, finishStage, PipelineError, PIPELINE_STAGES, CLAUDE_ROLE_SUGGESTIONS, unattendedChainAllowed, summary as pipelineSummary, type Pipeline } from '@agentontrack/core';
+import { cleanRelative } from '@agentontrack/core';
 import { isProviderSessionId, newSessionId, projectSessions, searchSessions, type SessionView } from '@agentontrack/core';
 import { planFacts as planFactsOf, planView as planViewOf } from './plan-view.js';
 import { makeExecutor, snapshotOf, stillTheSameFolder } from './remote-actions.js';
 import { terminate, type Killable } from './terminate.js';
 import { IdempotencyStore } from './idempotency.js';
-import { loadRemote, newRemoteFile, Refusal, saveRemote, type RemoteFile } from './remote-host.js';
+import { loadRemote, newRemoteFile, Refusal, revokeInFile, saveRemote, unlinkFile, type RemoteFile } from './remote-host.js';
 import { RemoteService } from './remote-service.js';
 import { fingerprint as fingerprintOf } from '@agentontrack/remote';
 import { FirestoreTransport, type Emulators, type FirebaseConfig } from './remote-transport.js';
@@ -165,6 +166,34 @@ export function parseGithubUrl(raw: string): string | null {
   return m && m[1] !== '.' && m[1] !== '..' && m[2] !== '.' && m[2] !== '..' ? `https://github.com/${m[1]}/${m[2]}.git` : null;
 }
 
+/** The real location of a path that may not exist yet: links are followed through the deepest folder that does exist. Compared without case on Windows and macOS. */
+function realLocation(p: string): string {
+  let cur = resolve(p);
+  const tail: string[] = [];
+  while (!existsSync(cur)) { const up = dirname(cur); if (up === cur) break; tail.unshift(basename(cur)); cur = up; }
+  let real: string;
+  try { real = join(realpathSync.native(cur), ...tail); } catch { real = resolve(p); }
+  return process.platform === 'win32' || process.platform === 'darwin' ? real.toLowerCase() : real;
+}
+/** Folders under a home folder that hold keys and sign-ins. A project is never one of them, or inside one. */
+const CREDENTIAL_FOLDERS = ['.ssh', '.aws', '.azure', '.gnupg', '.kube', '.docker', '.config', '.claude', '.codex', '.hermes', '.npm', join('AppData', 'Roaming'), join('Library', 'Application Support'), join('Library', 'Keychains')];
+/**
+ * Why a folder cannot be a project, or null. Judged on the real location, so another spelling of the same folder (different case, a link,
+ * a short name) is the same folder: not a drive root, not the home folder or a folder that contains it, not AgentOnTrack's own data folder
+ * (its files hold keys, the phone link and the grants), and not a folder of credentials.
+ */
+export function unsuitableProjectRoot(path: string): string | null {
+  const message = 'Choose a folder made for this project, not a drive root, your home folder or AgentOnTrack\'s own data folder';
+  const target = realLocation(path);
+  const within = (inner: string, outer: string) => inner === outer || inner.startsWith(outer.endsWith(sep) ? outer : outer + sep);
+  if (dirname(target) === target) return message;
+  const home = realLocation(homedir());
+  const data = realLocation(agentontrackHome());
+  if (within(home, target) || within(data, target) || within(target, data)) return message;
+  if (CREDENTIAL_FOLDERS.some((name) => within(target, realLocation(join(homedir(), name))))) return 'That folder holds sign-ins or keys, so it cannot be a project';
+  return null;
+}
+
 const SKIP = new Set(['node_modules', 'vendor', 'dist', 'build', 'target', '__pycache__', 'venv', 'AppData', 'Library']);
 /** Breadth-first, bounded in depth, in folders visited, and in results. A repository is reported and not entered. */
 export function discoverRepos(top: string, depth: number, registered: Set<string>): { dir: string; found: { path: string; name: string; registered: boolean }[]; truncated: boolean } {
@@ -297,13 +326,20 @@ export async function startCompanion(opts: CompanionOptions = {}): Promise<Compa
   const register = registerProject;
   if (opts.root) register(opts.root);
 
+  /** The hook command this companion writes when the person presses Connect. */
+  const ownHookCommand = () => opts.selfCommand ?? `"${process.execPath.replace(/\\/g, '/')}" "${resolve(here, '..', '..', 'cli', 'dist', 'index.js').replace(/\\/g, '/')}"`;
   const projectFor = (id: string | null): { entry: Registered; p: Project } => {
     const reg = loadRegistry();
     const entry = id ? reg.find((r) => r.id === id) : reg[0];
     if (!entry) throw new HttpError(404, 'No such project');
     if (!existsSync(entry.root)) throw new HttpError(409, `Project folder is missing: ${entry.root}. It may have been moved; attach it at its new path.`);
     let p = projects.get(entry.id);
-    if (!p) { p = new Project(entry.root); projects.set(entry.id, p); }
+    if (!p) {
+      p = new Project(entry.root); projects.set(entry.id, p);
+      // Once per project per run of the companion: hooks written by an earlier version of THIS installation are recorded as its own, so
+      // upgrading does not ask the person to connect again. A hook that is not exactly this installation's command stays untrusted.
+      for (const rt of ['claude-code', 'codex'] as const) { try { adoptHookTrust(rt, entry.root, [ownHookCommand()]); } catch { /* not adopted */ } }
+    }
     return { entry, p };
   };
 
@@ -650,6 +686,8 @@ ${brief}`.slice(0, 19_900), model: o.reviewerModel, maxBudgetUsd: o.maxUsd }), {
   /* ---------- The phone link ---------- */
   let remote: RemoteService | null = null;
   const remoteFileNow = (): RemoteFile | null => loadRemote();
+  /** The phones as stored, for when the link service is not running: they must still be listed, or they could not be revoked. */
+  const remoteDevicesOf = (file: RemoteFile) => file.devices.map(({ did, name, level, fingerprint, trustedAt, revokedAt }) => ({ did, name, level, fingerprint, trustedAt, ...(revokedAt ? { revokedAt } : {}) }));
   /** For the desktop only: the name and the resolved folder, and whether the folder is still the one that was chosen. */
   const defaultProjectView = (d: RemoteFile['defaultProject'] | null) => {
     if (!d) return null;
@@ -1169,8 +1207,13 @@ ${brief}`.slice(0, 19_900), model: o.reviewerModel, maxBudgetUsd: o.maxUsd }), {
     const sess = sessionOf(req);
     if (!sess) throw new HttpError(401, 'Not paired');
     const [key, session] = sess;
-    if (path === '/api/session' && method === 'GET') return json(res, 200, { csrf: session.csrf, expiresAt: session.expiresAt });
-    if (method !== 'GET' && !safeEq(String(req.headers['x-agentontrack-csrf'] ?? ''), session.csrf)) throw new HttpError(403, 'Missing CSRF token');
+    // A browser sends the cookie to EVERY port on this host, so a program serving a page on another local port can read it when the person opens
+    // that page. The cookie alone therefore proves nothing: a local session must also show the second value, which the dashboard keeps in storage
+    // that browsers do isolate by port. It is never given to a caller that does not already hold it, and it is needed for reads as well as writes.
+    const localSession = !session.origin && !session.surface;
+    const csrfOk = safeEq(String(req.headers['x-agentontrack-csrf'] ?? ''), session.csrf);
+    if (path === '/api/session' && method === 'GET') return json(res, 200, localSession && !csrfOk ? { csrf: null, expiresAt: session.expiresAt } : { csrf: session.csrf, expiresAt: session.expiresAt });
+    if ((method !== 'GET' || localSession) && !csrfOk) throw new HttpError(403, 'Missing CSRF token');
 
     if ((session.origin || session.surface) && method === 'POST' && !REMOTE_FREE.has(path)) requireTerminalProof(req, path, key, await readBody(req), url.searchParams.get('project'));
     const projectId = url.searchParams.get('project');
@@ -1182,7 +1225,8 @@ ${brief}`.slice(0, 19_900), model: o.reviewerModel, maxBudgetUsd: o.maxUsd }), {
       let timer: NodeJS.Timeout | undefined;
       const send = () => {
         try {
-          if (!sessions.has(key)) throw new Error('session ended');
+          const live = sessions.get(key);
+          if (!live || live.expiresAt < Date.now()) throw new Error('session ended');
           for (const e of p.store.since(last)) {
             res.write(`id: ${e.seq}\ndata: ${JSON.stringify(eventView(e))}\n\n`);
             last = e.seq;
@@ -1206,6 +1250,10 @@ ${brief}`.slice(0, 19_900), model: o.reviewerModel, maxBudgetUsd: o.maxUsd }), {
       if (session.origin || session.surface) return json(res, 200, { challengeId: '', code: null, inTerminal: true, needsPassphrase: p.approverEnrolled() });
       const id = randomBytes(8).toString('hex');
       const value = randomBytes(2).toString('hex');
+      // Codes that ran out are dropped here, and a session holds a few at most, so the list cannot grow without limit.
+      for (const [k, v] of challenges) if (v.expires < Date.now()) challenges.delete(k);
+      const mine = [...challenges].filter(([, v]) => v.session === key);
+      for (const [k] of mine.slice(0, Math.max(0, mine.length - 7))) challenges.delete(k);
       challenges.set(id, { code: value, expires: Date.now() + 120_000, session: key });
       return json(res, 200, { challengeId: id, code: value, needsPassphrase: p.approverEnrolled() });
     }
@@ -1223,10 +1271,12 @@ ${brief}`.slice(0, 19_900), model: o.reviewerModel, maxBudgetUsd: o.maxUsd }), {
       const body = z.object({ path: z.string().min(1).max(1000), create: z.boolean().default(false), gitInit: z.boolean().default(false) }).parse(await readBody(req));
       if (!isAbsolute(body.path)) throw new HttpError(400, 'Use an absolute path');
       // A project is a folder of its own: never a drive root, a home folder, or anywhere inside AgentOnTrack's own data.
-      const target = resolve(body.path);
-      const home = resolve(agentontrackHome());
-      if (dirname(target) === target || target === resolve(homedir()) || target === home || target.startsWith(home + sep)) throw new HttpError(400, 'Choose a folder made for this project, not a drive root, your home folder or AgentOnTrack\'s own data folder');
+      const refused = unsuitableProjectRoot(body.path);
+      if (refused) throw new HttpError(400, refused);
       if (body.create) mkdirSync(body.path, { recursive: true });
+      // Checked again once it exists: a link created in between must not change what the name means.
+      const refusedNow = unsuitableProjectRoot(body.path);
+      if (refusedNow) throw new HttpError(400, refusedNow);
       if (!existsSync(body.path) || !statSync(body.path).isDirectory()) throw new HttpError(400, 'That folder does not exist');
       if (body.gitInit && existsSync(body.path) && !existsSync(join(body.path, '.git'))) {
         const g = spawnSync('git', ['init', '-q', '-b', 'main'], { cwd: body.path, encoding: 'utf8', timeout: 30_000 });
@@ -1251,8 +1301,7 @@ ${brief}`.slice(0, 19_900), model: o.reviewerModel, maxBudgetUsd: o.maxUsd }), {
       if (!url) throw new HttpError(400, 'Use a GitHub address such as https://github.com/owner/repo');
       if (!isAbsolute(body.dest)) throw new HttpError(400, 'Use an absolute path for the new folder');
       const dest = resolve(body.dest);
-      const home = resolve(agentontrackHome());
-      if (dirname(dest) === dest || dest === resolve(homedir()) || dest === home || dest.startsWith(home + sep)) throw new HttpError(400, 'Choose a new folder for this project');
+      if (unsuitableProjectRoot(dest)) throw new HttpError(400, 'Choose a new folder for this project');
       if (existsSync(dest) && (!statSync(dest).isDirectory() || readdirSync(dest).length)) throw new HttpError(409, 'That folder already exists and is not empty. Choose a new one.');
       mkdirSync(dirname(dest), { recursive: true });
       const out = await runGit(['clone', '--', url, dest]);
@@ -1301,11 +1350,14 @@ ${brief}`.slice(0, 19_900), model: o.reviewerModel, maxBudgetUsd: o.maxUsd }), {
       const { entry } = projectFor(projectId);
       const runtime = agentAction[1] as 'claude-code' | 'codex';
       if (agentAction[2] === 'connect') {
-        const cli = resolve(here, '..', '..', 'cli', 'dist', 'index.js').replace(/\\/g, '/');
-        const r = installHooks(runtime, entry.root, opts.selfCommand ?? `"${process.execPath.replace(/\\/g, '/')}" "${cli}"`);
+        const r = installHooks(runtime, entry.root, ownHookCommand());
         return json(res, 200, { connected: true, path: r.path, note: runtime === 'codex' ? 'Codex skips a hook until you trust it with /hooks.' : undefined });
       }
-      uninstallHooks(runtime, entry.root);
+      // Removing the hooks removes the gate, so it is a human action like an approval: a fresh code, and the passphrase where one is enrolled.
+      const { p } = projectFor(projectId);
+      const body = z.object({ challengeId: z.string().optional(), confirm: z.string().optional(), passphrase: z.string().optional() }).parse(await readBody(req));
+      requireHumanProof(req, key, body, p, `disconnect ${runtime} from this project`);
+      try { uninstallHooks(runtime, entry.root); } finally { p.lock(); }
       return json(res, 200, { connected: false });
     }
     if (path === '/api/probe' && method === 'POST') {
@@ -1425,8 +1477,10 @@ ${brief}`.slice(0, 19_900), model: o.reviewerModel, maxBudgetUsd: o.maxUsd }), {
     if (path === '/api/file' && method === 'POST') {
       const b = z.object({ path: z.string().min(1).max(1000), content: z.string(), baseHash: z.string().nullable() }).parse(await readBody(req));
       return json(res, 200, workspace(() => {
-        if (p.isProtectedPath(b.path.replace(/\\/g, '/'))) throw new WorkspaceError(403, 'This is a protected file: goals, safety and instruction files, and agent hooks change only through the confirmation path. Use Save protected file.');
-        return p.saveWorkspaceFile(b.path, b.content, b.baseHash, 'workspace');
+        // Checked on the path as it will be written, cleaned and resolved through any link: not on the text that was sent.
+        const rel = cleanRelative(entry.root, b.path);
+        if (p.isProtectedPath(rel)) throw new WorkspaceError(403, 'This is a protected file: goals, safety and instruction files, and agent hooks change only through the confirmation path. Use Save protected file.');
+        return p.saveWorkspaceFile(rel, b.content, b.baseHash, 'workspace');
       }));
     }
     if (path === '/api/spec/check' && method === 'GET') return json(res, 200, workspace(() => checkSpec(p.readWorkspaceFile(url.searchParams.get('path') ?? '').content, entry.root)));
@@ -1611,7 +1665,7 @@ ${brief}`.slice(0, 19_900), model: o.reviewerModel, maxBudgetUsd: o.maxUsd }), {
       if (!file) return json(res, 200, { exists: false });
       const fp = await fingerprintOf(file.identity.pub);
       if (remote) return json(res, 200, { exists: true, linked: true, ...(await remote.status()), defaultProject: defaultProjectView(file.defaultProject ?? null) });
-      return json(res, 200, { exists: true, linked: !!file.link, running: false, online: false, lastError: file.link ? 'Starting, or not reachable yet' : '', degraded: null, computerId: file.computerId, name: file.name, fingerprint: fp, devices: [], pending: [], maxUsdPerRun: file.maxUsdPerRun, defaultProject: defaultProjectView(file.defaultProject ?? null) });
+      return json(res, 200, { exists: true, linked: !!file.link, running: false, online: false, lastError: file.link ? 'Starting, or not reachable yet' : '', degraded: null, computerId: file.computerId, name: file.name, fingerprint: fp, devices: remoteDevicesOf(file), pending: [], maxUsdPerRun: file.maxUsdPerRun, defaultProject: defaultProjectView(file.defaultProject ?? null) });
     }
     if (path === '/api/remote/prepare' && method === 'POST') {
       let file = remoteFileNow();
@@ -1671,13 +1725,21 @@ ${brief}`.slice(0, 19_900), model: o.reviewerModel, maxBudgetUsd: o.maxUsd }), {
     // Taking access away needs no ceremony: it only ever does less.
     if (path === '/api/remote/devices/revoke' && method === 'POST') {
       const b = z.object({ did: z.string().min(1).max(64) }).parse(await readBody(req));
-      if (!remote || !(await remote.revoke(b.did))) throw new HttpError(404, 'No such phone');
-      return json(res, 200, await remote.status());
+      if (remote) {
+        if (!(await remote.revoke(b.did))) throw new HttpError(404, 'No such phone');
+        return json(res, 200, await remote.status());
+      }
+      // The link service is not running (offline, or it could not start). Revoking still works: it is done on the stored state, which the service reads when it starts.
+      const file = remoteFileNow();
+      if (!file || revokeInFile(file, b.did) === 0) throw new HttpError(404, 'No such phone');
+      saveRemote(file);
+      return json(res, 200, { exists: true, linked: !!file.link, running: false, devices: remoteDevicesOf(file), pending: [] });
     }
     if (path === '/api/remote/unlink' && method === 'POST') {
-      const file = remoteFileNow();
       if (remote) { for (const d of (await remote.status()).devices.filter((x) => !x.revokedAt)) await remote.revoke(d.did); await remote.stop(); remote = null; }
-      if (file) { delete file.link; saveRemote(file); }
+      // Read again AFTER the service has stopped and saved: writing back a copy taken earlier would undo the revocations just made.
+      const file = remoteFileNow();
+      if (file) saveRemote(unlinkFile(file));
       return json(res, 200, { linked: false });
     }
     const stop = /^\/api\/runs\/(run_\w+)\/stop$/.exec(path);

@@ -31,7 +31,14 @@ export const currentPort = () => sessionStorage.getItem('aot-port') ?? '47631';
 
 /** A path that already names its project keeps it: the project grid reads several at once. */
 const withProject = (path: string) => (project && !/[?&]project=/.test(path) ? `${path}${path.includes('?') ? '&' : '?'}project=${project}` : path);
-const auth = (): Record<string, string> => (token ? { authorization: `Bearer ${token}` } : {});
+/**
+ * Sent with every request, reads included. The browser gives the session cookie to every port on this host, so the companion does not accept the
+ * cookie by itself: it also wants this value, which is kept in storage that the browser isolates by port.
+ */
+const CSRF_KEY = 'aot-csrf';
+const remember = (value: string) => { try { if (value) localStorage.setItem(CSRF_KEY, value); else localStorage.removeItem(CSRF_KEY); } catch { /* storage blocked: this tab still works until it is reloaded */ } };
+const recall = (): string => { try { return localStorage.getItem(CSRF_KEY) ?? ''; } catch { return ''; } };
+const auth = (): Record<string, string> => ({ ...(token ? { authorization: `Bearer ${token}` } : {}), ...(csrf ? { 'x-agentontrack-csrf': csrf } : {}) });
 
 /** The address that needs no permission from the browser, because the page and the companion are then the same origin. */
 export const localAddress = () => `http://127.0.0.1:${currentPort()}/`;
@@ -119,7 +126,10 @@ export async function resumeSession(): Promise<boolean> {
   try {
     const h = await get<{ paired: boolean }>('/api/health');
     if (!h.paired) { token = ''; sessionStorage.removeItem('aot-token'); return false; }
-    const s = await get<{ csrf: string }>('/api/session');
+    if (!isPublicSite()) csrf = recall();
+    const s = await get<{ csrf: string | null }>('/api/session');
+    // A local session whose second value this browser no longer holds cannot be resumed: pair again.
+    if (!s.csrf) { csrf = ''; return false; }
     csrf = s.csrf;
     return true;
   } catch {
@@ -132,12 +142,13 @@ export async function pair(code: string): Promise<void> {
   const out = await r.json().catch(() => ({}));
   if (!r.ok) throw new ApiError(r.status, out.error ?? 'Pairing failed');
   csrf = out.csrf;
-  if (out.token) { token = out.token; sessionStorage.setItem('aot-token', token); }
+  if (out.token) { token = out.token; sessionStorage.setItem('aot-token', token); } else remember(csrf);
 }
 
 export function forgetSession() {
   token = '';
   csrf = '';
+  remember('');
   sessionStorage.removeItem('aot-token');
 }
 

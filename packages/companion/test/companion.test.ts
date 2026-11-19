@@ -92,6 +92,31 @@ describe('bridge attacks', () => {
     expect((await fetch(`${origin}/api/state`, { headers: { cookie: 'bl_session=attackerchosen' } })).status).toBe(401);
   });
 
+  it('a stolen session cookie alone can read nothing, learn no token and approve nothing', async () => {
+    // A browser sends this cookie to every port on 127.0.0.1, so a page served by another local program receives it. That program then calls the companion directly.
+    const s = await pair();
+    const thief = { cookie: s.cookie };
+    const snapshot = async () => JSON.stringify(await (await api(s, '/api/state')).json());
+    const before = await snapshot();
+    // It cannot obtain the second value, as a cookie or as a bearer token.
+    const viaCookie = await fetch(`${origin}/api/session`, { headers: thief });
+    expect(viaCookie.status).toBe(200);
+    expect((await viaCookie.json()).csrf).toBeNull();
+    const viaBearer = await fetch(`${origin}/api/session`, { headers: { authorization: `Bearer ${s.cookie.split('=')[1]}` } });
+    expect((await viaBearer.json()).csrf ?? null).toBeNull();
+    // Without it, reads and writes are both refused, and no confirmation code is issued.
+    for (const path of ['/api/state', '/api/files', '/api/approvals', '/api/events/stream', '/api/discovery', '/api/remote/status']) expect((await fetch(`${origin}${path}`, { headers: thief })).status, path).toBe(403);
+    expect((await fetch(`${origin}/api/state`, { headers: { authorization: `Bearer ${s.cookie.split('=')[1]}` } })).status).toBe(403);
+    for (const path of ['/api/challenge', '/api/approvals/approve', '/api/policy/profile', '/api/tasks', '/api/settings/unattended', '/api/unpair']) {
+      expect((await fetch(`${origin}${path}`, { method: 'POST', headers: { ...thief, 'content-type': 'application/json' }, body: '{}' })).status, path).toBe(403);
+    }
+    // Still paired, and the record is exactly as it was: the refused unpair did not end the session either.
+    expect(await snapshot()).toBe(before);
+    // The dashboard, which holds both values, still works.
+    expect((await fetch(`${origin}/api/session`, { headers: { ...thief, 'x-agentontrack-csrf': s.csrf } }).then((r) => r.json())).csrf).toBe(s.csrf);
+    expect((await fetch(`${origin}/api/state`, { headers: { ...thief, 'x-agentontrack-csrf': s.csrf } })).status).toBe(200);
+  });
+
   it('pairing codes are single-use and lock after repeated wrong guesses', async () => {
     const code = c.newPairingCode();
     const send = (value: string) => fetch(`${origin}/api/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: value }) });
@@ -353,7 +378,7 @@ describe('projects, runs and data', () => {
     p.store.append({ type: 'test.marker', actor: { kind: 'system' }, payload: { n: 1 } });
     p.close();
     const ac = new AbortController();
-    const r = await fetch(`${origin}/api/events/stream?since=${before}`, { headers: { cookie: s.cookie }, signal: ac.signal });
+    const r = await fetch(`${origin}/api/events/stream?since=${before}`, { headers: { cookie: s.cookie, 'x-agentontrack-csrf': s.csrf }, signal: ac.signal });
     const reader = r.body!.getReader();
     const { value } = await reader.read();
     ac.abort();

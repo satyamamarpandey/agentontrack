@@ -130,6 +130,9 @@ test('the administrator signs in, is recognised only once listed as administrato
   await expect(drawer.locator('.badge', { hasText: /^approved$/ })).toBeVisible({ timeout: 15_000 });
   await drawer.getByTestId('admin-notes').fill('Met at the meetup; Windows + Claude Code, a good fit.');
   await drawer.getByTestId('save-notes').click();
+  // The note is kept where only the administrator can read it, and not inside the application, which its applicant can read.
+  await expect.poll(async () => (await ownerRead(`applicationNotes/${APPLICANT_ID}`))?.notes ?? null, { timeout: 15_000 }).toBe('Met at the meetup; Windows + Claude Code, a good fit.');
+  expect((await ownerRead(`applications/${APPLICANT_ID}`))!.notes).toBeUndefined();
   await drawer.getByTestId('create-invite').click();
   const linkBox = apage.getByTestId('invite-link');
   await expect(linkBox).toBeVisible({ timeout: 15_000 });
@@ -197,6 +200,13 @@ test('the applicant opens the link, creates the account with the invited address
   await expect(tpage.getByTestId('join-member')).toBeVisible({ timeout: 20_000 });
   const token = await signInRest(APPLICANT, 'applicant-password-1');
   expect((await commit(token, `invites/${inviteHash}`, { status: str('redeemed'), redeemedBy: str(testerUid) }, ['redeemedAt'], ['status', 'redeemedBy', 'redeemedAt'])).status).toBe(403);
+  // The applicant, now a verified member, can read their own application but never the administrator's private notes about it (audit 2026-11-19).
+  const own = await readDoc(token, `applications/${APPLICANT_ID}`);
+  expect(own.status).toBe(200);
+  expect(JSON.stringify(await own.json())).not.toContain('Met at the meetup');
+  expect((await readDoc(token, `applicationNotes/${APPLICANT_ID}`)).status, 'reading the private notes').toBe(403);
+  expect((await fetch(`${DOCS}/applicationNotes`, { headers: { authorization: `Bearer ${token}` } })).status, 'listing the private notes').toBe(403);
+  expect((await commit(token, `applicationNotes/${APPLICANT_ID}`, { notes: str('mine now') }, ['updatedAt'])).status, 'writing a note').toBe(403);
 });
 
 test('as a tester: the install steps, the account page, structured feedback, and the public-site dashboard with a saved summary', async () => {

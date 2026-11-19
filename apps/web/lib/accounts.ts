@@ -3,7 +3,7 @@
 import { getApp, getApps, initializeApp } from 'firebase/app';
 import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check';
 import { connectAuthEmulator, createUserWithEmailAndPassword, deleteUser, EmailAuthProvider, getAuth, GithubAuthProvider, GoogleAuthProvider, reauthenticateWithCredential, reauthenticateWithPopup, sendEmailVerification, sendPasswordResetEmail, signInWithEmailAndPassword, signInWithPopup, signOut, updateProfile, type AuthProvider, type User } from 'firebase/auth';
-import { collection, connectFirestoreEmulator, deleteDoc, doc, getDoc, getDocs, getFirestore, query, serverTimestamp, setDoc, Timestamp, updateDoc, where, writeBatch } from 'firebase/firestore';
+import { collection, connectFirestoreEmulator, deleteDoc, deleteField, doc, getDoc, getDocs, getFirestore, query, serverTimestamp, setDoc, Timestamp, updateDoc, where, writeBatch } from 'firebase/firestore';
 import { BASE_PATH, SIGNED_IN_FLAG } from './accounts-config';
 import type { Application } from './early-access';
 import { applicationId, normalizeEmail, shortReference } from './early-access';
@@ -254,10 +254,12 @@ const byNewest = <T extends { createdAt?: Date | null; at?: Date | null; joinedA
 /** Everything the administrator may see, in one read. Small by design: a handful of friends, not a public launch. */
 export async function adminLoad(): Promise<AdminData> {
   const { db } = connect();
-  const [apps, invites, members, audit, feedback] = await Promise.all(['applications', 'invites', 'members', 'audit', 'testerFeedback'].map((c) => getDocs(collection(db, c))));
+  const [apps, invites, members, audit, feedback, notes] = await Promise.all(['applications', 'invites', 'members', 'audit', 'testerFeedback', 'applicationNotes'].map((c) => getDocs(collection(db, c))));
+  // Private notes live in their own collection, which the applicant cannot read. A note still inside an older application is shown until it is next saved.
+  const noteOf = new Map(notes!.docs.map((d) => [d.id, String(d.data().notes ?? '')]));
   const now = Date.now();
   return {
-    applications: byNewest(apps!.docs.map((d) => ({ ...(d.data() as Application), id: d.id, reference: shortReference(d.id), status: d.data().status, notes: d.data().notes, createdAt: asDate(d.data().createdAt), reviewedAt: asDate(d.data().reviewedAt) }))),
+    applications: byNewest(apps!.docs.map((d) => ({ ...(d.data() as Application), id: d.id, reference: shortReference(d.id), status: d.data().status, notes: noteOf.get(d.id) ?? d.data().notes, createdAt: asDate(d.data().createdAt), reviewedAt: asDate(d.data().reviewedAt) }))),
     invites: byNewest(invites!.docs.map((d) => { const x = d.data(); const expiresAt = asDate(x.expiresAt); return { id: d.id, email: x.email, applicationId: x.applicationId, status: x.status, expired: x.status === 'sent' && !!expiresAt && expiresAt.getTime() < now, createdAt: asDate(x.createdAt), expiresAt, redeemedAt: asDate(x.redeemedAt), redeemedBy: x.redeemedBy, note: x.note }; })),
     members: byNewest(members!.docs.map((d) => { const x = d.data(); return { uid: d.id, email: x.email, name: x.name, inviteId: x.inviteId, applicationId: x.applicationId, status: x.status, joinedAt: asDate(x.joinedAt), statusAt: asDate(x.statusAt), note: x.note }; })),
     audit: byNewest(audit!.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<AuditRow, 'id' | 'at'>), at: asDate(d.data().at) }))),
@@ -279,7 +281,9 @@ export async function adminSetStatus(id: string, status: 'pending' | 'approved' 
 export async function adminNote(id: string, notes: string): Promise<void> {
   const u = await me(); const { db } = connect();
   const batch = writeBatch(db);
-  batch.update(doc(db, 'applications', id), { notes: notes.slice(0, 2000), reviewedAt: serverTimestamp(), reviewedBy: u.uid });
+  // The note goes where only the administrator can read it, and any copy left inside the application (which its applicant can read) is removed.
+  batch.set(doc(db, 'applicationNotes', id), { notes: notes.slice(0, 2000), updatedAt: serverTimestamp(), updatedBy: u.uid });
+  batch.update(doc(db, 'applications', id), { notes: deleteField(), reviewedAt: serverTimestamp(), reviewedBy: u.uid });
   batch.set(doc(collection(db, 'audit')), auditEntry(u.uid, 'note', `application:${id}`));
   await batch.commit();
 }
@@ -288,6 +292,7 @@ export async function adminDeleteApplication(id: string): Promise<void> {
   const u = await me(); const { db } = connect();
   const batch = writeBatch(db);
   batch.delete(doc(db, 'applications', id));
+  batch.delete(doc(db, 'applicationNotes', id));
   batch.set(doc(collection(db, 'audit')), auditEntry(u.uid, 'delete-application', `application:${id}`));
   await batch.commit();
 }

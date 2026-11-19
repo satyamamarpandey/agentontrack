@@ -18,6 +18,62 @@ Website and accounts only; the desktop program is unchanged from rc.7.
 - **Privacy, terms, pricing and security pages** describe the applications, invitations, membership records, tester feedback and the audit log, what is kept and how to withdraw. The phone link remains tested against emulators only; the account features now run on a real Firebase project where the owner provisions one (`scripts/release/firebase-provision.mjs`; `docs/accounts-setup.md`).
 - **Tests:** unit tests for the application model and the design-system contract; a browser spec for the popup, the form and its accessibility on Chromium, Firefox, WebKit and a phone profile; an emulator spec that walks the whole flow (apply, review, invite, join with email confirmation, gated pages, dashboard pairing and a saved summary, revoke, reinstate, export, withdraw) and makes the black-box requests an outsider, a holder of someone else's link, or an expired link would make, straight at the database. The existing emulator specs grant membership outright where the invitation is not the subject.
 
+## 1.0.0-rc.8 (candidate; security fixes from the 2026-11-19 audit; desktop only)
+
+A security release. Every item is from a self-run audit (`docs/security/AUDIT-2026-11-19.md`), fixed with a test that fails without the fix. No independent party has reviewed it. Upgrade from rc.7: the same install command with `--version 1.0.0-rc.8`. **After upgrading, each browser pairs with the dashboard once more.** Projects stay connected: hooks that are exactly this installation's own command are recognised automatically (see "Hooks" below).
+
+**What the agent can no longer slip past the gate**
+
+- A program name with a Windows suffix or a folder is the same program: `git.exe push`, `npm.cmd publish`, `curl.exe -T`, `docker.exe push` are a push, a publish and an upload. Before, they were "an unknown program", which the standard profile allows.
+- Every way git sends commits is a push: `git send-pack`, `git subtree push`, `git lfs push`, `git svn dcommit`, `hub push`, `gh repo sync`.
+- Indirection is held for approval: defining a git alias, rewriting a remote (`git remote set-url`, `git config remote.*`, `url.*.insteadOf`), a git verb that is not one of git's own commands, `gh alias`, `gh extension`, `--upload-pack`.
+- A wrapper no longer hides the command inside it: `cmd /c`, `Start-Process`, PowerShell `-EncodedCommand` (decoded and read; unreadable text is held), `timeout 5 ...`, `sudo -u x ...`, `xargs` feeding a known program, `git rebase -x`, `git submodule foreach`.
+- More tools are recognised: `gh gist create`, `gh repo edit|delete|fork`, `gh workflow run`, `yarn npm publish`, `rsync` to another host, `rclone`, `gsutil`, `azcopy`, `ftp`, `tftp`, `bitsadmin /upload`, `git send-email`.
+- This makes the gate ask more often than before for git commands that use a personal alias (`git co`) or change a remote. That is the cost of not guessing.
+
+**The local dashboard**
+
+- The session cookie alone no longer does anything. A browser sends it to every port on 127.0.0.1, so a page served by another local program could receive it. The dashboard now also sends a second value, kept in storage that browsers isolate by port, on every request including reads, and the companion never hands that value to a caller that does not already hold it. Each browser pairs once more after upgrading.
+- A protected file cannot be saved through another spelling of its name (`./GOAL.md`, `GOAL.md.`, `GOAL.md::$DATA`, a link, a different case on Windows and macOS).
+- Disconnecting an agent removes the gate, so it now needs the same confirmation code as an approval.
+- **Hooks.** AgentOnTrack records the exact hook command it writes for each project. A hook file that came with a cloned repository, or that was changed afterwards, is never run by AgentOnTrack and no longer shows as "connected": press Connect to replace it. A project connected by an earlier version is recognised without that step when its hooks are exactly the command this installation writes.
+- A project folder is judged on its real location: the home folder, a folder that contains it, AgentOnTrack's own data folder and folders of keys and sign-ins are refused under any spelling.
+- With a valid code, acknowledging a mismatch or accepting test changes for something that does not exist is refused instead of being written to the record.
+- The public-site dashboard refuses to run inside another site's frame.
+
+**The phone link (still switched off in this release)**
+
+- "Unlink and revoke every phone" really revokes them. Before, an older copy of the state was written back and every phone stayed trusted.
+- A phone can be revoked, and is listed, while the link service is not running.
+- The phone works out the computer's fingerprint from its key instead of showing stored text; it accepts only the answer to its own request and only the snapshot it asked for; a request expires about half a minute after the phone stops waiting, so "the computer did not answer" cannot become a run that starts minutes later.
+- Running a plan's check commands from a phone needs the same setting as starting an agent from a phone. A diff of a protected file is not shown on a phone.
+
+**Accounts (Firestore rules; deployed separately from the program)**
+
+- When a member is revoked, the limited account of their computer stops with them. A member cannot name their own account as the computer's.
+- Usage counts accept short agent ids only; every phone-link field has a type and a size.
+- The administrator's private notes about an application are kept where the applicant cannot read them.
+
+**Website**
+
+- No dialog opens by itself. The early-access form opens from its button.
+- The copy buttons say so when the clipboard is blocked. The mobile menu closes on Escape and after a link is followed.
+- The dashboard's Evaluations screen no longer scrolls sideways on a phone.
+- Next.js 16.4.3 to 16.4.6 (two moderate advisories about `use cache`, which the site does not use; the build refuses a vulnerable version).
+
+**Model roles**
+
+- Plan, Build, Review and Verify as four stages, each authorized by you with the agent and model you choose; the model the agent reported using is recorded next to your choice. Nothing starts the next stage by itself.
+- A model of the Fable family may charge usage credits on top of a subscription: it is refused unless you accept that for the run. No other model name is treated as "included"; that depends on your account.
+- Codex's own model list is read (read-only, no run is started) where Codex is installed and signed in. **Not tested against a real Codex.**
+
+**Tests and tools**
+
+- A sweep of every page and dashboard screen at six widths from 320 to 1920 in both themes; every enabled button clicked; every internal link resolved (`e2e/uat-sweep.spec.ts`).
+- One table of every human-only operation, each refused without a fresh code from the same session (`packages/companion/test/human-ops-table.test.ts`).
+- `scripts/uat/build-inventory.mjs` reads every route, command, tool, page and rule from the code and lists the tests that name each (the maintainers' record "INVENTORY.md" (not published)).
+- CodeQL analysis on the public repository.
+
 ## 1.0.0-rc.7 (pre-release candidate; desktop only)
 
 - **Cross-review is gated.** `POST /api/workflows/cross-review` runs a builder and then a reviewer with nobody acting in between, so it now follows the same server-side policy as the other chained paths: it needs an unattended-runs grant for the project (it spends one grant run for each of its two runs) and an agent signed in with your own API key while paid API mode is on. Otherwise it is refused with 409 and a message naming the compliant paths. New `POST /api/workflows/review {runId, reviewer, model}` is the manual two-step path: you start the build, then start one reviewer run from a validated handoff of that finished run. It starts exactly one run, supports Idempotency-Key, needs no grant and works with a subscription sign-in. The dashboard session view has a Review this run button. There is no cross-review control in the dashboard or on the phone, so nothing there changed.

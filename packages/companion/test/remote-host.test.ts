@@ -143,3 +143,34 @@ describe('who is believed', () => {
     expect(ran).toHaveLength(1);
   });
 });
+
+describe('taking trust away never depends on the link service (audit 2026-11-19)', () => {
+  it('unlinking revokes every phone on the stored state and removes the link, so linking again re-arms nothing', async () => {
+    const { unlinkFile, revokeInFile } = await import('../src/remote-host.js');
+    const second = await createIdentity();
+    await host.trust('phone-2', 'Tablet', second.pub, 'view');
+    expect(file.devices.filter((d) => !d.revokedAt)).toHaveLength(2);
+    // The bug: a copy read BEFORE revoking was written back afterwards. The stored state must be the one that is changed.
+    const stale = JSON.parse(JSON.stringify(file)) as RemoteFile;
+    unlinkFile(file, T);
+    expect(file.link).toBeUndefined();
+    expect(file.devices.every((d) => !!d.revokedAt)).toBe(true);
+    expect(stale.devices.some((d) => !d.revokedAt)).toBe(true); // what the old code saved
+    // A request from a phone that was trusted before the unlink gets no answer and runs nothing.
+    const again = await new RemoteHost(file, async (action) => { ran.push({ action, params: null, did: 'x' }); return {}; }, () => undefined, () => T).init();
+    const env = await seal({ action: 'ping', params: {} }, { v: 1, uid: UID, cid: file.computerId, did, rid: newId(), kind: 'request', ctr: 99, iat: T, exp: T + 60_000 }, key, phone.signing.privateKey);
+    expect(await again.handle(env)).toBeNull();
+    expect(ran).toEqual([]);
+    expect(revokeInFile(file)).toBe(0);
+  });
+  it('one phone can be revoked on the stored state alone, and only that phone', async () => {
+    const { revokeInFile } = await import('../src/remote-host.js');
+    const second = await createIdentity();
+    await host.trust('phone-2', 'Tablet', second.pub, 'view');
+    expect(revokeInFile(file, 'no-such-phone', T)).toBe(0);
+    expect(revokeInFile(file, did, T)).toBe(1);
+    expect(file.devices.find((d) => d.did === did)!.revokedAt).toBeTruthy();
+    expect(file.devices.find((d) => d.did === 'phone-2')!.revokedAt).toBeUndefined();
+    expect(revokeInFile(file, did, T)).toBe(0);
+  });
+});

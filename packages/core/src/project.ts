@@ -311,8 +311,15 @@ export class Project {
       return warnings;
     },
     configureAnchor: (remote: string, every: number) => checkRemote(remote) && this.humanAppend({ type: 'anchor.configured', payload: { remote, every } }),
-    acknowledgeMismatch: (seq: number, note: string) => this.humanAppend({ type: 'mismatch.acknowledged', payload: { seq, note } }),
-    acceptVerificationChanges: (taskId: string, note: string) => this.humanAppend({ type: 'verification.accepted', taskId, payload: { id: taskId, note, verificationBaseline: this.currentManifest() } }),
+    // Both refuse something that is not there: the record must not hold an acknowledgement or an acceptance of nothing.
+    acknowledgeMismatch: (seq: number, note: string) => {
+      if (!this.state().mismatches.some((m) => m.seq === seq)) throw new Error(`No mismatch ${seq}`);
+      return this.humanAppend({ type: 'mismatch.acknowledged', payload: { seq, note } });
+    },
+    acceptVerificationChanges: (taskId: string, note: string) => {
+      if (!this.state().tasks.has(taskId)) throw new Error(`No task ${taskId}`);
+      return this.humanAppend({ type: 'verification.accepted', taskId, payload: { id: taskId, note, verificationBaseline: this.currentManifest() } });
+    },
     acceptCriterion: (taskId: string, criterionId: string, note: string) => {
       const s = this.state();
       this.humanAppend({ type: 'evidence.recorded', ...this.stamp(s, taskId), payload: { criterionId, passed: true, observed: note, source: 'human', workspaceDigest: this.currentDigest() } });
@@ -802,7 +809,9 @@ export class Project {
   }
 
   isProtectedPath(rel: string): boolean {
-    return matchesAny(rel, this.state().policy.protectedPaths);
+    // One file has many spellings: ./GOAL.md, a//GOAL.md, a/./GOAL.md. The check is made on the plain one, whatever the caller passed.
+    const plain = rel.replace(/\\/g, '/').split('/').filter((s) => s !== '' && s !== '.').join('/');
+    return matchesAny(plain, this.state().policy.protectedPaths);
   }
 
   /**

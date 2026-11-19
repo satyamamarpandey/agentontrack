@@ -141,3 +141,28 @@ describe('one record for every surface', () => {
     expect(accepted.brief).not.toContain('Ignore the rules');
   });
 });
+
+describe('commands that only read, suggest or write a project file (audit 2026-11-19)', () => {
+  it('suggest maps an intention to a workflow and never runs anything', () => {
+    const r = json('suggest', 'fix', 'the', 'failing', 'tests');
+    expect(r.workflow).toBe('repair');
+    expect(r.note).toMatch(/Suggestion only|No dedicated command/);
+    expect(existsSync(join(root, 'src', 'new.ts'))).toBe(false);
+  });
+  it('sync-docs --dry-run lists what it would write and writes nothing', () => {
+    const before = git(root, 'status', '--porcelain').stdout;
+    const r = aot('sync-docs', '--dry-run', '--json');
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toMatch(/GOAL\.md|AGENTS\.md|SAFETY\.md/);
+    expect(git(root, 'status', '--porcelain').stdout).toBe(before);
+  });
+  it('mcp-config writes the config for a known client inside the project, says it enforces nothing, and refuses an unknown client', () => {
+    const bad = aot('mcp-config', 'not-a-client');
+    expect(bad.status).not.toBe(0);
+    expect(bad.stderr + bad.stdout).toMatch(/Usage: agentontrack mcp-config/);
+    const ok = aot('mcp-config', 'continue');
+    expect(ok.status, ok.stderr).toBe(0);
+    expect(ok.stdout).toMatch(/does not stop any action/);
+    expect(readFileSync(join(root, '.continue', 'mcpServers', 'agentontrack.yaml'), 'utf8')).toContain('agentontrack');
+  });
+});

@@ -66,7 +66,8 @@ describe('codex run', () => {
 
   it('is refused when the hook program cannot run, because Codex would then run actions unchecked', async () => {
     await setup(true);
-    writeFileSync(join(root, '.codex', 'hooks.json'), readFileSync(join(root, '.codex', 'hooks.json'), 'utf8').replaceAll(CLI.replaceAll('\\', '\\\\'), join(dir, 'missing.js').replaceAll('\\', '\\\\')));
+    // The hooks AgentOnTrack wrote, but pointing at a program that is not there: a genuine, broken connection.
+    installHooks('codex', root, `"${process.execPath}" "${join(dir, 'missing.js')}"`);
     const r = await start(await pair());
     expect(r.status).toBe(409);
     expect((await r.json()).error).toMatch(/Codex was not started/);

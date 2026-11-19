@@ -25,6 +25,8 @@ export function cleanRelative(root: string, raw: string): string {
   const rel = raw.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
   if (rel === '' || rel === '.') return '';
   if (/^([a-zA-Z]:|\/|~)/.test(rel) || rel.split('/').some((s) => s === '..')) throw new WorkspaceError(400, 'Use a path inside the project');
+  // Windows opens "GOAL.md.", "GOAL.md " and "GOAL.md::$DATA" as GOAL.md. No real file needs these spellings, so they are refused on every system.
+  if (rel.split('/').some((s) => s.includes(':') || (/[. ]$/.test(s) && s !== '.'))) throw new WorkspaceError(400, 'Not a usable path');
   const r = resolveInRoot(root, root, rel);
   if (!r.insideRoot) throw new WorkspaceError(403, 'That path leaves the project');
   if (r.path.split('/').some((s) => s === '.git')) throw new WorkspaceError(403, 'The .git folder is not available here');

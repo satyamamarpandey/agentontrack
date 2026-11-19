@@ -25,7 +25,7 @@ beforeEach(async () => {
   s = { cookie: r.headers.get('set-cookie')!.split(';')[0]!, csrf: (await r.json()).csrf };
 });
 afterEach(async () => { await c.close(); rmSync(dir, { recursive: true, force: true, maxRetries: 5 }); });
-const get = (path: string) => fetch(`${base}${path}`, { headers: { cookie: s.cookie } });
+const get = (path: string) => fetch(`${base}${path}`, { headers: { cookie: s.cookie, 'x-agentontrack-csrf': s.csrf } });
 const post = (path: string, body: unknown) => fetch(`${base}${path}`, { method: 'POST', headers: { cookie: s.cookie, 'x-agentontrack-csrf': s.csrf, 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json() as Promise<any>);
 
 describe('worktree diffs for an editor', () => {

@@ -17,6 +17,7 @@ const kv = (() => {
 
 interface StoredDevice { did: string; name: string; identity: Identity; fingerprint: string }
 import { RemoteError } from './remote-error';
+import { answersRequest, fingerprintOfKey, isSnapshotNamed, requestExpiry } from './remote-verify';
 export { RemoteError };
 export interface ComputerRow { id: string; name: string; fingerprint: string; pub: PublicIdentity }
 export type DeviceStatus = 'none' | 'pending' | 'trusted' | 'revoked';
@@ -61,7 +62,12 @@ export async function openBackend(config: string) {
 
     async computers(): Promise<ComputerRow[]> {
       const snap = await getDocs(collection(db, 'users', uid(), 'computers'));
-      return snap.docs.map((d) => ({ id: d.id, name: String(d.data().name ?? ''), fingerprint: String(d.data().fingerprint ?? ''), pub: d.data().pub as PublicIdentity }));
+      // The fingerprint shown to the person is worked out here from the key itself. The copy stored beside the key is ignored: whoever can write
+      // that document could keep the old fingerprint text while swapping the key, and the person would be comparing the wrong thing.
+      return Promise.all(snap.docs.map(async (d) => {
+        const pub = d.data().pub as PublicIdentity;
+        return { id: d.id, name: String(d.data().name ?? ''), fingerprint: await fingerprintOfKey(pub), pub };
+      }));
     },
     pinned,
     /** The person has compared this computer's fingerprint with the one on its screen, so its key is remembered, and changes to it are refused. */
@@ -88,6 +94,8 @@ export async function openBackend(config: string) {
         const pin = await pinned(cid);
         if (!pin || off) return;
         try {
+          // The kind and the name are inside what the computer signed. A genuine message of another kind, or another project's snapshot, put in this place is refused.
+          if (!isSnapshotNamed(env, name)) throw new Error('not this snapshot');
           const d = await device();
           const body = await open<any>(env, { uid: uid(), cid, did: d.did }, await keyFor(cid, pin), pin.sign, Date.now(), { allowExpired: true });
           if (!off) cb({ body, generatedAt: String(body.generatedAt ?? ''), stale: fromCache });
@@ -109,12 +117,17 @@ export async function openBackend(config: string) {
       const key = await keyFor(cid, pin);
       const rid = newId();
       const iat = Date.now();
-      const env = await seal({ action, params }, { v: 1, uid: uid(), cid, did: d.did, rid, kind: 'request', ctr: await nextCtr(cid), iat, exp: iat + 5 * 60_000 }, key, d.identity.signing.privateKey);
+      // The request stops being valid shortly after this phone stops waiting for it. A computer that wakes up later refuses it as expired, so
+      // "it did not answer" cannot turn into a run that starts minutes afterwards.
+      const env = await seal({ action, params }, { v: 1, uid: uid(), cid, did: d.did, rid, kind: 'request', ctr: await nextCtr(cid), iat, exp: requestExpiry(iat, waitMs) }, key, d.identity.signing.privateKey);
       const answer = new Promise<T>((ok, fail) => {
-        const timer = setTimeout(() => { stop(); fail(new RemoteError('offline', 'The computer did not answer. It may be off, asleep or offline, so nothing was changed.')); }, waitMs);
+        const timer = setTimeout(() => { stop(); fail(new RemoteError('offline', 'The computer did not answer in time. It may be off, asleep or offline. This request expires within half a minute and will not run after that. If the computer had already received it, its status will show that.')); }, waitMs);
         const stop = onSnapshot(cdoc(cid, 'responses', rid), (s) => {
           if (!s.exists()) return;
-          void open<{ ok: boolean; result?: T; code?: string; message?: string }>(s.data() as Envelope, { uid: uid(), cid, did: d.did }, key, pin.sign).then((r) => {
+          const answerEnv = s.data() as Envelope;
+          // Only the answer to THIS request counts. Another genuine answer from the same computer, placed here, is ignored.
+          if (!answersRequest(answerEnv, rid)) return;
+          void open<{ ok: boolean; result?: T; code?: string; message?: string }>(answerEnv, { uid: uid(), cid, did: d.did }, key, pin.sign).then((r) => {
             clearTimeout(timer); stop();
             void deleteDoc(cdoc(cid, 'responses', rid)).catch(() => undefined);
             if (r.ok) ok(r.result as T); else fail(new RemoteError(r.code ?? 'refused', r.message ?? 'The computer refused.'));

@@ -272,7 +272,8 @@ describe('from a website the user allowed', () => {
     const base = d.url.slice(0, -1);
     const r = await fetch(`${base}/api/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: d.newPairingCode() }) });
     const cookie = r.headers.get('set-cookie')!.split(';')[0]!;
-    expect((await fetch(`${base}/api/files`, { headers: { cookie } })).status).toBe(200);
+    const csrf = (await r.json()).csrf as string;
+    expect((await fetch(`${base}/api/files`, { headers: { cookie, 'x-agentontrack-csrf': csrf } })).status).toBe(200);
     await d.close();
   });
 });

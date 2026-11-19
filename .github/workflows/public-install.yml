@@ -46,7 +46,7 @@ jobs:
         run: |
           VERSION="${RELEASE_TAG#v}"
           curl -fsSL https://raw.githubusercontent.com/satyamamarpandey/agentontrack/main/scripts/release/upgrade-rollback-check.mjs -o upgrade-rollback-check.mjs
-          node upgrade-rollback-check.mjs --from 1.0.0-rc.6 --to "$VERSION"
+          node upgrade-rollback-check.mjs --from 1.0.0-rc.7 --to "$VERSION"
       - name: Install from the public site, then use it
         if: runner.os == 'Windows'
         shell: powershell

@@ -36,7 +36,8 @@ const PLACEHOLDER_ASSERT = /\b(assert\.ok\(\s*true\s*\)|assert\(\s*true\s*\)|exp
 export function assessCriteria(criteria: { id: string; kind: string; command?: string | undefined; sha256?: string | undefined }[], root: string, verificationPaths: string[], files: string[]): string[] {
   const out: string[] = [];
   for (const c of criteria) {
-    if (c.kind === 'command' && TRIVIAL_COMMAND.test(c.command ?? '')) out.push(`${c.id} runs a command that always succeeds`);
+    // A trivial command is short. A very long one is not tested against the pattern, which is slow on long input.
+    if (c.kind === 'command' && (c.command ?? '').length <= 500 && TRIVIAL_COMMAND.test(c.command ?? '')) out.push(`${c.id} runs a command that always succeeds`);
     if (c.kind === 'artifact' && !c.sha256) out.push(`${c.id} only checks that a file exists`);
   }
   if (criteria.some((c) => c.kind === 'command' && /\b(test|jest|vitest|pytest|mocha)\b/.test(c.command ?? ''))) {

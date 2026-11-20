@@ -537,7 +537,7 @@ textarea.editor:focus-visible { outline: none; box-shadow: inset 2px 0 0 var(--a
 .rail-recents ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
 .rail-recents li button { all: unset; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; cursor: pointer; padding: 5px 8px; min-height: 30px; border-radius: var(--r-2); color: var(--muted); font-size: 12.5px; }
 .rail-recents li button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rail-recents li button small { flex: none; font-size: 10.5px; opacity: .8; }
+.rail-recents li button small { flex: none; font-size: 10.5px; }
 .rail-recents li button:hover { color: var(--text); background: var(--raised-2); }
 .rail-recents li button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 @media (max-width: 800px) { .rail-recents { display: none; } }

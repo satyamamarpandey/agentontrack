@@ -79,7 +79,8 @@ test('click-through: every section opens, survives a reload, and uses only endpo
   await expect(page.getByTestId('project-panel-verification')).toBeVisible();
   await expect(page.getByTestId('project-tab-verification')).toHaveAttribute('aria-selected', 'true');
   const paths = seen.filter((p) => !p.startsWith('/api/events/stream'));
-  const allowed = /^\/api\/(health|session|projects|state|analytics|actions|event\/\d+|settings)(\?|$)/;
+  // agent-sessions: the sidebar's Recent sessions list. It is optional: an older companion that lacks it answers with an error and the list stays hidden.
+  const allowed = /^\/api\/(health|session|projects|state|analytics|actions|event\/\d+|settings|agent-sessions)(\?|$)/;
   expect(paths.filter((p) => !allowed.test(p))).toEqual([]);
   for (const p of paths.filter((x) => /\/api\/(state|analytics|actions)/.test(x))) expect(p).toContain('project=');
 });

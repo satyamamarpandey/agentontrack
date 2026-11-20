@@ -37,24 +37,24 @@ function Welcome({ onLocal, onDemo }: { onLocal: () => void; onDemo: () => void 
   const go = () => { location.href = `${signInPage()}?next=dashboard`; };
   return (
     <Frame>
-      <h1>Keep your AI coding agents on track</h1>
-      <p className="muted">Set a goal, approve what matters, and see proof when the work is done. Your code and your agents stay on your computer.</p>
+      <h1>One place for your coding agents</h1>
+      <p className="muted">Choose a project, type what you need, and let your agent work. You can review every important action before it runs.</p>
       {signedIn && on ? <div className="alert good" role="status">You are signed in. <a href={accountPage()}>Account</a></div> : null}
       <div className="stack" data-testid="welcome-options">
         {gate === 'open' ? <>
-          <button className="btn primary big" onClick={onLocal} data-testid="continue-local"><Icon name="terminal" />Continue on this computer</button>
-          <p className="muted small">{on ? 'Next, you connect this computer to your own AgentOnTrack.' : 'No account needed. Next, you connect this computer to your own AgentOnTrack.'}</p>
+          <button className="btn primary big" onClick={onLocal} data-testid="continue-local"><Icon name="terminal" />Open my workspace</button>
+          <p className="muted small">{on ? 'Connect the AgentOnTrack app running on your computer.' : 'No account required. Connect the AgentOnTrack app on this computer.'}</p>
         </> : null}
         {gate === 'checking' ? <p className="muted" role="status" data-testid="gate-checking">Checking your early-access status…</p> : null}
         {gate === 'signed-out' ? <div className="gate-note" data-testid="gate-signed-out">
           <b>Early access</b>
-          <p className="muted small" style={{ margin: 0 }}>Connecting a computer from this site is open to approved testers for now. Sign in with your early-access account, or apply. The local address your companion prints, such as <code>{localAddress()}</code>, always works and needs no account.</p>
+          <p className="muted small" style={{ margin: 0 }}>Sign in with your approved account to open the web workspace. You can also run AgentOnTrack locally without signing in.</p>
           <a className="btn primary big" href={`${signInPage()}?next=dashboard`} data-testid="gate-signin">Sign in to continue</a>
           <a className="btn big" href={earlyAccessPage()} data-testid="gate-apply">Apply for early access</a>
         </div> : null}
         {gate === 'not-approved' ? <div className="gate-note" data-testid="gate-not-approved">
           <b>Not approved yet</b>
-          <p className="muted small" style={{ margin: 0 }}>{email ? `${email} is signed in, but ` : 'This account is signed in, but '}it is not an early-access tester yet. Your account page shows where your application stands. The local address your companion prints always works.</p>
+          <p className="muted small" style={{ margin: 0 }}>{email ? `${email} is signed in, but ` : 'This account is signed in, but '}it is not an early-access tester yet. Your account page shows where your application stands. The local address your companion prints works whenever the companion is running.</p>
           <a className="btn big" href={accountPage()}>Your account</a>
         </div> : null}
         {gate === 'revoked' ? <div className="gate-note" data-testid="gate-revoked">
@@ -62,19 +62,14 @@ function Welcome({ onLocal, onDemo }: { onLocal: () => void; onDemo: () => void 
           <p className="muted small" style={{ margin: 0 }}>This account's early access was switched off. The local address your companion prints still works for your own computer.</p>
           <a className="btn big" href={accountPage()}>Your account</a>
         </div> : null}
-        {!on ? <>
-          <div className="divider"><span>or sign in to save your preferences</span></div>
-          <button className="btn big" disabled onClick={go} data-testid="continue-google">Continue with Google</button>
-          <button className="btn big" disabled onClick={go} data-testid="continue-github">Continue with GitHub</button>
-          <button className="btn big" disabled onClick={go} data-testid="continue-email">Sign up or sign in with email</button>
-          <p className="muted small" data-testid="signin-off">Sign-in is not switched on for this site yet. Everything else works without it.</p>
-        </> : (!signedIn && gate === 'open' ? <>
+        {!on ? <p className="muted small" data-testid="signin-off">Online accounts are unavailable here. You can still use AgentOnTrack locally.</p> : (!signedIn && gate === 'open' ? <>
           <div className="divider"><span>or</span></div>
           <button className="btn big" onClick={go} data-testid="continue-signin">Sign in to your account</button>
           <p className="muted small">An account is for early access and the optional cloud features. It never gives this website access to your computer.</p>
         </> : null)}
         <div className="divider"><span>or look around first</span></div>
         <button className="btn big" onClick={onDemo} data-testid="explore-demo">Explore a demo <span className="badge warn">invented data</span></button>
+        {on ? <a className="link" href="?m=1" data-testid="phone-preview-link">Use your phone to control a linked computer <span className="badge muted">experimental</span></a> : null}
       </div>
     </Frame>
   );
@@ -115,20 +110,20 @@ function Connect({ onPaired, notice, onBack }: { onPaired: () => void; notice?: 
       {notice && !error ? <div className="alert warn" role="status" data-testid="pair-notice">{notice}</div> : null}
 
       {pub && !asked ? (
-        <div className="alert" data-testid="probe-intro">
-          <p><b>Before you check.</b> Pressing the button makes this page look for the AgentOnTrack helper on your own computer, at <code>{localAddress()}</code>. Your browser (Chrome and Edge) will then ask whether this site may &ldquo;access other apps and services on this device&rdquo;, also called local network access.</p>
-          <ul>
-            <li><b>Allow</b> lets this page talk to the helper on your computer. Nothing is sent to this website.</li>
-            <li><b>Block</b> is fine too. Sign-in, early-access applications and the documentation do not need it, and the local address above works without any permission.</li>
-            <li>Safari and some browsers do not allow this from a secure page at all. Use the local address then.</li>
-          </ul>
-          <button className="btn primary" type="button" onClick={() => void look()} data-testid="retry">Check for helper</button>
+        <div className="stack" data-testid="probe-intro">
+          <p><b>Step 1.</b> Open a terminal on this computer and start AgentOnTrack:</p>
+          <Copy text={START} />
+          <p><b>Step 2.</b> Click below. We will look for the app running on this computer.</p>
+          <button className="btn primary big" type="button" onClick={() => void look()} data-testid="retry">Check for AgentOnTrack</button>
+          <details className="small"><summary>Why might my browser ask for permission?</summary>
+            <p>Chrome and Edge may ask for local network access. <b>Allow</b> lets this page reach the app on your computer. <b>Block</b> leaves your account and website working, but prevents this connection. Nothing starts until you click the check button. Safari may require opening the local app directly instead.</p>
+          </details>
         </div>
       ) : null}
 
       {pub && asked ? (
         <div role="status" aria-live="polite" data-testid="probe-status" className={`probe ${probe?.state ?? 'look'}`}>
-          {probe === null ? 'Looking for AgentOnTrack on this computer… If your browser asks for permission, choose Allow or Block.' : probe.state === 'timeout' ? 'No answer yet. The permission question may still be open, or nothing is listening on this port. Press Retry.' : probe.state === 'found' ? 'Found AgentOnTrack on this computer.' : probe.state === 'blocked' ? 'Your browser is blocking this page from reaching your computer.' : 'AgentOnTrack was not found on this computer.'}
+          {probe === null ? 'Looking for AgentOnTrack on this computer… If your browser asks for permission, choose Allow or Block.' : probe.state === 'timeout' ? 'No answer yet. The permission question may still be open, or nothing is listening on this port. Press Retry.' : probe.state === 'found' ? 'Found AgentOnTrack on this computer.' : probe.state === 'blocked' ? 'Your browser is blocking this page from reaching your computer.' : 'AgentOnTrack isn’t running on this computer.'}
         </div>
       ) : null}
 
@@ -140,9 +135,9 @@ function Connect({ onPaired, notice, onBack }: { onPaired: () => void; notice?: 
 
       {pub && (probe?.state === 'none' || probe?.state === 'timeout') ? (
         <ol className="steps big" data-testid="probe-steps">
-          <li><b>Get AgentOnTrack.</b> It installs in one command and needs no administrator rights. <a href={`${SITE}install/`} data-testid="download-link">Download and install</a></li>
+          <li><b>Get AgentOnTrack.</b> It installs in one command and needs no administrator rights. <a href={`${SITE}install/`} data-testid="download-link">Download and install</a> (a ZIP is an archive to unpack, not an installation)</li>
           <li><b>Start it.</b> In your project folder, run: <Copy text={START} /></li>
-          <li><b>Come back and press Retry.</b></li>
+          <li><b>Come back and press “I’ve started it, check again”.</b></li>
         </ol>
       ) : null}
 
@@ -156,8 +151,8 @@ function Connect({ onPaired, notice, onBack }: { onPaired: () => void; notice?: 
       ) : null}
 
       <div className="row wrap">
-        {pub && asked ? <button className="btn" type="button" onClick={() => void look()} data-testid="retry">Retry</button> : null}
-        {pub ? <a className="btn" href={localAddress()} data-testid="open-local">Open the local dashboard</a> : null}
+        {pub && asked ? <button className="btn" type="button" onClick={() => void look()} data-testid="retry">I’ve started it, check again</button> : null}
+        {pub && (found || probe?.state === 'blocked' || probe?.state === 'timeout') ? <a className="btn" href={localAddress()} data-testid="open-local">Open the local dashboard</a> : null}
         {pub && !found ? <a className="btn" href={`${SITE}install/`}>Download</a> : null}
       </div>
       {pub ? (
@@ -165,7 +160,7 @@ function Connect({ onPaired, notice, onBack }: { onPaired: () => void; notice?: 
           <label>Companion port<input value={port} onChange={(e) => setPortValue(e.target.value)} name="port" inputMode="numeric" /></label>
         </details>
       ) : <p className="muted small">Everything here stays on this machine. No account is needed.</p>}
-      {pub ? <p className="muted small">This page talks only to the helper on your own machine. Your data does not go to this website. If your browser asks about local network access, Allow is needed to use the helper from this page; Block leaves everything else on the site working. The address the helper prints in your terminal, such as <code>{localAddress()}</code>, always works and asks for nothing.</p> : null}
+      {pub ? <details className="small"><summary>Connection troubleshooting</summary><p>The address the helper prints in your terminal, such as <code>{localAddress()}</code>, works only while the helper is running, and asks for nothing. If your browser blocks local network access, open that address directly. It is reachable only from this computer: to control a desktop from your phone, use the experimental phone link, not this address.</p></details> : null}
     </Frame>
   );
 }
@@ -192,7 +187,6 @@ export function Offline({ onRetry, onConnect }: { onRetry: () => void; onConnect
         <button className="btn primary" onClick={onRetry} data-testid="offline-retry">Retry</button>
         <button className="btn" onClick={onConnect} data-testid="offline-connect">Connect again</button>
         <a className="btn" href={`${SITE}install/`}>Download</a>
-        <a className="btn" href={localAddress()}>Open the local dashboard</a>
       </div>
     </section>
   );

@@ -79,11 +79,12 @@ export default function Home() {
           {INSTALL_GATED
             ? <p className="pill"><span className="status-dot on" aria-hidden="true" />Early access · invitation only</p>
             : <p className="eyebrow">Free · Local-first · Bring your own agent</p>}
-          <h1>Agents that finish the <em className="display">right</em> task, inside the lines you set.</h1>
-          <p className="lead">AgentOnTrack is a control layer for AI coding agents. You set the goal and approve what matters. Your agent does the work, on your machine, under its own login. Independent checks decide when it is done.</p>
+          <h1>One workspace for your AI coding agents.</h1>
+          <p className="lead">Pick a project, tell an agent what to do, and see its work in one place. You approve important actions. Your code stays on your computer.</p>
           <div className="cta">
-            <EarlyAccessButton className="btn primary big" testId="hero-early-access">Request early access<Icon name="arrow-right" size={18} data-nudge="" /></EarlyAccessButton>
-            <a className="btn big" href={`${BASE}/dashboard/?demo=1`}>See the live demo</a>
+            <Link className="btn primary big" href="/dashboard/" data-testid="home-open-workspace">Open workspace<Icon name="arrow-right" size={18} data-nudge="" /></Link>
+            <EarlyAccessButton className="btn big" testId="hero-early-access">Request early access</EarlyAccessButton>
+            <a className="link" href={`${BASE}/dashboard/?demo=1`}>Try the demo</a>
             {INSTALL_GATED ? null : <Link className="btn big" href="/install#download" data-testid="home-download">{RELEASE_PUBLISHED ? `Download ${RELEASE_VERSION}` : 'Download: not published yet'}</Link>}
           </div>
         </div>

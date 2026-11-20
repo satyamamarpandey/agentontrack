@@ -378,7 +378,8 @@ test('when the computer stops answering, a clear screen offers a way forward ins
   await expect(offline.getByRole('button', { name: 'Retry' })).toBeVisible();
   await expect(offline.getByRole('button', { name: 'Connect again' })).toBeVisible();
   await expect(offline.getByRole('link', { name: 'Download' })).toBeVisible();
-  await expect(offline.getByRole('link', { name: 'Open the local dashboard' })).toBeVisible();
+  // The computer is not answering, so a link to its local address would be a dead end: none is offered here.
+  await expect(offline.getByRole('link', { name: /local dashboard|after starting/i })).toHaveCount(0);
   await offline.getByTestId('offline-connect').click();
   await expect(page.getByRole('heading', { name: 'Connect this computer' })).toBeVisible();
 });
@@ -410,4 +411,15 @@ test('usage counts: off by default, a plain preview of exactly what would be sen
   expect(outgoing).toEqual([]);
   await card.getByTestId('telemetry-consent').uncheck();
   expect(await page.evaluate(() => localStorage.getItem('aot-install-id'))).toBeNull();
+});
+
+test('the sidebar lists recent sessions under the main navigation, and opening one shows the Sessions screen', async ({ page }, info) => {
+  test.skip(info.project.name === 'mobile' || info.project.name === 'android' || info.project.name === 'iphone', 'The narrow layout has a menu bar, not this list.');
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('http://127.0.0.1:4199/agentontrack/dashboard/?demo=1#home');
+  const rail = page.getByTestId('rail-recents');
+  await expect(rail).toBeVisible();
+  await expect(rail.getByRole('button')).not.toHaveCount(0);
+  await rail.getByRole('button').first().click();
+  await expect(page.getByTestId('sessions-pane')).toBeVisible();
 });

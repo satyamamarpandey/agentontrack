@@ -53,7 +53,9 @@ function PhoneLinkCard() {
       {dialog}
       <h2>Phone access <span className="badge muted" data-testid="experimental">experimental</span></h2>
       <p className="muted small" data-testid="experimental-note">Experimental. Phone control has been tested against local emulators only, not against a real Firebase project or a physical phone. Do not rely on it to stop an agent.</p>
-      <p className="muted small">Use your phone as a remote control for the projects already on this computer: see progress, send the next prompt, pause or stop, and decide what is waiting for you. It cannot write code, open a terminal or make projects. Everything is encrypted between your phone and this computer, and Firebase only carries sealed messages.</p>
+      <p className="muted small">Your phone can view the projects already on this computer, follow progress, stop a run and approve file changes while this computer is online. Starting an agent from the phone is off until you turn it on here. Linking a phone needs your account and an approval on this computer. It does not use the desktop's 127.0.0.1 address.</p>
+      <p><a className="btn" href="https://pandeysatyam.com/agentontrack/dashboard/?m=1" target="_blank" rel="noopener noreferrer" data-testid="phone-preview-url">Open phone controller (experimental)</a></p>
+      <details className="small"><summary>How phone access works</summary><p>Sign in on your phone using the same account, compare device fingerprints, and approve the phone here. The Firebase relay carries encrypted messages. The desktop must remain online. Dangerous actions such as publishing, deletion and deployment still require approval at the desktop.</p></details>
       {msg ? <div className="alert bad" role="alert">{msg}</div> : null}
 
       {!s.linked ? (

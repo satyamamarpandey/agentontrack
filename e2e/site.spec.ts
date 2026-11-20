@@ -46,6 +46,7 @@ test('home shows the real recorded benchmark, its misses, and no invented adopti
   await expect(page.locator('.kpi-value').first()).toHaveText(String(full.prevented), { timeout: 5000 });
   const text = (await page.locator('body').textContent())!.toLowerCase();
   for (const banned of ['testimonial', 'trusted by', 'zero hallucination', 'tamper-proof', 'guaranteed savings', 'stars on github', 'be among the first']) expect(text).not.toContain(banned);
+  await expect(page.getByTestId('home-open-workspace')).toBeVisible();
   await expect(page.getByTestId('hero-early-access')).toBeVisible();
   await expect(page.getByTestId('nav-early-access')).toBeVisible();
 });
@@ -84,7 +85,7 @@ test('the home page has a clear way into projects, and the demo one is labelled'
   await expect(page.getByTestId('card-demo-label').first()).toHaveText('Demo data');
   await page.goto(`${SITE}/`);
   await page.getByTestId('open-projects').click();
-  await expect(page.getByRole('heading', { name: 'Keep your AI coding agents on track' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'One place for your coding agents' })).toBeVisible();
   if (GATED) {
     // Early access: a visitor is asked to sign in or apply; the demo stays open; nothing pairs from here.
     await expect(page.getByTestId('gate-signed-out')).toBeVisible();

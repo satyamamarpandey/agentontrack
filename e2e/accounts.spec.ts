@@ -225,7 +225,7 @@ test('coming from the dashboard welcome page, signing in returns there; without 
   await page.goto(`${SITE}/sign-in/?next=dashboard`);
   await googlePopupSignIn(page, 'back@example.com', 'Back Person');
   await page.waitForURL(/\/dashboard\//, { timeout: 30_000 });
-  await expect(page.getByRole('heading', { name: 'Keep your AI coding agents on track' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'One place for your coding agents' })).toBeVisible();
   await expect(page.getByText('You are signed in.')).toBeVisible();
   await expect(page.getByTestId('gate-not-approved')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByLabel('Pairing code')).toHaveCount(0);

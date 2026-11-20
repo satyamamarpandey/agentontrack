@@ -34,6 +34,19 @@ const JUMP: Record<string, string> = { Home: 'H', Sessions: 'N', Projects: 'P', 
 type Screen = (typeof SCREENS)[number];
 type Reload = () => void;
 
+/** The last few sessions under the main list, so returning to work is one click. Same data as Home; nothing is invented. */
+function RailRecents({ tick, onOpen }: { tick: number; onOpen: (id: string) => void }) {
+  const { data } = useLoad<{ sessions: { id: string; title?: string; status?: string }[] }>(() => get('/api/agent-sessions?archived=1'), [tick]);
+  const list = (data?.sessions ?? []).slice(0, 5);
+  if (list.length === 0) return null;
+  return (
+    <section className="rail-recents" aria-label="Recent sessions" data-testid="rail-recents">
+      <h2>Recent sessions</h2>
+      <ul>{list.map((s) => <li key={s.id}><button type="button" onClick={() => onOpen(s.id)} title={s.title || 'Untitled session'}><span>{s.title || 'Untitled session'}</span><small>{s.status || ''}</small></button></li>)}</ul>
+    </section>
+  );
+}
+
 function Overview({ tick, go }: { tick: number; go: (s: Screen) => void }) {
   const st = useLoad(() => get('/api/state'), [tick]);
   const an = useLoad(() => get('/api/analytics'), [tick]);
@@ -563,6 +576,7 @@ export function App() {
             <button key={x.name} className={on ? 'on' : ''} aria-current={on ? 'page' : undefined} aria-keyshortcuts={`g ${JUMP[x.name]!.toLowerCase()}`} onClick={() => go(x.leaves[0]!)}><Icon name={x.icon} />{x.name}<kbd aria-hidden="true">G {JUMP[x.name]}</kbd></button>
           ); })}
         </nav>
+        <RailRecents tick={tick} onOpen={(id) => { setSessionToOpen(id); go('Sessions'); }} />
         <p className="live small" role="status" data-testid="live-status"><i className={live ? 'on' : ''} />{isDemo() ? 'Demo: not connected' : live ? 'Live: local record' : 'Reconnecting…'}</p>
         {isDemo() ? <button className="btn small" onClick={() => { leaveDemo(); history.replaceState(null, '', location.pathname); setPaired(false); }}>Pair with my companion</button> : null}
       </aside>

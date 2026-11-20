@@ -122,7 +122,7 @@ test('a visitor meets the early-access gate on the install page and on this site
   await expect(page.locator('main')).not.toContainText('irm https://');
   await expect(page.locator('main')).toContainText('source and releases are public on GitHub');
   await page.goto(`${SITE}/dashboard/`);
-  await expect(page.getByRole('heading', { name: 'Keep your AI coding agents on track' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'One place for your coding agents' })).toBeVisible();
   await expect(page.getByTestId('gate-signed-out')).toBeVisible();
   await expect(page.getByTestId('gate-signin')).toHaveAttribute('href', /\/sign-in\/\?next=dashboard$/);
   await expect(page.getByTestId('continue-local')).toHaveCount(0);

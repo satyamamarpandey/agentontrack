@@ -155,6 +155,8 @@ test('when the browser stops the connection, the page says so and gives the loca
       const alert = p.locator('main');
       await expect(alert).toContainText(FALLBACK);
       if (state === 'denied') await expect(p.getByTestId('probe-blocked')).toContainText('local network access');
+      // The helper is probably running, so the page offers its local address as a real link here (it is hidden only when nothing was found).
+      await expect(p.getByTestId('open-local')).toBeVisible();
       record(info, 'local network access denied', `real block; permission state read as ${state}; message and local fallback shown`);
     } finally {
       await strict.close();
@@ -197,11 +199,11 @@ test('the local dashboard address still works as the fallback, with no terminal 
 
 test('welcome: the choices are clear, sign-in is honest when it is off, and nothing is asked before a choice', async ({ page, env }) => {
   await page.goto(`${ORIGIN}/agentontrack/dashboard/`);
-  await expect(page.getByRole('heading', { name: 'Keep your AI coding agents on track' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'One place for your coding agents' })).toBeVisible();
   await expect(page.getByTestId('continue-local')).toBeVisible();
   await expect(page.getByTestId('explore-demo')).toBeVisible();
-  for (const id of ['continue-google', 'continue-github', 'continue-email']) await expect(page.getByTestId(id)).toBeDisabled();
-  await expect(page.getByTestId('signin-off')).toContainText('not switched on');
+  for (const id of ['continue-google', 'continue-github', 'continue-email']) await expect(page.getByTestId(id)).toHaveCount(0);
+  await expect(page.getByTestId('signin-off')).toContainText('unavailable');
   // No pairing code box, no port and no terminal talk on the first screen.
   await expect(page.getByLabel('Pairing code')).toHaveCount(0);
   expect(env.codes).toEqual([]);
@@ -214,10 +216,10 @@ test('connect: not found shows what to do, found shows the one-time code, and th
   // A port nothing listens on: the page says so, and offers the way forward.
   await page.getByLabel('Companion port').fill('47999');
   await page.getByTestId('retry').click();
-  await expect(page.getByTestId('probe-status')).toContainText('not found', { timeout: 20_000 });
+  await expect(page.getByTestId('probe-status')).toContainText(/isn.t running/, { timeout: 20_000 });
   await expect(page.getByTestId('probe-steps')).toContainText('agentontrack dashboard --allow-public-site');
   await expect(page.getByTestId('download-link')).toBeVisible();
-  await expect(page.getByTestId('open-local')).toBeVisible();
+  await expect(page.getByTestId('open-local')).toHaveCount(0);
   await expect(page.getByLabel('Pairing code')).toHaveCount(0);
   // The real companion: found, then the code box appears.
   await page.getByLabel('Companion port').fill(String(new URL(env.c.url).port));
@@ -226,6 +228,7 @@ test('connect: not found shows what to do, found shows the one-time code, and th
   await expect(status).not.toContainText('Looking', { timeout: 20_000 });
   if (!(await status.textContent())?.includes('Found')) { record(info, 'probe', 'blocked by this browser'); return; }
   await expect(page.getByLabel('Pairing code')).toBeVisible();
+  await expect(page.getByTestId('open-local')).toBeVisible();
   record(info, 'probe', 'found');
   // The demo says it is a demo.
   await page.goto(`${ORIGIN}/agentontrack/dashboard/`);

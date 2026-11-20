@@ -68,7 +68,7 @@ test('deployed site, workspace composer: pair, connect, goal, task, denied and a
     await page.goto(`${SITE}/dashboard/`);
     if (!process.env.SITE_URL) expect(new URL(page.url()).protocol).toBe('https:');
     // A new visitor: a welcome, with no port and no code in sight. They continue on this computer, and look for the helper by pressing a button.
-    await expect(page.getByRole('heading', { name: 'Keep your AI coding agents on track' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'One place for your coding agents' })).toBeVisible();
     await expect(page.getByLabel('Pairing code')).toHaveCount(0);
     if (await page.getByTestId('gate-signed-out').isVisible()) {
       // While early access lasts, the welcome page offers connecting only to signed-in approved testers. The Connect screen itself stays
@@ -164,7 +164,7 @@ test('deployed site, workspace composer: pair, connect, goal, task, denied and a
     await go(page, 'Settings');
     await page.getByRole('button', { name: 'Disconnect this browser' }).click();
     // Disconnecting returns to the entry: the welcome, or the Connect screen when the address asked for it (?connect, above).
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText(/Keep your AI coding agents on track|Connect this computer/);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(/One place for your coding agents|Connect this computer/);
 
     const p = new Project(root);
     const events = p.store.all();

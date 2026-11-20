@@ -21,7 +21,7 @@ const AUDITED: Record<string, { count: number; why: string }> = {
   'e2e/rules.spec.ts': { count: 1, why: 'Firebase emulator job; that job fails on any skip' },
   'e2e/audit.spec.ts': { count: 1, why: 'screenshot/audit tool, needs an output folder' },
   'e2e/capture.spec.ts': { count: 1, why: 'screenshot capture tool' },
-  'e2e/dashboard.spec.ts': { count: 3, why: 'per-browser conditions: no Tab key on mobile, WebKit tab order, axe runs once' },
+  'e2e/dashboard.spec.ts': { count: 4, why: 'per-browser conditions: no Tab key on mobile, WebKit tab order, axe runs once, the narrow layout has a menu bar instead of the sidebar list' },
   'e2e/projects.spec.ts': { count: 3, why: 'per-browser conditions: no arrow keys on mobile, WebKit tab order, axe runs once' },
   'e2e/live-public-workspace.spec.ts': { count: 1, why: 'real inference; runs only with AGENTONTRACK_LIVE=1' },
   'e2e/live-workspace.spec.ts': { count: 1, why: 'real inference; runs only with AGENTONTRACK_LIVE=1' },

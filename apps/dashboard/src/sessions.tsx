@@ -197,10 +197,10 @@ function Section({ id, label, items, empty, sel, onPick }: { id: string; label: 
 }
 
 /** Every agent session of this project in one place. The status comes from the companion; nothing here turns an unknown or failed run into a success. */
-export function SessionsPane({ tick, projectName }: { tick: number; projectName: string }) {
+export function SessionsPane({ tick, projectName, initialSessionId = null }: { tick: number; projectName: string; initialSessionId?: string | null }) {
   const [q, setQ] = useState('');
   const [qd, setQd] = useState('');
-  const [sel, setSel] = useState<string | null>(null);
+  const [sel, setSel] = useState<string | null>(initialSessionId);
   const [showNew, setShowNew] = useState(false);
   const [msg, setMsg] = useState('');
   const listRef = useRef<HTMLElement>(null);

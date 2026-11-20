@@ -74,7 +74,7 @@ async function pairOrRecordBlock(page: Page, env: Env, info: TestInfo) {
     test.skip(true, 'This browser blocked the page from reaching the companion, so this step cannot run. The block is the recorded result.');
   }
   expect(out).toBe('paired');
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('My projects');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('What are you working on?');
 }
 
 const openGoalDialog = async (page: Page, statement: string) => {
@@ -187,7 +187,7 @@ test('the local dashboard address still works as the fallback, with no terminal 
   await page.goto(env.c.url);
   await page.getByLabel('Pairing code').fill(env.c.newPairingCode());
   await page.getByRole('button', { name: 'Pair', exact: true }).click();
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('My projects');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('What are you working on?');
   await openGoalDialog(page, 'Local fix');
   await confirmDialog(page);
   await expect.poll(() => env.goal()).toMatchObject({ statement: 'Local fix' });

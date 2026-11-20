@@ -10,23 +10,27 @@ import { PhoneAccessCard } from './remote';
 import { TelemetryCard } from './telemetry';
 import { Badge, Empty, Loading, Page, useLoad } from './ui';
 import { Workspace } from './workspace';
+import { Home } from './home';
+import { SessionsPane } from './sessions';
 import { currentProject, downloadExport, forgetSession, get, isDemo, leaveDemo, post, resumeSession, setProject, subscribe } from './api';
 import { ChartFrame, fmt, fmtMs, HBars, Provenance, StackedBars, Stat } from './charts';
 
-const SCREENS = ['Projects', 'Goals', 'Workspace', 'Agents', 'Approvals', 'Safety', 'Evidence', 'Overview', 'Usage', 'Results', 'Comparisons', 'Evaluations', 'Environment', 'Settings', 'Feedback'] as const;
+const SCREENS = ['Home', 'Projects', 'Goals', 'Sessions', 'Workspace', 'Agents', 'Approvals', 'Safety', 'Evidence', 'Overview', 'Usage', 'Results', 'Comparisons', 'Evaluations', 'Environment', 'Settings', 'Feedback'] as const;
 /** Six places to go. The detail that most people never need sits one tab inside, not in the main list. */
 const SECTIONS: { name: string; icon: IconName; leaves: (typeof SCREENS)[number][] }[] = [
+  { name: 'Home', icon: 'home', leaves: ['Home'] },
   { name: 'Projects', icon: 'folder', leaves: ['Projects', 'Goals'] },
+  { name: 'Sessions', icon: 'message', leaves: ['Sessions'] },
   { name: 'Workspace', icon: 'terminal', leaves: ['Workspace'] },
   { name: 'Agents', icon: 'bot', leaves: ['Agents'] },
   { name: 'Activity', icon: 'checkCircle', leaves: ['Approvals', 'Safety', 'Evidence'] },
   { name: 'Analytics', icon: 'chart', leaves: ['Overview', 'Usage', 'Results', 'Comparisons', 'Evaluations', 'Environment'] },
   { name: 'Settings', icon: 'settings', leaves: ['Settings', 'Feedback'] },
 ];
-const LABEL: Record<(typeof SCREENS)[number], string> = { Projects: 'My projects', Goals: 'Goals and tasks', Workspace: 'Workspace', Agents: 'Agents', Approvals: 'Approvals', Safety: 'Safety', Evidence: 'Records', Overview: 'Overview', Usage: 'Usage', Results: 'Results and evidence', Comparisons: 'Comparisons', Evaluations: 'Evaluations', Environment: 'Environment', Settings: 'Settings', Feedback: 'Feedback' };
+const LABEL: Record<(typeof SCREENS)[number], string> = { Home: 'Home', Sessions: 'Sessions', Projects: 'My projects', Goals: 'Goals and tasks', Workspace: 'Workspace', Agents: 'Agents', Approvals: 'Approvals', Safety: 'Safety', Evidence: 'Records', Overview: 'Overview', Usage: 'Usage', Results: 'Results and evidence', Comparisons: 'Comparisons', Evaluations: 'Evaluations', Environment: 'Environment', Settings: 'Settings', Feedback: 'Feedback' };
 const sectionOf = (screen: (typeof SCREENS)[number]) => SECTIONS.find((x) => x.leaves.includes(screen))!;
 /** The letter that follows G to jump to each section, shown beside it in the rail. The key handler in App owns the behaviour; this is just the label. */
-const JUMP: Record<string, string> = { Projects: 'P', Workspace: 'W', Agents: 'A', Activity: 'V', Analytics: 'U', Settings: 'S' };
+const JUMP: Record<string, string> = { Home: 'H', Sessions: 'N', Projects: 'P', Workspace: 'W', Agents: 'A', Activity: 'V', Analytics: 'U', Settings: 'S' };
 type Screen = (typeof SCREENS)[number];
 type Reload = () => void;
 
@@ -446,10 +450,11 @@ function routeFromHash(): ProjectRoute | null {
 
 export function App() {
   const [paired, setPaired] = useState<boolean | null>(null);
-  const [screen, setScreen] = useState<Screen>(() => (SCREENS.find((s) => s.toLowerCase() === location.hash.slice(1)) ?? 'Projects'));
+  const [screen, setScreen] = useState<Screen>(() => (SCREENS.find((s) => s.toLowerCase() === location.hash.slice(1)) ?? 'Home'));
   const [route, setRoute] = useState<ProjectRoute | null>(() => routeFromHash());
   const [tick, setTick] = useState(0);
   const [projects, setProjects] = useState<any[] | null>(null);
+  const [sessionToOpen, setSessionToOpen] = useState<string | null>(null);
   const [theme, setThemeState] = useState(() => localStorage.getItem('bl-theme') ?? 'dark');
   const [open, setOpen] = useState<number | null>(null);
   const [live, setLive] = useState(false);
@@ -468,7 +473,7 @@ export function App() {
   // Ctrl/Cmd K opens the palette. "G then a letter" jumps to a section, as in keyboard-first tools, and never while typing or inside a dialog.
   useEffect(() => {
     let armed = 0;
-    const GO: Record<string, Screen> = { p: 'Projects', w: 'Workspace', a: 'Agents', v: 'Approvals', u: 'Usage', s: 'Settings' };
+    const GO: Record<string, Screen> = { h: 'Home', n: 'Sessions', p: 'Projects', w: 'Workspace', a: 'Agents', v: 'Approvals', u: 'Usage', s: 'Settings' };
     const typing = (t: EventTarget | null) => t instanceof HTMLElement && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable);
     const on = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette((p) => !p); return; }
@@ -522,10 +527,12 @@ export function App() {
   let body: ReactNode = <Loading />;
   if (route && projects) {
     body = <ProjectDetail key={route.id} route={route} projects={projects} tick={tick} onTab={(tab) => setRoute({ id: route.id, tab })} onBack={() => go('Projects')} open={setOpen} go={(s) => go(s as Screen)} />;
-  } else if (projects && projects.length === 0 && screen !== 'Projects') {
+  } else if (projects && projects.length === 0 && !['Home', 'Projects'].includes(screen)) {
     body = <Empty>No project attached. <button className="link" onClick={() => go('Projects')}>Attach one</button></Empty>;
   } else if (projects) {
     body = {
+      Home: <Home projects={projects} selectedProject={current?.id ?? ''} tick={tick} onProject={(id) => { setProject(id); bump(); }} onStarted={(id) => { setSessionToOpen(id); go('Sessions'); }} onSessions={(id) => { setSessionToOpen(id || null); go('Sessions'); }} onProjects={() => go('Projects')} onAgents={() => go('Agents')} onWorkspace={() => go('Workspace')} />,
+      Sessions: <Page title="Sessions" intro="Continue where you left off, or start a fresh task."><SessionsPane key={sessionToOpen ?? 'all'} initialSessionId={sessionToOpen} tick={tick} projectName={current?.name ?? 'project'} /></Page>,
       Overview: <Overview tick={tick} go={go} />,
       Workspace: <Workspace key={currentProject()} tick={tick} projectName={current?.name ?? 'project'} open={setOpen} setCommands={setExtra} />,
       Projects: <ProjectsHome projects={projects} tick={tick} reloadShell={loadProjects} onOpen={openProject} />,
@@ -550,6 +557,7 @@ export function App() {
         <div className="brand"><Logo /> AgentOnTrack
           <button className="menu" aria-expanded={menu} aria-label="Menu" onClick={() => setMenu(!menu)}><Icon name={menu ? 'x' : 'menu'} size={18} /></button>
         </div>
+        <button className="btn primary nav-new-task" data-testid="nav-new-task" onClick={() => go('Home')}><Icon name="plus" /> New task</button>
         <nav aria-label="Main">
           {SECTIONS.map((x) => { const on = route ? x.name === 'Projects' : sectionOf(screen).name === x.name; return (
             <button key={x.name} className={on ? 'on' : ''} aria-current={on ? 'page' : undefined} aria-keyshortcuts={`g ${JUMP[x.name]!.toLowerCase()}`} onClick={() => go(x.leaves[0]!)}><Icon name={x.icon} />{x.name}<kbd aria-hidden="true">G {JUMP[x.name]}</kbd></button>
@@ -560,7 +568,7 @@ export function App() {
       </aside>
       <header className="topbar">
         <div className="crumbs"><span className="small">{isDemo() ? 'Demo' : 'Local'}</span><span aria-hidden="true">/</span><b>{current?.name ?? 'No project'}</b><span aria-hidden="true">/</span><span>{route ? 'Project' : screen}</span></div>
-        <button className="search-btn" onClick={() => setPalette(true)} aria-keyshortcuts="Control+K Meta+K" data-testid="open-palette"><span className="row" style={{ gap: 8 }}><Icon name="search" /><span className="label">Search or run a command</span></span><kbd>Ctrl K</kbd></button>
+        <button className="search-btn" onClick={() => setPalette(true)} aria-keyshortcuts="Control+K Meta+K" data-testid="open-palette"><span className="row" style={{ gap: 8 }}><Icon name="search" /><span className="label">Search</span></span><kbd>Ctrl K</kbd></button>
         <button className="icon-btn" aria-label={theme === 'dark' ? 'Switch to the light theme' : 'Switch to the dark theme'} title="Theme" onClick={() => setThemeState(theme === 'dark' ? 'light' : 'dark')}><Icon name={theme === 'dark' ? 'sun' : 'moon'} /></button>
       </header>
       <main id="main" tabIndex={-1} className={!route && screen === 'Workspace' ? 'bleed' : ''}>

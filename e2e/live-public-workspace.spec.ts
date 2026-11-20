@@ -88,7 +88,8 @@ test('deployed site, workspace composer: pair, connect, goal, task, denied and a
     await expect(page.getByRole('alert')).toContainText('Wrong pairing code');
     await page.getByLabel('Pairing code').fill(await c.newPairingCode());
     await page.getByRole('button', { name: 'Pair', exact: true }).click();
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('My projects');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('What are you working on?');
+    await go(page, 'Projects');
     await expect(page.getByTestId('demo-banner')).toHaveCount(0);
     // The project already registered on this computer is there with no further step.
     await expect(page.getByTestId('project-card')).toHaveCount(1);

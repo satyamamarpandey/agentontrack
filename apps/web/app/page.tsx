@@ -140,7 +140,7 @@ export default function Home() {
         <div className="projects-entry reveal" data-testid="projects-entry">
           <div>
             <h2>Every project, in one place</h2>
-            <p className="section-lead">The dashboard opens on your projects. Click one to see how its work went. It reads the companion on your own machine, so your records do not come to this website. The demo shows invented data, and says so.</p>
+            <p className="section-lead">Start with a prompt, choose a project and an available agent, then follow the work in one place. Projects, approvals and evidence are always one click away. Your local records stay on your computer. The demo is clearly marked as invented data.</p>
             <div className="cta">
               <a className="btn primary" href={`${BASE}/dashboard/#projects`} data-testid="open-projects">Open your projects</a>
               <a className="btn" href={`${BASE}/dashboard/?demo=1#projects`} data-testid="demo-projects">See the demo projects</a>

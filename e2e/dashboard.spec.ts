@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { confirmDialog, expect, go, test } from './fixtures';
 
-const SCREENS = ['Overview', 'Results', 'Workspace', 'Projects', 'Goals', 'Agents', 'Usage', 'Comparisons', 'Evidence', 'Safety', 'Approvals', 'Evaluations', 'Environment', 'Feedback', 'Settings'];
+const SCREENS = ['Home', 'Sessions', 'Overview', 'Results', 'Workspace', 'Projects', 'Goals', 'Agents', 'Usage', 'Comparisons', 'Evidence', 'Safety', 'Approvals', 'Evaluations', 'Environment', 'Feedback', 'Settings'];
 const seed = (env: any) => env.project((p: any) => {
   p.human.setGoal({ statement: 'Fix the parser', scope: { include: ['src/**'] }, prohibit: ['deploy'] });
   p.human.createTask({ id: 't1', title: 'Parser fix', criteria: [{ id: 'c', description: 'fixed file exists', kind: 'artifact', path: 'src/a.txt' }] });
@@ -18,9 +18,32 @@ test('pairing: refuses a wrong code, then pairs, and survives a reload', async (
   await expect(page.getByRole('alert')).toContainText('Wrong pairing code');
   await page.getByLabel('Pairing code').fill(env.c.newPairingCode());
   await page.getByRole('button', { name: 'Pair', exact: true }).click();
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('My projects');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('What are you working on?');
+  await expect(page.getByTestId('home-composer')).toBeVisible();
+  await go(page, 'Projects');
   await expect(page.getByTestId('project-card')).toContainText('repo');
   await page.reload();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('My projects');
+});
+
+test('chat-first home keeps project and agent choices simple without running anything', async ({ page, env }) => {
+  await env.pair(page);
+  await expect(page.getByTestId('home-screen')).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('What are you working on?');
+  const composer = page.getByTestId('home-composer');
+  await expect(composer.getByLabel('Choose project')).toBeVisible();
+  await expect(composer.getByLabel('Choose agent')).toBeVisible();
+  await expect(composer.getByLabel('Choose model')).toHaveValue('');
+  await expect(composer.getByTestId('home-start')).toBeDisabled();
+  await composer.getByLabel('What should your agent do?').fill('Check this project for broken tests');
+  await expect(composer.getByLabel('What should your agent do?')).toHaveValue('Check this project for broken tests');
+  // Example prompts only fill the box; nothing is sent until Start.
+  await page.getByTestId('home-starters').getByRole('button').first().click();
+  await expect(composer.getByLabel('What should your agent do?')).not.toHaveValue('Check this project for broken tests');
+  await expect(composer.getByLabel('What should your agent do?')).not.toHaveValue('');
+  await composer.getByText('More options').click();
+  await expect(composer.getByLabel('Task permissions')).toBeVisible();
+  await page.getByRole('button', { name: 'My projects', exact: true }).click();
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('My projects');
 });
 

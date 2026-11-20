@@ -63,6 +63,8 @@ kbd { font: 500 10.5px/1 var(--font-mono); padding: 3px 5px; border: 1px solid v
 .num, .tabular, .stat-value, td.n { font-variant-numeric: tabular-nums; }
 
 /* Shell: a rail on the left, a bar on top, and the page. */
+.shell > main, .shell > .topbar { min-width: 0; }
+.shell { overflow-x: clip; }
 .shell { display: grid; grid-template-columns: 228px minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); min-height: 100%; }
 .shell > aside { grid-row: 1 / span 2; position: sticky; top: 0; height: 100vh; height: 100dvh; border-right: 1px solid var(--border); padding: 8px; display: flex; flex-direction: column; gap: 2px; background: var(--bg-2); min-height: 0; }
 .brand { display: flex; align-items: center; gap: 9px; font-weight: 620; font-size: 13.5px; padding: 6px 8px 14px; letter-spacing: -0.015em; }
@@ -300,10 +302,10 @@ details.tl-body { display: block; }
 
 /* Workspace: files and goals on the left, the work in the middle, agents on the right, evidence along the bottom.
    The dividers are 5px tracks to grab, drawn as 1px lines. */
-.ws { --left: 264px; --right: 320px; --bottom: 240px; display: grid; grid-template-columns: var(--left) 5px minmax(0, 1fr) 5px var(--right); grid-template-rows: minmax(0, 1fr) 5px var(--bottom); height: 100%; min-height: 0; background: var(--bg); }
-.ws > * { min-width: 0; min-height: 0; background: var(--bg); }
-.ws.no-left { grid-template-columns: 0 0 minmax(0, 1fr) 5px var(--right); }
-.ws.no-right { grid-template-columns: var(--left) 5px minmax(0, 1fr) 0 0; }
+.ws { --left: 264px; --right: 320px; --bottom: 240px; display: grid; grid-template-columns: min(var(--left), 28%) 5px minmax(0, 1fr) 5px min(var(--right), 32%); grid-template-rows: minmax(0, 1fr) 5px var(--bottom); height: 100%; min-height: 0; background: var(--bg); }
+.ws > * { min-width: 0; min-height: 0; background: var(--bg); position: relative; }
+.ws.no-left { grid-template-columns: 0 0 minmax(0, 1fr) 5px min(var(--right), 32%); }
+.ws.no-right { grid-template-columns: min(var(--left), 28%) 5px minmax(0, 1fr) 0 0; }
 .ws.no-left.no-right { grid-template-columns: 0 0 minmax(0, 1fr) 0 0; }
 .ws.no-bottom { grid-template-rows: minmax(0, 1fr) 0 0; }
 .ws-left { grid-column: 1; grid-row: 1 / span 3; background: var(--bg-2); display: flex; flex-direction: column; overflow: hidden; }

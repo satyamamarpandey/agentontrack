@@ -1,0 +1,54 @@
+/* Chat-first home: quiet by default, advanced workflow tools one click away. */
+.aot-home { width:100%; min-height:min(820px,calc(100dvh - 110px)); display:flex; justify-content:center; padding:clamp(24px,6vh,76px) 12px 34px; }
+.aot-home-center { width:min(100%,760px); margin-inline:auto; }
+.aot-home-mark { width:42px; height:42px; border-radius:14px; display:grid; place-items:center; background:var(--accent-soft); color:var(--accent-2); margin:0 auto 18px; }
+.aot-home h1 { text-align:center; font-size:clamp(26px,3.1vw,36px); line-height:1.2; font-weight:620; letter-spacing:-.035em; margin:0 0 12px; }
+.aot-home-intro { color:var(--muted); text-align:center; font-size:14px; max-width:60ch; margin:0 auto 32px; line-height:1.65; }
+.aot-home-composer { border:1px solid var(--border-strong); border-radius:18px; background:var(--raised); padding:16px; box-shadow:0 14px 38px -28px rgb(0 0 0 / .8); display:flex; flex-direction:column; gap:10px; }
+.aot-home-composer:focus-within { border-color:var(--accent); }
+.aot-home-composer textarea { resize:vertical; width:100%; min-height:112px; border:0; outline:0; box-shadow:none; padding:4px 3px 12px; background:transparent; color:var(--text); font:400 15px/1.65 var(--font-ui); }
+.aot-home-composer textarea::placeholder { color:var(--muted); opacity:1; }
+.aot-home-composer textarea:focus-visible { outline:0; }
+.aot-home-tools { display:flex; flex-wrap:wrap; gap:8px; align-items:end; }
+.aot-home-picker { display:flex; flex-direction:column; gap:4px; flex:1 1 122px; min-width:108px; max-width:195px; color:var(--muted); font-size:11px; font-weight:560; }
+.aot-home-picker select { width:100%; min-height:38px; padding:7px 10px; border-radius:10px; border:1px solid var(--border-strong); background:var(--bg-2); color:var(--text); font:inherit; font-size:13px; }
+.aot-home-picker select:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+.aot-home-send { margin-left:auto; border-radius:10px; min-height:38px; padding:9px 15px; }
+.aot-home-more { border-top:1px solid var(--border); padding-top:10px; color:var(--muted); }
+.aot-home-more summary { cursor:pointer; font-size:12px; width:max-content; }
+.aot-home-more summary:focus-visible { outline:2px solid var(--accent); }
+.aot-home-options { display:flex; flex-wrap:wrap; align-items:end; gap:12px; margin-top:10px; }
+.aot-home-options label { font-size:12px; }
+.aot-home-options select,.aot-home-options input { min-height:36px; border-radius:8px; }
+.aot-home-hint { display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:12px; color:var(--muted); }
+.aot-home-mic { flex:none; }
+.aot-home-credits { display:flex; gap:8px; padding:9px 12px; color:var(--bad); background:var(--bad-bg); border-radius:9px; font-size:12px; }
+.aot-home-empty { border:1px solid var(--border-strong); border-radius:16px; padding:30px 22px; text-align:center; background:var(--raised); }
+.aot-home-empty h2 { font-size:19px; }
+.aot-home-empty p { color:var(--muted); font-size:14px; margin-bottom:20px; }
+.aot-home-quick { display:flex; flex-wrap:wrap; justify-content:center; gap:10px; margin:18px 0 48px; }
+.aot-home-quick button { display:inline-flex; align-items:center; gap:8px; border:1px solid var(--border); background:var(--bg-2); color:var(--muted); border-radius:999px; font:500 12px var(--font-ui); padding:10px 14px; min-height:40px; cursor:pointer; }
+.aot-home-quick button:hover { color:var(--text); border-color:var(--border-strong); background:var(--raised-2); }
+.aot-home-recents { width:100%; max-width:720px; margin:0 auto; }
+.aot-home-recents-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+.aot-home-recents-head h2 { font-size:14px; margin:0; }
+.aot-home-recents ul { list-style:none; margin:0; padding:0; display:grid; gap:5px; }
+.aot-home-recents li button { display:flex; align-items:center; gap:12px; width:100%; text-align:left; min-height:48px; padding:10px 12px; border:1px solid transparent; border-radius:10px; background:transparent; color:var(--text); cursor:pointer; }
+.aot-home-recents li button:hover,.aot-home-recents li button:focus-visible { border-color:var(--border); background:var(--raised); }
+.aot-home-recents li button span { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.aot-home-recents li button small { color:var(--muted); font-size:11px; }
+.aot-home-noagent { margin:0; padding:9px 12px; border-radius:9px; background:var(--raised-2); color:var(--muted); font-size:12px; line-height:1.55; }
+.aot-home-starters { display:flex; flex-wrap:wrap; justify-content:center; gap:8px; margin:16px 0 0; }
+.aot-home-starters button { border:1px solid var(--border); background:transparent; color:var(--muted); border-radius:999px; font:500 12px var(--font-ui); padding:8px 13px; min-height:36px; cursor:pointer; text-align:left; }
+.aot-home-starters button:hover { color:var(--text); border-color:var(--border-strong); background:var(--raised); }
+.aot-home-starters button:focus-visible,.aot-home-quick button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+@media (max-width:700px) {
+  .aot-home { min-height:0; padding:30px 4px; }
+  .aot-home-intro { margin-bottom:24px; }
+  .aot-home-composer { padding:12px; border-radius:15px; }
+  .aot-home-composer textarea { min-height:112px; }
+  .aot-home-picker { flex:1 1 40%; max-width:none; }
+  .aot-home-send { flex:1 1 100%; justify-content:center; }
+  .aot-home-quick { margin-bottom:30px; }
+}
+@media (prefers-reduced-motion:reduce) { .aot-home * { scroll-behavior:auto; } }

@@ -257,6 +257,9 @@ test('as a tester: the install steps, the account page, structured feedback, and
     await expect(tpage.getByTestId('probe-status')).toContainText('Found AgentOnTrack on this computer', { timeout: 30_000 });
     await tpage.getByLabel('Pairing code').fill(c.newPairingCode());
     await tpage.getByRole('button', { name: 'Pair', exact: true }).click();
+    await expect(tpage.getByTestId('home-screen')).toBeVisible();
+    await tpage.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Projects', exact: true }).click();
+    await tpage.getByRole('tablist', { name: 'Section' }).getByRole('tab', { name: 'My projects', exact: true }).click();
     await tpage.getByTestId('project-card').locator('.project-open').click();
     const saver = tpage.getByTestId('summary-saver');
     await saver.getByTestId('summary-toggle').check();

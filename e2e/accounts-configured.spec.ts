@@ -148,6 +148,10 @@ test('a visitor meets the early-access gate on the install page and on this site
     await expect(page.getByRole('heading', { name: 'Connect this computer' })).toBeVisible();
     await page.getByLabel('Pairing code').fill(c.newPairingCode());
     await page.getByRole('button', { name: 'Pair', exact: true }).click();
+    // The first screen after pairing is Home; the project cards are one click away.
+    await expect(page.getByTestId('home-screen')).toBeVisible();
+    await page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Projects', exact: true }).click();
+    await page.getByRole('tablist', { name: 'Section' }).getByRole('tab', { name: 'My projects', exact: true }).click();
     await expect(page.getByTestId('project-card')).toBeVisible();
   } finally {
     await c.close();

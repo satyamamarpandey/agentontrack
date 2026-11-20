@@ -86,6 +86,7 @@ test('real Claude Code through the web workspace composer, end to end', async ({
   // A second window, paired on its own, sees the same held request.
   const second = await browser.newPage();
   await env.pair(second);
+  await go(second, 'Projects');
   await second.getByTestId('project-card').filter({ hasText: 'live-proj' }).getByRole('button', { name: 'live-proj' }).click();
   await go(second, 'Approvals');
   await expect(second.locator('[data-testid=approval][data-view=pending]')).toHaveCount(1);

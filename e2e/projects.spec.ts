@@ -22,6 +22,7 @@ test('project cards show real name, goal, status, approvals, tokens and last act
   seedUsage(env);
   env.hook('git push origin main');
   await env.pair(page);
+  await go(page, 'Projects');
   const card = page.getByTestId('project-card');
   await expect(card).toHaveCount(1);
   await expect(card).toContainText('repo');
@@ -36,6 +37,7 @@ test('project cards show real name, goal, status, approvals, tokens and last act
 
 test('a card with nothing recorded says so, instead of showing a zero', async ({ page, env }) => {
   await env.pair(page);
+  await go(page, 'Projects');
   const card = page.getByTestId('project-card');
   await expect(card.getByTestId('card-tokens')).toHaveText('Unavailable');
   await expect(card.getByTestId('card-activity')).toContainText('None recorded');
@@ -46,6 +48,7 @@ test('several projects: each card and page shows that project\'s own record', as
   seed(env);
   seedUsage(env);
   await env.pair(page);
+  await go(page, 'Projects');
   await page.getByRole('button', { name: 'Add project' }).click();
   const second = join(env.dir, 'second');
   mkdirSync(second);
@@ -65,6 +68,7 @@ test('several projects: each card and page shows that project\'s own record', as
 test('click-through: every section opens, survives a reload, and uses only endpoints released in 1.0.0-rc.2, naming the project', async ({ page, env }) => {
   seed(env);
   await env.pair(page);
+  await go(page, 'Projects');
   const seen: string[] = [];
   page.on('request', (r) => { const u = new URL(r.url()); if (u.pathname.startsWith('/api/')) seen.push(u.pathname + u.search); });
   await openRepo(page);
@@ -83,6 +87,7 @@ test('click-through: every section opens, survives a reload, and uses only endpo
 test('tabs work with the arrow keys', async ({ page, env, browserName, isMobile }) => {
   test.skip(isMobile || browserName === 'webkit', 'Mobile has no arrow keys; Safari tabs past buttons by default.');
   await env.pair(page);
+  await go(page, 'Projects');
   await openRepo(page);
   await page.getByTestId('project-tab-overview').focus();
   await page.keyboard.press('ArrowRight');
@@ -96,6 +101,7 @@ test('workflow: goal, task, actions, held, approved and verification, in order, 
   env.hook('git push origin main');
   env.project((p) => p.verifyTask('t1'));
   await env.pair(page);
+  await go(page, 'Projects');
   await go(page, 'Approvals');
   await page.getByTestId('approval').getByRole('button', { name: 'Approve' }).click();
   await confirmDialog(page);
@@ -122,6 +128,7 @@ test('a detected change appears on the timeline as detected, not prevented', asy
     p.postAction({ runtime: 'claude-code', tool: 'Bash', effects: [] });
   });
   await env.pair(page);
+  await go(page, 'Projects');
   await openRepo(page);
   await tab(page, 'workflow');
   await expect(page.locator('[data-kind=detected]').first()).toContainText('detected afterwards');
@@ -134,6 +141,7 @@ test('with nothing to compare, every saved figure and environmental figure is Un
   seed(env);
   seedUsage(env);
   await env.pair(page);
+  await go(page, 'Projects');
   await openRepo(page);
   await expect(page.getByTestId('glance-tokens-saved')).toContainText('Unavailable');
   await expect(page.getByTestId('glance-tokens-saved')).toContainText('No baseline');
@@ -153,6 +161,7 @@ test('with nothing to compare, every saved figure and environmental figure is Un
 test('a project with no usage says why, and a baseline cannot make up a saving', async ({ page, env }) => {
   seed(env);
   await env.pair(page);
+  await go(page, 'Projects');
   await openRepo(page);
   await tab(page, 'usage');
   await page.getByLabel('Input + output tokens').fill('1000');
@@ -166,6 +175,7 @@ test('baseline entry: a bigger actual is shown as a cost, a smaller one as a sav
   seed(env);
   seedUsage(env);
   await env.pair(page);
+  await go(page, 'Projects');
   await openRepo(page);
   await tab(page, 'usage');
   const form = page.getByTestId('baseline-form');
@@ -199,6 +209,7 @@ test('a baseline that cannot be a measurement is refused', async ({ page, env })
   seed(env);
   seedUsage(env);
   await env.pair(page);
+  await go(page, 'Projects');
   await openRepo(page);
   await tab(page, 'usage');
   const form = page.getByTestId('baseline-form');
@@ -214,6 +225,7 @@ test('environment: factors give a labelled ESTIMATE, and water saved still needs
   seed(env);
   seedUsage(env);
   await env.pair(page);
+  await go(page, 'Projects');
   await openRepo(page);
   await tab(page, 'environment');
   await page.getByLabel('Energy (Wh per 1k tokens)').fill('2');
@@ -238,6 +250,7 @@ test('environment: factors give a labelled ESTIMATE, and water saved still needs
 test('verification is measured and labelled as verification, and claims nothing about the code', async ({ page, env }) => {
   seed(env);
   await env.pair(page);
+  await go(page, 'Projects');
   await openRepo(page);
   await tab(page, 'verification');
   await expect(page.getByTestId('verify-runs')).toContainText('Unavailable');
@@ -256,6 +269,7 @@ test('no third-party request and no account UI on the project page, with no conf
   const foreign: string[] = [];
   page.on('request', (r) => { if (!r.url().startsWith(env.c.url) && !r.url().startsWith('data:')) foreign.push(r.url()); });
   await env.pair(page);
+  await go(page, 'Projects');
   await openRepo(page);
   for (const name of ['workflow', 'usage', 'verification', 'environment']) await tab(page, name);
   expect(foreign).toEqual([]);
@@ -274,6 +288,7 @@ test('mobile: no horizontal page overflow on the grid or any section, with long 
   seedUsage(env);
   env.hook(`git push origin ${long}`);
   await env.pair(page);
+  await go(page, 'Projects');
   const over = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   await expect(page.getByTestId('project-card')).toHaveCount(1);
   expect(await over(), 'grid').toBeLessThanOrEqual(1);
@@ -293,6 +308,7 @@ for (const theme of ['dark', 'light']) {
     env.hook('git status');
     env.hook('git push');
     await env.pair(page);
+    await go(page, 'Projects');
     await page.evaluate((t) => localStorage.setItem('bl-theme', t), theme);
     await page.reload();
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
@@ -358,6 +374,7 @@ test('find projects: names one folder, lists only repositories, adds what is cho
   for (const name of ['alpha', 'beta']) { mkdirSync(join(parent, name, '.git'), { recursive: true }); }
   mkdirSync(join(parent, 'notes'), { recursive: true });
   await env.pair(page);
+  await go(page, 'Projects');
   await page.getByTestId('find-projects').click();
   await page.getByLabel(/Folder to look in/).fill(parent);
   await page.getByRole('button', { name: 'Look', exact: true }).click();
@@ -382,6 +399,7 @@ test('find projects: names one folder, lists only repositories, adds what is cho
 
 test('a folder that is a whole drive, or missing, is refused when looking for projects', async ({ page, env }) => {
   await env.pair(page);
+  await go(page, 'Projects');
   await page.getByTestId('find-projects').click();
   await page.getByLabel(/Folder to look in/).fill(join(env.dir, 'nothing-here'));
   await page.getByRole('button', { name: 'Look', exact: true }).click();
